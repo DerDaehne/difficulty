@@ -1232,6 +1232,8 @@ Wann wir neu entscheiden: Wenn `dif run` bei typischen Programmen über 500 ms l
 | `dif llms` | gibt die zur Compiler-Version passende `llms.txt` aus |
 | `dif explain R13` | lange Erklärung zu einem Fehlercode |
 
+**Editoren (#1824):** Syntax-Highlighting, Dateityp-Erkennung, Einrückung und `dif fmt`-Anbindung für **Vim/Neovim** (`editors/vim/`: ftdetect, syntax, ftplugin) und **Emacs** (`editors/emacs/dif-mode.el`). Die Wortlisten kommen aus der Spec; CI prüft, dass keine Datei ein Schlüsselwort vergisst. Später: tree-sitter-Grammatik (Neovim, Emacs 29+, Helix, Zed) und LSP.
+
 Compiler-Meldungen sind englisch (Vorwissen der Modelle, eindeutige Suchbegriffe), mit `--lang de` deutsch.
 
 ```
@@ -1347,7 +1349,7 @@ Makros · Klassen, Vererbung, Objekte · Exceptions · Operator-Überladung (v0)
 | M2 „Kino“ | `enum`, `switch`, Listen, `str`, `T!E`, `test`, `io.lines` → `kino.dif` aus §5 läuft, Tests grün | #1811, #1812, #1814 (io, str) |
 | M3 „Ausdruck“ | benannte Parameter, Funktionswerte und Blöcke, Generics → `filter`/`map`/`sort_by` in std, Builder-Beispiele aus §4.10 laufen | #1817 |
 | M4 „C-Nachbar“ | `extern`, Linken, Laufzeit-Laden, C-Quellen, `use c`, `bindgen`, Callbacks mit Kontext, `defer` | #1813, #1819 |
-| M5 „Werkzeugkasten“ | fmt, `--json`, fix, doc, llms; Coverage, Sanitizer, Doc-Tests; Rest der std | #1815, #1820, #1814 |
+| M5 „Werkzeugkasten“ | fmt, `--json`, fix, doc, llms; Coverage, Sanitizer, Doc-Tests; Rest der std; Highlighting für Vim/Neovim und Emacs | #1815, #1820, #1814, #1824 |
 | M6 „UI“ | rekta-Modul: `hello` aus §4.11 läuft | #1822 |
 | M7 „Messen“ | Agenten-Experiment, Benchmarks gegen Ease, C, Python | #1816 |
 | danach | Export als `.so`/`.dll`, Nebenläufigkeit, Benchmarks in der Sprache | #1821, #1818 |
@@ -1411,6 +1413,7 @@ Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate)
 | Blöcke | Literal ohne Parameter als `{ … }` hinter dem Aufruf; `return`/`try` beenden den Block (R26) |
 | Generics | vollständig in v0 (#1817): Typparameter `[A, B]`, Funktionstypen `R(T)`; Einschränkungs-Syntax entscheidet #1817 (R27) |
 | UI-Muster | Elm-Architektur: Nachrichten + `update` + `view`, rekta-Modul (#1822) |
+| Editoren | Syntax-Highlighting für Vim/Neovim und Emacs (#1824), später tree-sitter und LSP |
 | C-Import-Details | C-Pointer sind `?T`, opake Pointer sind Griffe, C-struct-Felder ohne Angabe sind 0, `c.sizeof` (R17) |
 | Backend | C11 an gcc/clang (§6.2) |
 | Compiler-Sprache | Rust, anfangs ohne Crates (§6.3) |
