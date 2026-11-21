@@ -111,7 +111,7 @@ Vollständig und ohne „außer“. Diese Liste ist auch der Kern von `llms.txt`
 | R23 | `defer f()` läuft, wenn der umgebende Block endet, auf jedem Weg hinaus (Ende, `return`, `try`, `break`). Mehrere `defer` laufen in umgekehrter Reihenfolge. | `defer rk.ui_close()` |
 | R24 | Erwartet C ein Paar aus Funktion und `void *user`, übergibt man eine dif-Funktion und, wenn sie Zustand braucht, eine Variable; die Funktion bekommt die Variable als ersten Parameter, mit `mut`, wenn sie sie ändert (R6). Keine Funktion: `none`. Die Variable muss bis Programmende leben: aus `main` oder selbst so übergeben. | `rk.button("+1", add_one, mut app)` |
 | R25 | Parameter mit Default stehen hinten und werden beim Aufruf beim Namen genannt (`name: wert`), alle anderen der Reihe nach. | `ui.tile("0.3", label: "notes")` |
-| R26 | Ein Funktionswert hat den Typ `R(T1, T2)` und wird geschrieben wie eine Funktion ohne Namen: `R(T1 a, T2 b) { … }`. Er lebt nur während des Aufrufs, an den er geht: er darf ringsum lesen und ändern, wird aber nie gespeichert oder zurückgegeben. Ein Literal ohne Parameter darf als Block `{ … }` hinter der Klammer stehen; `return` und `try` darin beenden den Block. | `people.filter(bool(Person p) { return p.age >= 18 })` · `db.transaction { … }` |
+| R26 | Ein Funktionswert hat den Typ `R(T1, T2)` und wird geschrieben wie eine Funktion ohne Namen: `R(T1 a, T2 b) { … }`. Er lebt nur während des Aufrufs, an den er geht: er darf ringsum lesen und ändern, wird aber nie gespeichert oder zurückgegeben. Ein Literal ohne Parameter darf als Block `{ … }` hinter der Klammer stehen; `return` und `try` darin beenden den Block. Benannte Funktionen und Varianten-Konstruktoren haben keine Umgebung und sind gewöhnliche Werte, die man speichern darf. Ändert ein Funktionswert einen Parameter, steht `mut` in seinem Typ. | `people.filter(bool(Person p) { return p.age >= 18 })` · `db.transaction { … }` · `on_change: Msg.Draft` · `void(mut A, M) update` |
 | R27 | Typparameter stehen in eckigen Klammern hinter dem Namen und werden beim Aufruf meist abgeleitet; jede Instanz wird eigener Code. | `[]B map[A, B]([]A xs, B(A) f)` · `struct Pair[A, B]` |
 
 ### 3.3 Sonderfälle, die wir aufgelöst haben
@@ -790,7 +790,8 @@ void view(App app) {
 }
 
 void main() {
-    ui.run("My tool", App{}, view, update)
+    App app = App{}
+    ui.run("My tool", mut app, view, update)
 }
 
 test "build one zählt" {
@@ -800,7 +801,167 @@ test "build one zählt" {
 }
 ```
 
-Alle Zustandsänderungen stehen in `update`, testbar ohne Bildschirm; eine neue Aktion ist eine neue Variante, und der Compiler zeigt, wo sie fehlt. Das Modul `rekta` übersetzt Blöcke in `rk_ui_open`/`rk_ui_close`, setzt `size` und `kind` selbst und nutzt intern den Kontext aus R24.
+Alle Zustandsänderungen stehen in `update`, testbar ohne Bildschirm; eine neue Aktion ist eine neue Variante, und der Compiler zeigt, wo sie fehlt. Das Modul `rekta` übersetzt Blöcke in `rk_ui_open`/`rk_ui_close`, setzt `size` und `kind` selbst und nutzt intern den Kontext aus R24. Seine Signatur zeigt R26 und R27 zusammen: `void run[A, M](str title, A app, void(A) view, void(mut A, M) update)`.
+
+Ein realitätsnahes Beispiel, eine Aufgabenliste mit Datei, Eingabefeld, Fehlern und Tests:
+
+```dif
+use std.fs
+use rekta as ui
+
+const str FILE = "aufgaben.txt"
+
+struct Task {
+    str title
+    bool done = false
+}
+
+struct App {
+    []Task tasks = []
+    str draft = ""
+    str status = ""
+}
+
+enum Msg {
+    Draft(str text)
+    Add
+    Toggle(int index)
+    ClearDone
+}
+
+enum FileErr {
+    Io(str path)
+    BadLine(int line)
+}
+
+str message(FileErr e) {
+    switch e {
+    case FileErr.Io(str path):
+        return "{path} lässt sich nicht schreiben"
+    case FileErr.BadLine(int n):
+        return "Zeile {n} in {FILE} ist ungültig"
+    }
+}
+
+[]Task!FileErr parse(str text) {
+    []Task tasks = []
+    []str lines = text.split("\n")
+    for int i in range(lines.len()) {
+        str line = lines[i].trim()
+        if line == "" {
+            continue
+        }
+        if line.starts_with("[x] ") {
+            tasks.push(Task{title: line.slice(4, line.len()), done: true})
+        } else if line.starts_with("[ ] ") {
+            tasks.push(Task{title: line.slice(4, line.len())})
+        } else {
+            return err(FileErr.BadLine(i + 1))
+        }
+    }
+    return tasks
+}
+
+str render([]Task tasks) {
+    []str lines = tasks.map(str(Task t) {
+        return if t.done { "[x] {t.title}" } else { "[ ] {t.title}" }
+    })
+    return lines.join("\n")
+}
+
+void!FileErr save([]Task tasks) {
+    try fs.write(FILE, render(tasks)) or FileErr.Io(FILE)
+}
+
+void persist(App app) {
+    switch save(app.tasks) {
+    case ok:
+        app.status = "{app.tasks.len()} Aufgaben gespeichert"
+    case err(FileErr e):
+        app.status = message(e)
+    }
+}
+
+void update(App app, Msg m) {
+    switch m {
+    case Msg.Draft(str text):
+        app.draft = text
+    case Msg.Add:
+        str title = app.draft.trim()
+        if title == "" {
+            return
+        }
+        app.tasks.push(Task{title: title})
+        app.draft = ""
+        persist(mut app)
+    case Msg.Toggle(int i):
+        app.tasks[i].done = !app.tasks[i].done
+        persist(mut app)
+    case Msg.ClearDone:
+        app.tasks = app.tasks.filter(bool(Task t) { return !t.done })
+        persist(mut app)
+    }
+}
+
+void view(App app) {
+    int open = app.tasks.filter(bool(Task t) { return !t.done }).len()
+    ui.panorama("Aufgaben") {
+        ui.section("heute") {
+            ui.tiles {
+                ui.tile("{open}", label: "offen", status: if open == 0 { ui.Success } else { ui.Info })
+                ui.tile("{app.tasks.len() - open}", label: "erledigt")
+            }
+            ui.hstack {
+                ui.field("Neue Aufgabe", text: app.draft, on_change: Msg.Draft, on_submit: Msg.Add)
+                ui.button("Hinzufügen", on_press: Msg.Add, disabled: app.draft.trim() == "")
+            }
+            ui.rows {
+                for int i in range(app.tasks.len()) {
+                    ui.check(app.tasks[i].title, on: app.tasks[i].done, on_change: Msg.Toggle(i))
+                }
+            }
+            ui.button("Erledigte entfernen", on_press: Msg.ClearDone, disabled: open == app.tasks.len())
+            ui.label(app.status, style: ui.Small)
+        }
+    }
+}
+
+void main() {
+    App app = App{}
+    switch parse(fs.read(FILE) ?? "") {
+    case ok([]Task tasks):
+        app.tasks = tasks
+    case err(FileErr e):
+        app.status = message(e)
+    }
+    ui.run("Aufgaben", mut app, view, update)
+}
+
+test "laden und speichern" {
+    []Task tasks = [Task{title: "Milch", done: true}, Task{title: "Steuer"}]
+    expect(render(tasks) == "[x] Milch\n[ ] Steuer")
+    expect(parse(render(tasks)) == ok(tasks))
+    expect(parse("kaputt") == err(FileErr.BadLine(1)))
+}
+
+test "hinzufügen und abhaken" {
+    try fs.with_temp_dir {
+        App app = App{}
+        update(mut app, Msg.Draft("  Milch kaufen "))
+        update(mut app, Msg.Add)
+        update(mut app, Msg.Toggle(0))
+        expect(app.tasks == [Task{title: "Milch kaufen", done: true}])
+        expect(app.draft == "")
+        expect((fs.read(FILE) ?? "") == "[x] Milch kaufen")
+    }
+}
+
+test "leere Eingabe" {
+    App app = App{}
+    update(mut app, Msg.Add)
+    expect(app.tasks.len() == 0)
+}
+```
 
 ### 4.12 Später
 
