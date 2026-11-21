@@ -91,7 +91,7 @@ Vollständig und ohne „außer“. Diese Liste ist auch der Kern von `llms.txt`
 | R3 | Anweisungen enden am Zeilenende. Blöcke stehen in `{}`, Bedingungen ohne Klammern. | `if n > 0 { n -= 1 }` |
 | R4 | Variablen sind veränderlich, `const` nicht. Global gibt es nur `const`. Ein Name gilt bis zum Ende seines Blocks und wird darin nicht neu deklariert. | `const int MAX = 8` |
 | R5 | Zuweisung und Rückgabe kopieren den Wert; die Kopie ist unabhängig, intern aber billig. Ein Griff (Kanal, Task, `shared`, Datei, Bibliothek, C-Objekt) ist ein Wert, der auf etwas außerhalb zeigt: kopiert wird der Griff, nicht das Ding. Ohne `mut` übergebene Argumente kann eine Funktion nur lesen. | `Point b = a` · `b.x = 9` ändert `a` nicht |
-| R6 | Ändert eine Funktion einen Parameter, übergibt man ihn mit `mut`, und die Änderung landet beim Aufrufer; alle anderen Argumente ohne `mut`. Der Compiler sieht am Rumpf, welche Parameter das sind, und meldet jedes fehlende oder überflüssige `mut`. Nur Variablen lassen sich mit `mut` übergeben, jede höchstens einmal pro Aufruf. | `shift(mut p, 5)` · `shift(p, 5)` → Fehler mit Fix |
+| R6 | Ändert eine Funktion einen Parameter, übergibt man ihn mit `mut`, und die Änderung landet beim Aufrufer; alle anderen Argumente ohne `mut`. Der Compiler sieht am Rumpf, welche Parameter das sind, und meldet jedes fehlende oder überflüssige `mut`. Nur Variablen lassen sich mit `mut` übergeben. Eine Variable geht höchstens einmal veränderbar in einen Aufruf: als `self`, als `mut`-Argument oder über ein Funktionsliteral, das sie ändert. | `shift(mut p, 5)` · `shift(p, 5)` → Fehler mit Fix |
 | R7 | Eine Methode ist eine Funktion an einem Typ: `R T.name(params)`. In ihr ist `self` immer die Variable, an der sie aufgerufen wird, und darf geändert werden. | `hall.book(3, 5)` · `xs.push(4)` · `int Hall.free() { return self.seats.count(Seat.Free) }` |
 | R8 | Typen mischen sich nie von selbst. Operatoren verlangen gleiche Typen; `T(x)` wandelt exakt um oder bricht ab; absichtlich runden mit `round()`/`trunc()`; Text baut man mit `"{x}"`. Zahl-Literale und Ausdrücke nur aus Literalen nehmen den Typ ihrer Stelle an, wenn das Ergebnis exakt passt. | `f64(n)` · `int(x.round())` · `f64 h = 7 / 2` ist `3.5`, `int k = 7 / 2` ist `3` |
 | R9 | Bedingungen sind `bool`, nichts anderes. | `if xs.len() > 0` statt `if xs` |
@@ -110,6 +110,9 @@ Vollständig und ohne „außer“. Diese Liste ist auch der Kern von `llms.txt`
 | R22 | *(nach v0)* `share(x)` friert einen Wert ein und liefert `shared[T]`: nur lesbar, und ohne Kopie an beliebig viele Tasks übergebbar. Ändern heißt, eine neue Version zu bauen und erneut zu teilen. | `shared[Layout] snap = share(layout)` |
 | R23 | `defer f()` läuft, wenn der umgebende Block endet, auf jedem Weg hinaus (Ende, `return`, `try`, `break`). Mehrere `defer` laufen in umgekehrter Reihenfolge. | `defer rk.ui_close()` |
 | R24 | Erwartet C ein Paar aus Funktion und `void *user`, übergibt man eine dif-Funktion und, wenn sie Zustand braucht, eine Variable; die Funktion bekommt die Variable als ersten Parameter, mit `mut`, wenn sie sie ändert (R6). Keine Funktion: `none`. Die Variable muss bis Programmende leben: aus `main` oder selbst so übergeben. | `rk.button("+1", add_one, mut app)` |
+| R25 | Parameter mit Default stehen hinten und werden beim Aufruf beim Namen genannt (`name: wert`), alle anderen der Reihe nach. | `ui.tile("0.3", label: "notes")` |
+| R26 | Ein Funktionswert hat den Typ `R(T1, T2)` und wird geschrieben wie eine Funktion ohne Namen: `R(T1 a, T2 b) { … }`. Er lebt nur während des Aufrufs, an den er geht: er darf ringsum lesen und ändern, wird aber nie gespeichert oder zurückgegeben. Ein Literal ohne Parameter darf als Block `{ … }` hinter der Klammer stehen; `return` und `try` darin beenden den Block. | `people.filter(bool(Person p) { return p.age >= 18 })` · `db.transaction { … }` |
+| R27 | Typparameter stehen in eckigen Klammern hinter dem Namen und werden beim Aufruf meist abgeleitet; jede Instanz wird eigener Code. | `[]B map[A, B]([]A xs, B(A) f)` · `struct Pair[A, B]` |
 
 ### 3.3 Sonderfälle, die wir aufgelöst haben
 
@@ -682,9 +685,126 @@ void main() {
 
 Runtime: zuerst ein OS-Thread pro Task (pthreads, wenige hundert Zeilen C in `dif_rt.h`), später leichte Tasks (M:N-Scheduler) für sehr viele gleichzeitige Verbindungen, ohne dass sich Code ändert. Referenzzählung bleibt nicht atomar: Werte, die in einen Task oder Kanal gehen, werden übertragen (bei letzter Nutzung verschoben, sonst kopiert), `parallel for` liest äußere Variablen ohne Zähleroperationen, und nur `shared[T]` zählt atomar. Mehrere Prozesse (Site-Isolation wie in Chrome) gehen über `std.process` und Pipes, nicht über neue Sprachmittel.
 
-### 4.10 Später
+### 4.10 Benannte Parameter, Funktionswerte, Blöcke, Generics (v0, #1817)
 
-Generics und Closures (#1817): Syntax wird dort entschieden, Monomorphisierung, Capture by value. Benchmarks in der Sprache (`bench "x" { }`), Export als `.so`/`.dll` (#1821).
+Drei Sprachmittel machen Bibliotheken so angenehm wie SwiftUI, ohne Schnickschnack:
+
+```dif
+void tile(str value, str label = "", Status status = Status.None, ?Msg on_press = none) { … }
+
+ui.tile("{n}")
+ui.tile("0.3", label: "release notes", on_press: Msg.OpenNotes)
+```
+
+**Benannte Parameter mit Default (R25):** Parameter mit Default stehen hinten und werden beim Aufruf beim Namen genannt, alle anderen der Reihe nach.
+
+```dif
+[]Person adults = people.filter(bool(Person p) { return p.age >= 18 })
+people.sort_by(bool(Person a, Person b) { return a.age < b.age })
+
+int total = 0
+xs.each(void(int x) { total += x })
+
+void!DbErr transfer(Db db, int from, int to, int amount) {
+    try db.transaction {
+        try db.debit(from, amount)
+        try db.credit(to, amount)
+    }
+}
+
+str html = try net.retry(3) {
+    return try net.get(url)
+}
+
+str page = html.doc {
+    html.h1("Bestellung {o.id}")
+    html.list {
+        for Item i in o.items {
+            html.li("{i.name}: {i.price:.2f} €")
+        }
+    }
+}
+```
+
+**Funktionswerte (R26):** Ein Funktionstyp heißt `R(T1, T2)`, ein Literal sieht aus wie eine Funktion ohne Namen: `bool(Person p) { return p.age >= 18 }`. Ein Funktionswert lebt nur während des Aufrufs, an den er geht. Er darf ringsum lesen und ändern, wird aber nie gespeichert oder zurückgegeben; darum gibt es keine Captures, keine Zyklen und keinen GC. Ein Literal ohne Parameter darf als **Block** `{ … }` hinter der Klammer stehen; `return` und `try` darin beenden den Block. Callbacks für später laufen über Nachrichten (`enum`) oder `spawn`.
+
+Das Literal gehört zum Aufrufer: es sieht dessen Variablen, und `self` ist darin das `self` des Aufrufers. Das Element kommt immer als benannter Parameter (`p`), nie implizit.
+
+```dif
+struct Pair[A, B] {
+    A first
+    B second
+}
+
+[]B map[A, B]([]A xs, B(A) f) {
+    []B out = []
+    for A x in xs {
+        out.push(f(x))
+    }
+    return out
+}
+
+[]str names = map(people, str(Person p) { return p.name })
+```
+
+**Generics (R27):** Typparameter in eckigen Klammern nach dem Namen, beim Aufruf meist abgeleitet. Monomorphisierung: ein C-Exemplar pro Instanz. Die Schreibweise für Einschränkungen (vergleichbar, sortierbar, …) entscheidet #1817.
+
+| | |
+|---|---|
+| **+** | Transaktionen, Builder, Zeitmessung, Retry und Test-Fixtures erzwingen Vorher/Nachher in der Bibliothek; Struktur = Einrückung; Blöcke kosten nichts, weil der Compiler sie inline einsetzen kann |
+| **−** | Man sieht nicht, wie oft ein Block läuft (der Funktionsname muss es sagen); `return` im Block beendet nur den Block; Builder-Bibliotheken merken sich intern, wo sie gerade sind |
+
+### 4.11 UI im SwiftUI-Stil (rekta-Modul, #1822)
+
+Mit 4.10 wird aus rekta-core eine Bibliothek, die sich überfliegen lässt. Elemente senden Nachrichten, eine Funktion `update` ändert den Zustand, `view` beschreibt, was zu sehen ist (Elm-Architektur):
+
+```dif
+use rekta as ui
+
+struct App {
+    int finished = 312
+}
+
+enum Msg { BuildOne, OpenNotes }
+
+void update(App app, Msg m) {
+    switch m {
+    case Msg.BuildOne:
+        app.finished += 1
+    case Msg.OpenNotes:
+        ui.toast("Release notes are on their way.")
+    }
+}
+
+void view(App app) {
+    ui.panorama {
+        ui.section("today") {
+            ui.label("Today", style: ui.Group)
+            ui.tiles {
+                ui.tile("{app.finished}", label: "finished today", status: ui.Success)
+                ui.tile("0.3", label: "release notes", on_press: Msg.OpenNotes)
+            }
+            ui.button("build one", on_press: Msg.BuildOne)
+        }
+    }
+}
+
+void main() {
+    ui.run("My tool", App{}, view, update)
+}
+
+test "build one zählt" {
+    App app = App{}
+    update(mut app, Msg.BuildOne)
+    expect(app.finished == 313)
+}
+```
+
+Alle Zustandsänderungen stehen in `update`, testbar ohne Bildschirm; eine neue Aktion ist eine neue Variante, und der Compiler zeigt, wo sie fehlt. Das Modul `rekta` übersetzt Blöcke in `rk_ui_open`/`rk_ui_close`, setzt `size` und `kind` selbst und nutzt intern den Kontext aus R24.
+
+### 4.12 Später
+
+Benchmarks in der Sprache (`bench "x" { }`), Export als `.so`/`.dll` (#1821).
 
 ---
 
@@ -1064,10 +1184,12 @@ Makros · Klassen, Vererbung, Objekte · Exceptions · Operator-Überladung (v0)
 | M0 Spec | Spezifikation, ADRs akzeptiert | #1807 |
 | M1 „Hallo, nativ“ | `int`, `bool`, Funktionen, `if`/`while`/`for`, `struct`, `print` → hello und fib als native Binaries, Größe und Laufzeit gemessen | #1808, #1809 (Teil), #1810 |
 | M2 „Kino“ | `enum`, `switch`, Listen, `str`, `T!E`, `test`, `io.lines` → `kino.dif` aus §5 läuft, Tests grün | #1811, #1812, #1814 (io, str) |
-| M3 „C-Nachbar“ | `extern`, Linken, Laufzeit-Laden, C-Quellen, `use c`, `bindgen` | #1813, #1819 |
-| M4 „Werkzeugkasten“ | fmt, `--json`, fix, doc, llms; Coverage, Sanitizer, Doc-Tests; Rest der std | #1815, #1820, #1814 |
-| M5 „Messen“ | Agenten-Experiment, Benchmarks gegen Ease, C, Python | #1816 |
-| danach | Export als `.so`/`.dll`, Generics/Closures, Nebenläufigkeit, Benchmarks in der Sprache | #1821, #1817, #1818 |
+| M3 „Ausdruck“ | benannte Parameter, Funktionswerte und Blöcke, Generics → `filter`/`map`/`sort_by` in std, Builder-Beispiele aus §4.10 laufen | #1817 |
+| M4 „C-Nachbar“ | `extern`, Linken, Laufzeit-Laden, C-Quellen, `use c`, `bindgen`, Callbacks mit Kontext, `defer` | #1813, #1819 |
+| M5 „Werkzeugkasten“ | fmt, `--json`, fix, doc, llms; Coverage, Sanitizer, Doc-Tests; Rest der std | #1815, #1820, #1814 |
+| M6 „UI“ | rekta-Modul: `hello` aus §4.11 läuft | #1822 |
+| M7 „Messen“ | Agenten-Experiment, Benchmarks gegen Ease, C, Python | #1816 |
+| danach | Export als `.so`/`.dll`, Nebenläufigkeit, Benchmarks in der Sprache | #1821, #1818 |
 
 **Epics und Reihenfolge**
 
@@ -1076,7 +1198,9 @@ Makros · Klassen, Vererbung, Objekte · Exceptions · Operator-Überladung (v0)
             │                   └─▶ #1815 Tooling                      ├─▶ #1813 FFI ─┬─▶ #1819 C-Header-Import     ├─▶ #1816 Evaluation
             │                                                          │              └─▶ #1821 Export (nach v0)     │
             │                                                          └─▶ #1814 std ────────────────────────────────┘
-            └─▶ #1811 Speicher/Runtime ──▶ #1814 std, #1817 Generics (auch nach #1810), #1818 Nebenläufigkeit
+            └─▶ #1811 Speicher/Runtime ──▶ #1814 std, #1817 Generics & Funktionswerte (auch nach #1810), #1818 Nebenläufigkeit
+
+#1817 + #1819 ─▶ #1822 rekta-Modul (UI)
 ```
 
 Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate), `rt/dif_rt.h`, `std/*.dif`, `tests/ok`, `tests/err`, `docs/spec.md`, `docs/llms.txt`.
@@ -1093,7 +1217,7 @@ Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate)
 | Methoden | `Rückgabetyp Typ.name(…)`; `self` wird nicht deklariert und ist in jeder Methode die Variable, an der sie aufgerufen wird; sie darf geändert werden |
 | Übergabe | ändert eine Funktion einen Parameter, kommt er mit `mut` (`shift(mut p, 5)`), sonst ohne; kein `mut` in Signaturen, der Compiler sieht es am Rumpf (R6) |
 | Methodenaufruf | `hall.book(3, 5)` ohne `mut`: `self` ist immer die Variable vor dem Punkt; ein Aufruf ohne Wirkung ist ein Fehler (R13) |
-| Regeln | Design-Grundsätze und Regeln R1–R18 ohne Sonderfälle (§3); Fehlercodes = Regelnummern |
+| Regeln | Design-Grundsätze und Regeln R1–R27 ohne Sonderfälle (§3); Fehlercodes = Regelnummern |
 | Fehler | `int!AgeErr parse_age(str s)`, `void!BookErr`, `?str`; `try`, `err(...)` |
 | Verzweigung | `switch`/`case`, kein Fallthrough, vollständig |
 | Schleifen | `for int i in range(n)`, `range(a, b)`, `for T x in xs`, `while` |
@@ -1121,6 +1245,11 @@ Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate)
 | Fehler mischen | `try x or E.V(…)` übersetzt, kein Sammeltyp `error` (R12) |
 | Zahl-Literale | passen sich ihrer Stelle an, auch Ausdrücke nur aus Literalen (`f64 h = 7 / 2` ist 3.5) (R8) |
 | Aufräumen | `defer` (R23) |
+| Optionen an Funktionen | benannte Parameter mit Default, beim Aufruf per Name (R25) |
+| Funktionswerte | Literal `bool(Person p) { … }`, nur während des Aufrufs gültig, darf ringsum lesen und ändern (R26); keine impliziten Parameter wie `it` |
+| Blöcke | Literal ohne Parameter als `{ … }` hinter dem Aufruf; `return`/`try` beenden den Block (R26) |
+| Generics | vollständig in v0 (#1817): Typparameter `[A, B]`, Funktionstypen `R(T)`; Einschränkungs-Syntax entscheidet #1817 (R27) |
+| UI-Muster | Elm-Architektur: Nachrichten + `update` + `view`, rekta-Modul (#1822) |
 | C-Import-Details | C-Pointer sind `?T`, opake Pointer sind Griffe, C-struct-Felder ohne Angabe sind 0, `c.sizeof` (R17) |
 | Backend | C11 an gcc/clang (§6.2) |
 | Compiler-Sprache | Rust, anfangs ohne Crates (§6.3) |
