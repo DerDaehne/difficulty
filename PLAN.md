@@ -90,24 +90,26 @@ Vollständig und ohne „außer“. Diese Liste ist auch der Kern von `llms.txt`
 | R2 | Jede Deklaration nennt ihren Typ vorn: Variablen, Parameter, Felder, Schleifen- und `case`-Variablen. | `int n = 0` · `int add(int a, int b)` · `for int i in range(3)` |
 | R3 | Anweisungen enden am Zeilenende. Blöcke stehen in `{}`, Bedingungen ohne Klammern. | `if n > 0 { n -= 1 }` |
 | R4 | Variablen sind veränderlich, `const` nicht. Global gibt es nur `const`. Ein Name gilt bis zum Ende seines Blocks und wird darin nicht neu deklariert. | `const int MAX = 8` |
-| R5 | Zuweisung und Rückgabe kopieren den Wert; die Kopie ist unabhängig, intern aber billig. Ohne `mut` übergebene Argumente kann eine Funktion nur lesen. | `Point b = a` · `b.x = 9` ändert `a` nicht |
+| R5 | Zuweisung und Rückgabe kopieren den Wert; die Kopie ist unabhängig, intern aber billig. Ein Griff (Kanal, Task, `shared`, Datei, Bibliothek, C-Objekt) ist ein Wert, der auf etwas außerhalb zeigt: kopiert wird der Griff, nicht das Ding. Ohne `mut` übergebene Argumente kann eine Funktion nur lesen. | `Point b = a` · `b.x = 9` ändert `a` nicht |
 | R6 | Ändert eine Funktion einen Parameter, übergibt man ihn mit `mut`, und die Änderung landet beim Aufrufer; alle anderen Argumente ohne `mut`. Der Compiler sieht am Rumpf, welche Parameter das sind, und meldet jedes fehlende oder überflüssige `mut`. Nur Variablen lassen sich mit `mut` übergeben, jede höchstens einmal pro Aufruf. | `shift(mut p, 5)` · `shift(p, 5)` → Fehler mit Fix |
 | R7 | Eine Methode ist eine Funktion an einem Typ: `R T.name(params)`. In ihr ist `self` immer die Variable, an der sie aufgerufen wird, und darf geändert werden. | `hall.book(3, 5)` · `xs.push(4)` · `int Hall.free() { return self.seats.count(Seat.Free) }` |
-| R8 | Typen mischen sich nie von selbst. Operatoren verlangen gleiche Typen; `T(x)` wandelt exakt um oder bricht ab; absichtlich runden mit `round()`/`trunc()`; Text baut man mit `"{x}"`. Zahl-Literale passen sich ihrer Stelle an, wenn sie exakt passen. | `f64(n)` · `int(x.round())` · `"{n} Plätze"` |
+| R8 | Typen mischen sich nie von selbst. Operatoren verlangen gleiche Typen; `T(x)` wandelt exakt um oder bricht ab; absichtlich runden mit `round()`/`trunc()`; Text baut man mit `"{x}"`. Zahl-Literale und Ausdrücke nur aus Literalen nehmen den Typ ihrer Stelle an, wenn das Ergebnis exakt passt. | `f64(n)` · `int(x.round())` · `f64 h = 7 / 2` ist `3.5`, `int k = 7 / 2` ist `3` |
 | R9 | Bedingungen sind `bool`, nichts anderes. | `if xs.len() > 0` statt `if xs` |
-| R10 | `switch` deckt jeden möglichen Wert ab: alle Varianten oder `default`. Ein `case` endet von selbst. Varianten schreibt man mit ihrem Typ. | `case Seat.Taken:` |
+| R10 | `switch` deckt jeden möglichen Wert ab: alle Varianten oder `default`. Ein `case` endet von selbst. Varianten eines `enum` schreibt man mit ihrem Typ; `T!E` und `?T` sind keine `enum`s, sie haben die eingebauten Formen `ok`, `err`, `some`, `none`. | `case Seat.Taken:` · `case ok(int n):` |
 | R11 | Schleifen: `for T x in …` (über `range(n)`, `range(a, b)`, Listen, Maps, `io.lines()`) und `while cond`. `break` und `continue` gehören zur innersten Schleife und stehen nie direkt in einem `switch`. | `for str line in io.lines() { … }` |
-| R12 | Kann eine Funktion scheitern, steht es im Rückgabetyp: `T!E` heißt Wert oder `err(e)`, `?T` heißt Wert oder `none`. Erfolg gibt man einfach zurück. | `int!AgeErr parse_age(str s)` |
+| R12 | Kann eine Funktion scheitern, steht es im Rückgabetyp: `T!E` heißt Wert oder `err(e)`, `?T` heißt Wert oder `none`. Erfolg gibt man einfach zurück. `try x` reicht einen Fehler gleichen Typs weiter; `try x or E.V(…)` übersetzt ihn vorher in einen eigenen. | `int!AgeErr parse_age(str s)` · `try s.parse_int() or AgeErr.NotANumber(s)` |
 | R13 | Jeder Aufruf hat eine Wirkung: sein Ergebnis wird verwendet (`try`, `??`, `switch`, bewusst wegwerfen mit `_ =`), oder er ändert etwas (`mut`-Übergabe, `self`), oder er macht Ein-/Ausgabe oder startet einen Task. Ein Aufruf ohne Wirkung ist ein Fehler. | `int a = parse_age(s) ?? 0` · `add(2, 3)` allein → Fehler |
 | R14 | Programmierfehler brechen mit Meldung und Position ab: Index außerhalb, Überlauf, Division durch 0, ungenaue Umwandlung, `assert`. Immer, auch im Release. | `panic: index 40 out of bounds (kino.dif:31:13)` |
 | R15 | `if` mit `else` liefert einen Wert, wenn jeder Zweig mit einem Ausdruck endet. | `str s = if ok { "ja" } else { "nein" }` |
 | R16 | Eine Datei ist ein Modul. `use name` lädt `name.dif` neben der Datei, `use std.x` die Standardbibliothek, `use c "x.h"` einen C-Header. `pub` macht sichtbar. | `use geo` · `use c "math.h" link "m"` |
-| R17 | Pointer gibt es nur in `unsafe { }` und in C-Deklarationen. Dort gelten C-Regeln. | `unsafe { *void p = malloc(64) }` |
+| R17 | Pointer gibt es nur in `unsafe { }` und in C-Deklarationen; dort gelten C-Regeln. Was aus C kommt, darf `NULL` sein und ist darum `?T`; Pointer auf opake C-Typen sind Griffe. Nicht genannte Felder eines C-structs sind 0. | `unsafe { *void p = malloc(64) }` · `?rk.window w = rk.view_window(v)` |
 | R18 | Tests stehen neben dem Code: `test "name" { }`, geprüft mit `expect(cond)`. `dif test` führt sie aus, auch die Codebeispiele in `///`-Kommentaren. | `test "add" { expect(add(2, 3) == 5) }` |
 | R19 | *(nach v0)* `spawn f(args)` startet `f` parallel und liefert `task[T]`; `t.wait()` holt das Ergebnis. Argumente gehen ohne `mut` hinein. Ein Task lebt nur in der Funktion, die ihn gestartet hat: sie kehrt erst zurück, wenn alle ihre Tasks fertig sind. Ein Abbruch im Task kommt beim Warten an. Nach `t.cancel()` kehrt jeder blockierende std-Aufruf im Task mit Fehler zurück. `main` läuft immer im Hauptthread des Betriebssystems, Tasks nie. | `task[int] a = spawn fib(40)` · `a.wait()` |
 | R20 | *(nach v0)* Tasks tauschen Werte nur über Kanäle aus: `chan[T]`, `ch.send(v)`, `for T x in ch` (endet nach `ch.close()`). Ein Kanal ist ein Griff: Kopien zeigen auf denselben Kanal. Gesendete Werte gehören danach dem Empfänger. | `chan[int] ch = chan[int](64)` |
 | R21 | *(nach v0)* `parallel for T x in xs { … yield v }` verteilt die Durchläufe auf alle Kerne und liefert die `yield`-Werte als Liste in Eingabereihenfolge. Der Rumpf liest Variablen von außen nur. | `[]int sq = parallel for int x in xs { yield x * x }` |
 | R22 | *(nach v0)* `share(x)` friert einen Wert ein und liefert `shared[T]`: nur lesbar, und ohne Kopie an beliebig viele Tasks übergebbar. Ändern heißt, eine neue Version zu bauen und erneut zu teilen. | `shared[Layout] snap = share(layout)` |
+| R23 | `defer f()` läuft, wenn der umgebende Block endet, auf jedem Weg hinaus (Ende, `return`, `try`, `break`). Mehrere `defer` laufen in umgekehrter Reihenfolge. | `defer rk.ui_close()` |
+| R24 | Erwartet C ein Paar aus Funktion und `void *user`, übergibt man eine dif-Funktion und, wenn sie Zustand braucht, eine Variable; die Funktion bekommt die Variable als ersten Parameter, mit `mut`, wenn sie sie ändert (R6). Keine Funktion: `none`. Die Variable muss bis Programmende leben: aus `main` oder selbst so übergeben. | `rk.button("+1", add_one, mut app)` |
 
 ### 3.3 Sonderfälle, die wir aufgelöst haben
 
@@ -122,6 +124,11 @@ Vollständig und ohne „außer“. Diese Liste ist auch der Kern von `llms.txt`
 | `f64(n)` bricht ab, `int(2.5)` ist ein Compilerfehler | eine Regel: `T(x)` ist exakt oder bricht ab; steht der Wert schon beim Kompilieren fest, meldet es der Compiler (R8, R14) |
 | `break` im `switch` (in C verlässt es den `switch`, in Go auch) | `break` gehört nur zu Schleifen und steht nie direkt im `switch` (R11) |
 | `default` bei `enum` optional, bei `int`/`str` Pflicht | eine Regel: jeder mögliche Wert ist abgedeckt (R10) |
+| `ok`/`err`/`some`/`none` ohne Typ, obwohl Varianten immer einen Typ tragen | `T!E` und `?T` sind keine `enum`s, sondern eingebaute Formen (R10) |
+| Kanal, Task, `shared`, C-Objekt verhalten sich nicht wie unabhängige Kopien | sie sind Griffe: kopiert wird der Griff (R5) |
+| C-structs mit 50 Feldern, ohne Defaults in der Deklaration | C-Regel: nicht genannte Felder sind 0 (R17) |
+| C-Callbacks brauchen App-Zustand, es gibt aber keine veränderlichen Globalen | Kontext-Variable aus `main` (R24) |
+| `try` passt nur bei gleichem Fehlertyp | `try x or E.V(…)` übersetzt (R12) |
 
 Zwei einfache Bilder genügen: Ein Funktionsaufruf `f(x)` liest `x`, `f(mut x)` ändert `x`. Ein Methodenaufruf `x.m()` arbeitet immer auf `x`, wie `this` in C++/Java. Wer in einer Funktion mit einer Arbeitskopie rechnen will, legt sie dort an: `Hall work = hall`.
 
@@ -131,8 +138,9 @@ Zwei einfache Bilder genügen: Ein Funktionsaufruf `f(x)` liest `x`, `f(mut x)` 
 - Jede Regel hat eine Fehlermeldung, die die Regelnummer nennt (`error[R6]: …`, `dif explain R6`), und Golden-Tests für den gültigen Fall und den Verstoß.
 - Schreiben C, Python oder Go es schon gleich, übernehmen wir es. Eine Abweichung braucht einen Fehler, den sie verhindert.
 - Ein neues Schlüsselwort kommt nur, wenn keine Bibliotheksfunktion reicht.
+- Regelnummern sind stabil, weil sie Fehlercodes sind; neue Regeln hängen hinten an.
 
-Schlüsselwörter (23): `const struct enum if else while for in break continue return switch case default try mut use pub test extern unsafe void self`, nach v0 dazu `spawn parallel yield`
+Schlüsselwörter (24): `const struct enum if else while for in break continue return switch case default try mut use pub test extern unsafe void self defer`, nach v0 dazu `spawn parallel yield`
 Nur in `use c`/`extern`-Zeilen: `c link pkg source impl load as strip`
 Literale/Konstruktoren: `true false none some ok err` · eingebaute Funktionen: `print range repeat expect assert`
 
@@ -316,15 +324,11 @@ int!AgeErr parse_age(str s) {
     if s.len() == 0 {
         return err(AgeErr.Empty)
     }
-    switch s.parse_int() {
-    case ok(int n):
-        if n < 0 || n > 150 {
-            return err(AgeErr.OutOfRange(n))
-        }
-        return n                                  // Erfolg: Wert direkt
-    case err(ParseErr _):
-        return err(AgeErr.NotANumber(s))
+    int n = try s.parse_int() or AgeErr.NotANumber(s)   // ParseErr → AgeErr übersetzt
+    if n < 0 || n > 150 {
+        return err(AgeErr.OutOfRange(n))
     }
+    return n                                      // Erfolg: Wert direkt
 }
 
 int!AgeErr total_age(str a, str b) {
@@ -429,10 +433,12 @@ So funktioniert es: `dif` lässt eine Probe-Datei mit `#include <sqlite3.h>` dur
 |---|---|
 | `int32_t`, `uint8_t`, `double`, `_Bool` … | `i32`, `u8`, `f64`, `bool` |
 | `int`, `long`, `size_t` … | `c.int`, `c.long`, `c.size` |
-| `const char*` als Parameter | `c.str`: man übergibt einfach `str`, dif legt eine NUL-terminierte Kopie für die Dauer des Aufrufs an |
-| `const char*` als Rückgabe | `c.str`, lesbar über `str.from_c(p) -> ?str` |
-| andere Pointer `T*` | `*T`, nur in `unsafe` |
-| `struct S { … }` / unvollständiges `struct S` | struct mit Feldern / opaker Typ (nur über `*S`) |
+| `const char*` als Parameter | `?c.str`: man übergibt einfach `str` (oder `none` für `NULL`); dif-Strings sind intern NUL-terminiert, der Pointer gilt, solange der String lebt; ein C-struct hält die dif-Werte in seinen Feldern selbst am Leben |
+| `const char*` als Rückgabe | `?c.str`, lesbar über `str.from_c(p) -> ?str` |
+| Pointer auf opakes `struct S` (`rk_view*`) | Griff `?S`; ein Callback-Parameter vom Typ `S` wird beim Aufruf auf `NULL` geprüft (Abbruch wie bei `T(x)`) |
+| andere Pointer `T*` | `?*T`, nur in `unsafe` |
+| `struct S { … }` | struct mit Feldern; nicht genannte Felder im Literal sind 0, `c.sizeof(S)` gibt die Größe |
+| Paar aus Funktionspointer und `void *user` | dif-Funktion plus Kontext-Variable (R24) |
 | `enum`, `#define N 42` | Konstanten |
 | Funktionsmakros, varargs (`printf`) | werden nicht importiert; `dif doc sqlite3` listet sie mit Grund, nie still verworfen |
 
@@ -498,7 +504,29 @@ static void *(*const dif_chk_malloc)(size_t) = malloc;
 
 `dif bindgen sqlite3.h --strip sqlite3_ > sqlite3.dif` erzeugt aus einem Header einen solchen `extern`-Block als lesbare, versionierbare Datei (gleicher Parser wie `use c`).
 
-Regeln: Die Deklaration ist die Vertrauensgrenze. Funktionen mit `*T` in der Signatur sind nur in `unsafe` aufrufbar, `c.str` und reine Zahlen gelten als sicher. Nach v0 (#1821): dif-Funktionen exportieren (`export int add(int a, int b)`, `dif build --lib` → `.so`/`.dll` + Header).
+**6. Callbacks mit Zustand und Aufräumen** (R23, R24), am Beispiel rekta-core: C ruft `build` und `on_press` später zurück und reicht nur `void *user` durch. dif bindet dort eine Variable aus `main` und erzeugt den Trampolin; `defer` schließt, was geöffnet wurde.
+
+```dif
+use c "rekta.h" link pkg "rekta" strip "rk_" as rk
+
+struct App {
+    int count = 0
+}
+
+void add_one(App app, rk.view button) {
+    app.count += 1
+}
+
+void build(App app) {
+    if rk.ui_open(rk.ui{size: c.sizeof(rk.ui), kind: rk.UI_VSTACK}) {
+        defer rk.ui_close()
+        rk.ui_put(rk.ui{size: c.sizeof(rk.ui), kind: rk.UI_LABEL, text: "{app.count}"})
+        rk.ui_put(rk.ui{size: c.sizeof(rk.ui), kind: rk.UI_BUTTON, text: "+1", on_press: add_one, user: mut app})
+    }
+}
+```
+
+Regeln: Die Deklaration ist die Vertrauensgrenze. Funktionen mit `*T` in der Signatur sind nur in `unsafe` aufrufbar, `c.str`, Griffe und reine Zahlen gelten als sicher. Nach v0 (#1821): dif-Funktionen exportieren (`export int add(int a, int b)`, `dif build --lib` → `.so`/`.dll` + Header).
 
 ### 4.8 Module
 
@@ -1089,6 +1117,11 @@ Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate)
 | Name | `difficulty`, Kommando `dif`, Dateien `.dif` |
 | Remote | öffentliches GitHub-Repo, angelegt über `gh` (per nix-shell) |
 | Lizenz | MIT |
+| Callbacks mit Zustand | Kontext-Variable aus `main` für C-Paare aus Funktion und `void *user` (R24) |
+| Fehler mischen | `try x or E.V(…)` übersetzt, kein Sammeltyp `error` (R12) |
+| Zahl-Literale | passen sich ihrer Stelle an, auch Ausdrücke nur aus Literalen (`f64 h = 7 / 2` ist 3.5) (R8) |
+| Aufräumen | `defer` (R23) |
+| C-Import-Details | C-Pointer sind `?T`, opake Pointer sind Griffe, C-struct-Felder ohne Angabe sind 0, `c.sizeof` (R17) |
 | Backend | C11 an gcc/clang (§6.2) |
 | Compiler-Sprache | Rust, anfangs ohne Crates (§6.3) |
 | Speicher | Wertsemantik + Referenzzählung + Copy-on-Write, kein GC (§6.4) |
