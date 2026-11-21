@@ -104,9 +104,10 @@ Vollständig und ohne „außer“. Diese Liste ist auch der Kern von `llms.txt`
 | R16 | Eine Datei ist ein Modul. `use name` lädt `name.dif` neben der Datei, `use std.x` die Standardbibliothek, `use c "x.h"` einen C-Header. `pub` macht sichtbar. | `use geo` · `use c "math.h" link "m"` |
 | R17 | Pointer gibt es nur in `unsafe { }` und in C-Deklarationen. Dort gelten C-Regeln. | `unsafe { *void p = malloc(64) }` |
 | R18 | Tests stehen neben dem Code: `test "name" { }`, geprüft mit `expect(cond)`. `dif test` führt sie aus, auch die Codebeispiele in `///`-Kommentaren. | `test "add" { expect(add(2, 3) == 5) }` |
-| R19 | *(nach v0)* `spawn f(args)` startet `f` parallel und liefert `task[T]`; `t.wait()` holt das Ergebnis. Argumente gehen ohne `mut` hinein. Ein Task lebt nur in der Funktion, die ihn gestartet hat: sie kehrt erst zurück, wenn alle ihre Tasks fertig sind. Ein Abbruch im Task kommt beim Warten an. | `task[int] a = spawn fib(40)` · `a.wait()` |
+| R19 | *(nach v0)* `spawn f(args)` startet `f` parallel und liefert `task[T]`; `t.wait()` holt das Ergebnis. Argumente gehen ohne `mut` hinein. Ein Task lebt nur in der Funktion, die ihn gestartet hat: sie kehrt erst zurück, wenn alle ihre Tasks fertig sind. Ein Abbruch im Task kommt beim Warten an. Nach `t.cancel()` kehrt jeder blockierende std-Aufruf im Task mit Fehler zurück. `main` läuft immer im Hauptthread des Betriebssystems, Tasks nie. | `task[int] a = spawn fib(40)` · `a.wait()` |
 | R20 | *(nach v0)* Tasks tauschen Werte nur über Kanäle aus: `chan[T]`, `ch.send(v)`, `for T x in ch` (endet nach `ch.close()`). Ein Kanal ist ein Griff: Kopien zeigen auf denselben Kanal. Gesendete Werte gehören danach dem Empfänger. | `chan[int] ch = chan[int](64)` |
 | R21 | *(nach v0)* `parallel for T x in xs { … yield v }` verteilt die Durchläufe auf alle Kerne und liefert die `yield`-Werte als Liste in Eingabereihenfolge. Der Rumpf liest Variablen von außen nur. | `[]int sq = parallel for int x in xs { yield x * x }` |
+| R22 | *(nach v0)* `share(x)` friert einen Wert ein und liefert `shared[T]`: nur lesbar, und ohne Kopie an beliebig viele Tasks übergebbar. Ändern heißt, eine neue Version zu bauen und erneut zu teilen. | `shared[Layout] snap = share(layout)` |
 
 ### 3.3 Sonderfälle, die wir aufgelöst haben
 
@@ -603,11 +604,55 @@ panic: deadlock: all tasks are blocked
 | `spawn` / `task[T]` / `wait` | mehrere Kerne nutzen; Fehler und Abbrüche kommen beim Aufrufer an; keine verwaisten Threads |
 | `chan[T]` | Producer/Consumer, Pipelines, Server; Werte werden übertragen, nie geteilt |
 | `parallel for … yield` | Rechenlast mit einem Wort parallelisieren, Ergebnis in stabiler Reihenfolge, `print` in Reihenfolge der Durchläufe |
-| `wait_for`, `recv_for`, `cancel` | Timeouts und kooperativer Abbruch als Methoden, ohne neue Syntax |
+| `wait_for`, `recv_for`, `try_recv`, `cancel` | Timeouts, nicht blockierendes Abholen und Abbruch als Methoden, ohne neue Syntax |
+| abbrechbares IO | nach `t.cancel()` kehren blockierende std-Aufrufe im Task (`net`, `fs`, `sleep`, `recv`, `wait`) sofort mit `err(…Cancelled)` bzw. `none` zurück; `try` reicht es nach oben |
+| `shared[T]` | große Daten (Layout-Baum, Cache, Textur) ohne Kopie an viele Tasks; unveränderlich, also weiter race-frei; atomare Zählung nur für `shared` |
+| Inbox-Muster + `time.every`/`time.after` | auf mehrere Quellen warten, ohne `select`: alle senden Varianten eines `enum` in einen Kanal |
+| Hauptthread-Garantie + `ch.fd()` | `main` läuft im OS-Hauptthread (SDL, GTK, Cocoa verlangen das); `ch.fd()` wird lesbar, sobald Nachrichten da sind, für C-Eventloops ohne Polling |
 | Deadlock-Erkennung | statt stillem Hängen: wer wartet worauf, an welcher Zeile |
 | reproduzierbare Tests | `dif test` fährt Nebenläufigkeit deterministisch (Wechsel nur an Kanälen und `wait`, Reihenfolge per Seed); `--schedules N` probiert N Abläufe, ein Fehlschlag nennt den Seed zum Wiederholen |
 
-Runtime: zuerst ein OS-Thread pro Task (pthreads, wenige hundert Zeilen C in `dif_rt.h`), später leichte Tasks (M:N-Scheduler) für sehr viele gleichzeitige Verbindungen, ohne dass sich Code ändert. Referenzzählung bleibt nicht atomar: Werte, die in einen Task oder Kanal gehen, werden übertragen (bei letzter Nutzung verschoben, sonst kopiert), und `parallel for` liest äußere Variablen ohne Zähleroperationen.
+**Prüfstein Webbrowser:** UI-Schleife im Hauptthread, Downloads als Tasks, alles fließt über eine Inbox, Layout geht als `shared` an die Raster-Tasks, ein geschlossener Tab bricht seine Downloads ab.
+
+```dif
+enum Msg {
+    Page(int tab, str html)
+    Input(ui.Event e)
+    Tick
+}
+
+str!net.Err fetch(int tab, str url, chan[Msg] inbox) {
+    str html = try net.get(url)
+    inbox.send(Msg.Page(tab, html))
+    return html
+}
+
+void main() {
+    Browser b = Browser{}
+    chan[Msg] inbox = chan[Msg](256)
+    spawn time.every(time.ms(16), inbox, Msg.Tick)
+    task[str!net.Err] load = spawn fetch(1, "https://example.org", inbox)
+    ui.watch_fd(inbox.fd())
+    for Msg m in inbox {
+        switch m {
+        case Msg.Page(int tab, str html):
+            b.open(tab, html)
+        case Msg.Input(ui.Event e):
+            if e.is_close_tab() {
+                load.cancel()
+            }
+        case Msg.Tick:
+            shared[Layout] snap = share(b.layout())
+            []Tile tiles = parallel for Rect r in screen_tiles() {
+                yield raster(snap, r)
+            }
+            ui.present(tiles)
+        }
+    }
+}
+```
+
+Runtime: zuerst ein OS-Thread pro Task (pthreads, wenige hundert Zeilen C in `dif_rt.h`), später leichte Tasks (M:N-Scheduler) für sehr viele gleichzeitige Verbindungen, ohne dass sich Code ändert. Referenzzählung bleibt nicht atomar: Werte, die in einen Task oder Kanal gehen, werden übertragen (bei letzter Nutzung verschoben, sonst kopiert), `parallel for` liest äußere Variablen ohne Zähleroperationen, und nur `shared[T]` zählt atomar. Mehrere Prozesse (Site-Isolation wie in Chrome) gehen über `std.process` und Pipes, nicht über neue Sprachmittel.
 
 ### 4.10 Später
 
@@ -1037,6 +1082,10 @@ Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate)
 | Test-Werkzeuge v0 | Coverage, Sanitizer, Doc-Tests (plus Prozess-Isolation, `panics`-Tests); Benchmarks nach v0 |
 | Nebenläufigkeit | nach v0 (#1818): `spawn`/`task[T]`/`wait`, Funktion wartet auf ihre Tasks; `chan[T]`; `parallel for … yield`; Timeouts und kooperativer Abbruch; Deadlock-Erkennung; reproduzierbare Tests; kein `async`/`await` |
 | Nebenläufigkeits-Runtime | erst OS-Threads, später leichte Tasks (M:N) mit gleichem Code |
+| Mehrere Quellen | Inbox-Muster (`enum` + ein Kanal), kein `select`; dazu `time.every`, `time.after`, `try_recv` |
+| Große Daten teilen | `shared[T]` über `share(x)`, unveränderlich, atomare Zählung nur dort (R22) |
+| Abbruch und IO | blockierende std-Aufrufe kehren nach `cancel` mit Fehler zurück |
+| GUI-Anbindung | `main` immer im OS-Hauptthread; `ch.fd()` als Weck-Deskriptor für C-Eventloops |
 | Name | `difficulty`, Kommando `dif`, Dateien `.dif` |
 | Remote | öffentliches GitHub-Repo, angelegt über `gh` (per nix-shell) |
 | Lizenz | MIT |
