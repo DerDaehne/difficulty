@@ -98,12 +98,15 @@ Vollständig und ohne „außer“. Diese Liste ist auch der Kern von `llms.txt`
 | R10 | `switch` deckt jeden möglichen Wert ab: alle Varianten oder `default`. Ein `case` endet von selbst. Varianten schreibt man mit ihrem Typ. | `case Seat.Taken:` |
 | R11 | Schleifen: `for T x in …` (über `range(n)`, `range(a, b)`, Listen, Maps, `io.lines()`) und `while cond`. `break` und `continue` gehören zur innersten Schleife und stehen nie direkt in einem `switch`. | `for str line in io.lines() { … }` |
 | R12 | Kann eine Funktion scheitern, steht es im Rückgabetyp: `T!E` heißt Wert oder `err(e)`, `?T` heißt Wert oder `none`. Erfolg gibt man einfach zurück. | `int!AgeErr parse_age(str s)` |
-| R13 | Jeder Aufruf hat eine Wirkung: sein Ergebnis wird verwendet (`try`, `??`, `switch`, bewusst wegwerfen mit `_ =`), oder er ändert etwas (`mut`-Übergabe, `self`), oder er macht Ein-/Ausgabe. Ein Aufruf ohne Wirkung ist ein Fehler. | `int a = parse_age(s) ?? 0` · `add(2, 3)` allein → Fehler |
+| R13 | Jeder Aufruf hat eine Wirkung: sein Ergebnis wird verwendet (`try`, `??`, `switch`, bewusst wegwerfen mit `_ =`), oder er ändert etwas (`mut`-Übergabe, `self`), oder er macht Ein-/Ausgabe oder startet einen Task. Ein Aufruf ohne Wirkung ist ein Fehler. | `int a = parse_age(s) ?? 0` · `add(2, 3)` allein → Fehler |
 | R14 | Programmierfehler brechen mit Meldung und Position ab: Index außerhalb, Überlauf, Division durch 0, ungenaue Umwandlung, `assert`. Immer, auch im Release. | `panic: index 40 out of bounds (kino.dif:31:13)` |
 | R15 | `if` mit `else` liefert einen Wert, wenn jeder Zweig mit einem Ausdruck endet. | `str s = if ok { "ja" } else { "nein" }` |
 | R16 | Eine Datei ist ein Modul. `use name` lädt `name.dif` neben der Datei, `use std.x` die Standardbibliothek, `use c "x.h"` einen C-Header. `pub` macht sichtbar. | `use geo` · `use c "math.h" link "m"` |
 | R17 | Pointer gibt es nur in `unsafe { }` und in C-Deklarationen. Dort gelten C-Regeln. | `unsafe { *void p = malloc(64) }` |
 | R18 | Tests stehen neben dem Code: `test "name" { }`, geprüft mit `expect(cond)`. `dif test` führt sie aus, auch die Codebeispiele in `///`-Kommentaren. | `test "add" { expect(add(2, 3) == 5) }` |
+| R19 | *(nach v0)* `spawn f(args)` startet `f` parallel und liefert `task[T]`; `t.wait()` holt das Ergebnis. Argumente gehen ohne `mut` hinein. Ein Task lebt nur in der Funktion, die ihn gestartet hat: sie kehrt erst zurück, wenn alle ihre Tasks fertig sind. Ein Abbruch im Task kommt beim Warten an. | `task[int] a = spawn fib(40)` · `a.wait()` |
+| R20 | *(nach v0)* Tasks tauschen Werte nur über Kanäle aus: `chan[T]`, `ch.send(v)`, `for T x in ch` (endet nach `ch.close()`). Ein Kanal ist ein Griff: Kopien zeigen auf denselben Kanal. Gesendete Werte gehören danach dem Empfänger. | `chan[int] ch = chan[int](64)` |
+| R21 | *(nach v0)* `parallel for T x in xs { … yield v }` verteilt die Durchläufe auf alle Kerne und liefert die `yield`-Werte als Liste in Eingabereihenfolge. Der Rumpf liest Variablen von außen nur. | `[]int sq = parallel for int x in xs { yield x * x }` |
 
 ### 3.3 Sonderfälle, die wir aufgelöst haben
 
@@ -128,7 +131,7 @@ Zwei einfache Bilder genügen: Ein Funktionsaufruf `f(x)` liest `x`, `f(mut x)` 
 - Schreiben C, Python oder Go es schon gleich, übernehmen wir es. Eine Abweichung braucht einen Fehler, den sie verhindert.
 - Ein neues Schlüsselwort kommt nur, wenn keine Bibliotheksfunktion reicht.
 
-Schlüsselwörter (23): `const struct enum if else while for in break continue return switch case default try mut use pub test extern unsafe void self`
+Schlüsselwörter (23): `const struct enum if else while for in break continue return switch case default try mut use pub test extern unsafe void self`, nach v0 dazu `spawn parallel yield`
 Nur in `use c`/`extern`-Zeilen: `c link pkg source impl load as strip`
 Literale/Konstruktoren: `true false none some ok err` · eingebaute Funktionen: `print range repeat expect assert`
 
@@ -524,17 +527,91 @@ void main() {
 
 Eine Datei ist ein Modul, `pub` exportiert, sonst privat. `std.*` ist in den Compiler eingebettet und lässt sich nicht still durch lokale Dateien ersetzen (Ease-Review SEC-001).
 
-### 4.9 Später (eigene Epics)
+### 4.9 Nebenläufigkeit (nach v0, #1818)
 
-Generics und Closures (#1817): Syntax wird dort entschieden, Monomorphisierung, Capture by value. Nebenläufigkeit (#1818) wie Ease-Inboxen, Werte werden übertragen, kein geteilter Zustand:
+Weil es keine Referenzen und keine veränderlichen Globalen gibt, können zwei Tasks nie dieselbe Variable ändern: **Data Races sind schon durch das Design unmöglich**, ohne Borrow-Checker und ohne Locks. Tasks treffen sich nur an Kanälen und beim Warten; das macht Deadlocks erkennbar und Tests reproduzierbar. Kein `async`/`await`: Funktionen werden nicht „gefärbt“, blockierender Code bleibt einfacher Code.
 
 ```dif
-chan[str] ch = chan[str](64)
-spawn produce(ch)
-for str msg in ch {          // endet, wenn ch geschlossen und leer ist
-    print(msg)
+use std.time
+use std.fs
+
+int count_words(str text) {
+    return text.split(" ").len()
+}
+
+void produce(int n, chan[int] out) {      // out ist ein Griff: send ändert den Kanal, nicht out
+    for int i in range(n) {
+        out.send(i * i)
+    }
+    out.close()
+}
+
+void main() {
+    // 1. Tasks: parallel rechnen, Ergebnis abholen
+    task[int] a = spawn count_words("ein langer text")
+    task[int] b = spawn count_words("noch einer")
+    print("Wörter: {a.wait() + b.wait()}")
+
+    // 2. Kanal: Producer/Consumer
+    chan[int] squares = chan[int](64)
+    spawn produce(10, squares)
+    for int sq in squares {                // endet, wenn produce den Kanal schließt
+        print(sq)
+    }
+
+    // 3. Parallele Schleife: alle Kerne, Reihenfolge bleibt
+    []str texts = ["a b", "c d e", "f"]
+    []int counts = parallel for str t in texts {
+        yield count_words(t)
+    }
+
+    // 4. Timeout und Abbruch
+    str big = fs.read("big.txt") ?? ""
+    task[int] slow = spawn count_words(big)
+    switch slow.wait_for(time.sec(2)) {
+    case some(int n):
+        print("{n} Wörter")
+    case none:
+        slow.cancel()                      // kooperativ: der Task fragt task.cancelled() ab
+        print("zu langsam")
+    }
+}   // main kehrt erst zurück, wenn alle gestarteten Tasks fertig sind
+
+test "producer" {
+    chan[int] ch = chan[int](1)
+    spawn produce(3, ch)
+    []int got = []
+    for int x in ch {
+        got.push(x)
+    }
+    expect(got == [0, 1, 4])
 }
 ```
+
+```
+$ dif test shop.dif --schedules 200      # 200 verschiedene Abläufe, deterministisch per Seed
+ok   shop.dif:40 test "producer" (200 schedules)
+
+$ dif run shop.dif
+panic: deadlock: all tasks are blocked
+  main     waits in ch.recv()    at shop.dif:21:9
+  produce  waits in out.send()   at shop.dif:8:9
+```
+
+| Baustein | Was er bringt |
+|---|---|
+| `spawn` / `task[T]` / `wait` | mehrere Kerne nutzen; Fehler und Abbrüche kommen beim Aufrufer an; keine verwaisten Threads |
+| `chan[T]` | Producer/Consumer, Pipelines, Server; Werte werden übertragen, nie geteilt |
+| `parallel for … yield` | Rechenlast mit einem Wort parallelisieren, Ergebnis in stabiler Reihenfolge, `print` in Reihenfolge der Durchläufe |
+| `wait_for`, `recv_for`, `cancel` | Timeouts und kooperativer Abbruch als Methoden, ohne neue Syntax |
+| Deadlock-Erkennung | statt stillem Hängen: wer wartet worauf, an welcher Zeile |
+| reproduzierbare Tests | `dif test` fährt Nebenläufigkeit deterministisch (Wechsel nur an Kanälen und `wait`, Reihenfolge per Seed); `--schedules N` probiert N Abläufe, ein Fehlschlag nennt den Seed zum Wiederholen |
+
+Runtime: zuerst ein OS-Thread pro Task (pthreads, wenige hundert Zeilen C in `dif_rt.h`), später leichte Tasks (M:N-Scheduler) für sehr viele gleichzeitige Verbindungen, ohne dass sich Code ändert. Referenzzählung bleibt nicht atomar: Werte, die in einen Task oder Kanal gehen, werden übertragen (bei letzter Nutzung verschoben, sonst kopiert), und `parallel for` liest äußere Variablen ohne Zähleroperationen.
+
+### 4.10 Später
+
+Generics und Closures (#1817): Syntax wird dort entschieden, Monomorphisierung, Capture by value. Benchmarks in der Sprache (`bench "x" { }`), Export als `.so`/`.dll` (#1821).
 
 ---
 
@@ -958,6 +1035,8 @@ Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate)
 | C-Anbindung v0 | Header-Import `use c`, Laufzeit-Laden, C-Quellen mitbauen, `dif bindgen` (plus `extern`, Linken per Name/Pfad/pkg-config) |
 | Export als `.so`/`.dll` | nach v0 (#1821) |
 | Test-Werkzeuge v0 | Coverage, Sanitizer, Doc-Tests (plus Prozess-Isolation, `panics`-Tests); Benchmarks nach v0 |
+| Nebenläufigkeit | nach v0 (#1818): `spawn`/`task[T]`/`wait`, Funktion wartet auf ihre Tasks; `chan[T]`; `parallel for … yield`; Timeouts und kooperativer Abbruch; Deadlock-Erkennung; reproduzierbare Tests; kein `async`/`await` |
+| Nebenläufigkeits-Runtime | erst OS-Threads, später leichte Tasks (M:N) mit gleichem Code |
 | Name | `difficulty`, Kommando `dif`, Dateien `.dif` |
 | Remote | öffentliches GitHub-Repo, angelegt über `gh` (per nix-shell) |
 | Lizenz | MIT |
