@@ -1416,7 +1416,7 @@ Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate)
 | Methoden | `Rückgabetyp Typ.name(…)`; `self` wird nicht deklariert und ist in jeder Methode die Variable, an der sie aufgerufen wird; sie darf geändert werden |
 | Übergabe | `mut` in Signatur und Aufruf (`void shift(mut Point p, int dx)`, `shift(mut p, 5)`); Parameter ohne `mut` sind lokale Kopien wie in C; eine nie gelesene Änderung ist ein Fehler (R6; nach Review geändert, früher aus dem Rumpf abgeleitet) |
 | Methodenaufruf | `hall.book(3, 5)` ohne `mut`: `self` ist immer die Variable vor dem Punkt; ein Aufruf ohne Wirkung ist ein Fehler (R13) |
-| Regeln | Design-Grundsätze und Regeln R1–R27 ohne Sonderfälle (§3); Fehlercodes = Regelnummern |
+| Regeln | Design-Grundsätze und Regeln R1–R31 ohne Sonderfälle (§3); Fehlercodes = Regelnummern |
 | Fehler | `int!AgeErr parse_age(str s)`, `void!BookErr`, `?str`; `try`, `err(...)` |
 | Verzweigung | `switch`/`case`, kein Fallthrough, vollständig |
 | Schleifen | `for int i in range(n)`, `range(a, b)`, `for T x in xs`, `while` |
