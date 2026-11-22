@@ -91,28 +91,32 @@ Vollständig und ohne „außer“. Diese Liste ist auch der Kern von `llms.txt`
 | R3 | Anweisungen enden am Zeilenende. Blöcke stehen in `{}`, Bedingungen ohne Klammern. Die Kopfzeile von `if`, `while`, `for` und `switch` endet am ersten `{`. | `if n > 0 { n -= 1 }` · `if hall.is_full() { … }` |
 | R4 | Variablen sind veränderlich, `const` nicht. Global gibt es nur `const`. Ein Name gilt bis zum Ende seines Blocks und wird darin nicht neu deklariert. | `const int MAX = 8` |
 | R5 | Zuweisung und Rückgabe kopieren den Wert; die Kopie ist unabhängig, intern aber billig. Ein Griff (Kanal, Task, `shared`, Datei, Bibliothek, C-Objekt) ist ein Wert, der auf etwas außerhalb zeigt: kopiert wird der Griff, nicht das Ding. Parameter ohne `mut` sind lokale Kopien, wie in C. | `Point b = a` · `b.x = 9` ändert `a` nicht |
-| R6 | Soll eine Funktion ein Argument ändern, steht `mut` in der Signatur und am Aufruf; die Änderung landet beim Aufrufer. Eine Änderung, die danach nie gelesen wird, ist ein Fehler (sie träfe nur eine Kopie). Nur Variablen lassen sich mit `mut` übergeben. Eine Variable geht höchstens einmal veränderbar in einen Aufruf: als `self`, als `mut`-Argument oder über ein Funktionsliteral, das sie ändert; liest derselbe Aufruf sie zusätzlich, bekommt der lesende Teil einen Schnappschuss. | `void shift(mut Point p, int dx)` · `shift(mut p, 5)` · `void nudge(Point p) { p.x += 1 }` → Fehler |
-| R7 | Eine Methode ist eine Funktion an einem Typ: `R T.name(params)`. In ihr ist `self` immer die Variable, an der sie aufgerufen wird, und darf geändert werden. | `hall.book(3, 5)` · `xs.push(4)` · `int Hall.free() { return self.seats.count(Seat.Free) }` |
-| R8 | Typen mischen sich nie von selbst. Operatoren verlangen gleiche Typen; `T(x)` wandelt exakt um oder bricht ab; absichtlich runden mit `round()`/`trunc()`; Text baut man mit `"{x}"`. Zahl-Literale und Ausdrücke nur aus Literalen nehmen den Typ ihrer Stelle an, wenn das Ergebnis exakt passt. | `f64(n)` · `int(x.round())` · `f64 h = 7 / 2` ist `3.5`, `int k = 7 / 2` ist `3` |
+| R6 | Soll eine Funktion ein Argument ändern, steht `mut` in der Signatur und am Aufruf; die Änderung landet beim Aufrufer. Eine Änderung, die danach nie gelesen wird, ist ein Fehler (sie träfe nur eine Kopie). `mut` nimmt Orte: Variablen, Felder und Elemente. Ein Ort geht höchstens einmal veränderbar in einen Aufruf: als `self`, als `mut`-Argument oder über ein Funktionsliteral, das ihn ändert; überlappen zwei Orte, ist das ein Fehler, bei Elementen mit Laufzeit-Index ein Abbruch. Liest derselbe Aufruf einen Ort zusätzlich, bekommt der lesende Teil einen Schnappschuss. | `void shift(mut Point p, int dx)` · `shift(mut scene.player.pos, 5)` · `normalize(mut tasks[i])` · `void nudge(Point p) { p.x += 1 }` → Fehler |
+| R7 | Eine Methode ist eine Funktion an einem Typ: `R T.name(params)`. In ihr ist `self` immer der Ort, an dem sie aufgerufen wird, und darf geändert werden. Methoden, die `self` nicht ändern, gehen auch auf Ausdrücken. | `hall.book(3, 5)` · `(dx * dx + dy * dy).sqrt()` · `xs.push(4)` · `int Hall.free() { return self.seats.count(Seat.Free) }` |
+| R8 | Typen mischen sich nie von selbst. Operatoren verlangen gleiche Typen; `T(x)` wandelt exakt um oder bricht ab; absichtlich runden mit `round()`/`trunc()`; Text baut man mit `"{x}"`. Ausdrücke nur aus Literalen rechnen im Typ ihrer Stelle; ohne Stelle ist ein Literal ohne Punkt `int`, mit Punkt `f64`; Float-Literale werden auf den nächsten Wert gerundet. „Steht beim Kompilieren fest“ heißt: nur Literale und `const`. | `f64(n)` · `int(x.round())` · `f64 h = 7 / 2` ist `3.5` · `int k = 7 / 2` ist `3` · `print(7 / 2)` ist `3` |
 | R9 | Bedingungen sind `bool`, nichts anderes. | `if xs.len() > 0` statt `if xs` |
-| R10 | `switch` deckt jeden möglichen Wert ab: alle Varianten oder `default`. Ein `case` endet von selbst. Varianten eines `enum` schreibt man mit ihrem Typ; `T!E` und `?T` sind keine `enum`s, sie haben die eingebauten Formen `ok`, `err`, `some`, `none`. | `case Seat.Taken:` · `case ok(int n):` |
-| R11 | Schleifen: `for T x in …` (über `range(n)`, `range(a, b)`, Listen, Maps, `io.lines()`) und `while cond`. `break` und `continue` gehören zur innersten Schleife; `break` steht nie direkt in einem `switch`, weil es dort in C und Go den `switch` verließe. | `for str line in io.lines() { … }` · `case Msg.Quit: return` |
+| R10 | `switch` deckt jeden möglichen Wert ab: alle Varianten oder `default`. Jeder `case` ist ein eigener Block und endet von selbst. Varianten eines `enum` schreibt man mit ihrem Typ; `T!E` und `?T` sind keine `enum`s, sie haben die eingebauten Formen `ok`, `err`, `some`, `none`. | `case Seat.Taken:` · `case ok(int n):` |
+| R11 | Schleifen: `for T x in …` (über `range(n)`, `range(a, b)`, Listen, `io.lines()`, Kanäle), `for int i, T x in xs` (Index und Element), `for K k, V v in m` (Schlüssel und Wert) und `while cond`. `break` und `continue` gehören zur innersten Schleife; `break` steht nie direkt in einem `switch`, weil es dort in C und Go den `switch` verließe. | `for str line in io.lines() { … }` · `case Msg.Quit: return` |
 | R12 | Kann eine Funktion scheitern, steht es im Rückgabetyp: `T!E` heißt Wert oder `err(e)`, `?T` heißt Wert oder `none`. Erfolg gibt man einfach zurück. `try x` reicht einen Fehler gleichen Typs weiter; `try x or E.V(…)` übersetzt ihn vorher in einen eigenen. | `int!AgeErr parse_age(str s)` · `try s.parse_int() or AgeErr.NotANumber(s)` |
 | R13 | Ein Ergebnis vom Typ `T!E` oder `?T` wird immer verwendet: `try`, `??`, `switch` oder bewusst `_ =`. Jeder andere Aufruf braucht eine Wirkung: sein Ergebnis wird verwendet, oder er ändert etwas (`mut`, `self`), macht Ein-/Ausgabe, ruft C oder startet einen Task. Ein Aufruf ohne Wirkung ist ein Fehler. | `int a = parse_age(s) ?? 0` · `hall.book(3, 5)` allein → Fehler · `add(2, 3)` allein → Fehler |
 | R14 | Programmierfehler brechen mit Meldung und Position ab: Index außerhalb, Überlauf, Division durch 0, ungenaue Umwandlung, `assert`. Immer, auch im Release. | `panic: index 40 out of bounds (kino.dif:31:13)` |
 | R15 | `if` mit `else` liefert einen Wert, wenn jeder Zweig mit einem Ausdruck endet. | `str s = if ok { "ja" } else { "nein" }` |
-| R16 | Eine Datei ist ein Modul. `use name` lädt `name.dif` neben der Datei, `use std.x` die Standardbibliothek, `use c "x.h"` einen C-Header. `pub` macht sichtbar. | `use geo` · `use c "math.h" link "m"` |
-| R17 | Pointer gibt es nur in `unsafe { }` und in C-Deklarationen; dort gelten C-Regeln. Rückgaben aus C sind `?T`; Parameter an C sind nicht optional, außer eine `extern`-Deklaration erlaubt `?`. Pointer auf opake C-Typen sind Griffe; nennt der Import einen Freigeber (`release T with f`), werden sie gezählt und `f` läuft genau einmal. Strings an C gelten nur für die Dauer des Aufrufs, ein NUL-Byte darin bricht ab. Nicht genannte Felder eines C-structs sind 0. | `unsafe { *void p = malloc(64) }` · `?rk.window w = rk.view_window(v)` |
+| R16 | Eine Datei ist ein Modul. `use name` lädt `name.dif` neben der Datei, `use std.x` die Standardbibliothek, `use c "x.h"` einen C-Header; `as` gibt jedem Modul einen anderen Namen; zyklische `use` sind ein Fehler. `pub` vor Typen, Funktionen, Feldern und Methoden macht sie sichtbar. Funktionen ohne `self` gehören in ein Modul, nicht an einen Typ (`c.to_str(p)`, `chan.new[int](64)`). | `use geo` · `use rekta as ui` · `use c "math.h" link "m"` |
+| R17 | Pointer gibt es nur in `unsafe { }` und in C-Deklarationen; dort gelten C-Regeln, ein roher Pointer `*T` darf wie in C NULL sein (`p.is_null()`). Strings und Griffe, die C zurückgibt, sind `?T`; Parameter an C sind nicht optional, außer eine `extern`-Deklaration erlaubt `?`. Pointer auf opake C-Typen sind Griffe; nennt der Import einen Freigeber (`release T with f`), werden sie gezählt und `f` läuft genau einmal. Strings an C gelten nur für die Dauer des Aufrufs, ein NUL-Byte darin bricht ab. Nicht genannte Felder eines C-structs sind 0. | `unsafe { *void p = malloc(64) }` · `?rk.window w = rk.view_window(v)` |
 | R18 | Tests stehen neben dem Code: `test "name" { }`, geprüft mit `expect(cond)`. `dif test` führt sie aus, auch die Codebeispiele in `///`-Kommentaren. | `test "add" { expect(add(2, 3) == 5) }` |
 | R19 | *(nach v0)* `spawn f(args)` startet `f` parallel und liefert `task[T]`; `t.wait()` holt das Ergebnis. Argumente gehen ohne `mut` hinein. Ein Task lebt nur in der Funktion, die ihn gestartet hat: verlässt sie ihren Rumpf, werden ihre noch laufenden Tasks erst abgebrochen, dann abgewartet. Ein Abbruch im Task kommt beim Warten an. Nach `t.cancel()` kehrt jeder blockierende std-Aufruf im Task mit Fehler zurück. `main` läuft immer im Hauptthread des Betriebssystems, Tasks nie. | `task[int] a = spawn fib(40)` · `a.wait()` |
-| R20 | *(nach v0)* Tasks tauschen Werte nur über Kanäle aus: `chan[T]`, `ch.send(v)`, `for T x in ch` (endet nach `ch.close()`). Ein Kanal ist ein Griff: Kopien zeigen auf denselben Kanal. Gesendete Werte gehören danach dem Empfänger. | `chan[int] ch = chan[int](64)` |
+| R20 | *(nach v0)* Tasks tauschen Werte nur über Kanäle aus: `chan[T]`, `ch.send(v)`, `for T x in ch` (endet nach `ch.close()`). Ein Kanal ist ein Griff: Kopien zeigen auf denselben Kanal. Gesendete Werte gehören danach dem Empfänger. Griffe zählen atomar; ein C-Griff darf nur in einen Task, wenn sein Import `send T` sagt. | `chan[int] ch = chan.new[int](64)` |
 | R21 | *(nach v0)* `parallel for T x in xs { … yield v }` verteilt die Durchläufe auf alle Kerne und liefert die `yield`-Werte als Liste in Eingabereihenfolge. Der Rumpf liest Variablen von außen nur. | `[]int sq = parallel for int x in xs { yield x * x }` |
 | R22 | *(nach v0)* `share(x)` friert einen Wert ein und liefert `shared[T]`: nur lesbar, und ohne Kopie an beliebig viele Tasks übergebbar. Ändern heißt, eine neue Version zu bauen und erneut zu teilen. | `shared[Layout] snap = share(layout)` |
-| R23 | `defer f()` läuft, wenn der umgebende Block endet, auf jedem Weg hinaus (Ende, `return`, `try`, `break`). Mehrere `defer` laufen in umgekehrter Reihenfolge. | `defer rk.ui_close()` |
+| R23 | `defer X` führt X am Ende des umgebenden Blocks aus, als stünde es dort, auf jedem Weg hinaus (Ende, `return`, `try`, `break`); Argumente werden erst dann ausgewertet. Mehrere `defer` laufen in umgekehrter Reihenfolge. Ein Ergebnis vom Typ `T!E` braucht `_ =`. Ein Abbruch (R14) beendet das Programm ohne `defer`. | `defer rk.ui_close()` · `defer _ = f.close()` |
 | R24 | Erwartet C ein Paar aus Funktion und `void *user`, übergibt man eine dif-Funktion und, wenn sie Zustand braucht, eine Variable; die Funktion bekommt die Variable als ersten Parameter, mit `mut`, wenn sie sie ändert (R6). Keine Funktion: `none`. Der Kontext gilt, solange der Aufruf läuft, in den die Variable mit `mut` hineinging; ein Callback außerhalb dieses Aufrufs oder aus einem anderen Thread bricht mit Meldung ab. | `rk.app_main(rk.app_desc{…, launch: launch, user: mut app})` |
 | R25 | Parameter mit Default stehen hinten und werden beim Aufruf beim Namen genannt (`name: wert`), alle anderen der Reihe nach. | `ui.tile("0.3", label: "notes")` |
 | R26 | Ein Funktionswert hat den Typ `R(T1, T2)` und wird geschrieben wie eine Funktion ohne Namen: `R(T1 a, T2 b) { … }`. Ein Literal steht nur direkt als Argument eines Aufrufs (nie in einer Variable, einem struct, einer Liste, in `spawn` oder als Typargument) und lebt nur während dieses Aufrufs: es darf ringsum lesen und ändern. Ein Literal ohne Parameter darf als Block `{ … }` direkt hinter der schließenden Klammer stehen; `return` und `try` darin beenden den Block. Benannte Funktionen und Varianten-Konstruktoren haben keine Umgebung und sind gewöhnliche Werte, die man speichern darf. Ändert ein Funktionswert einen Parameter, steht `mut` in seinem Typ. | `people.filter(bool(Person p) { return p.age >= 18 })` · `db.transaction() { … }` · `on_change: Msg.Draft` · `void(mut A, M) update` |
-| R27 | Typparameter stehen in eckigen Klammern hinter dem Namen und werden beim Aufruf meist abgeleitet; jede Instanz wird eigener Code. | `[]B map[A, B]([]A xs, B(A) f)` · `struct Pair[A, B]` |
+| R27 | Typparameter stehen in eckigen Klammern hinter dem Namen und werden beim Aufruf meist abgeleitet; jede Instanz wird eigener Code. Eine Einschränkung steht vor dem Typparameter wie ein Typ vor dem Namen: `equal`, `ordered`, `hashable`, `text`. | `[]B convert[A, B]([]A xs, B(A) f)` · `T max[ordered T](T a, T b)` · `struct Pair[A, B]` |
+| R28 | Jeder Typ ohne Funktionswert-Felder ist `equal` (`==`) und `text` (Ausgabe, `"{x}"`); `ordered` (`<`) sind Zahlen und `str`; `hashable` ist alles, was `equal` ist. Griffe vergleichen ihre Identität, Maps sind gleich, wenn ihre Einträge gleich sind. | `Point{x: 1, y: 2} == Point{x: 1, y: 2}` · `map[Point]str` |
+| R29 | Zahlen: Ganzzahl-`/` rundet Richtung 0, `%` hat das Vorzeichen des Dividenden; Floats folgen IEEE 754 (`inf`, `NaN`, `NaN == NaN` ist false); Ganzzahl-Division durch 0, `INT_MIN / -1` und Shifts ab der Bitbreite brechen ab. Ausdrücke und Argumente werden von links nach rechts ausgewertet. | `-7 / 2` ist `-3` · `-7 % 3` ist `-1` · `1.0 / 0.0` ist `inf` |
+| R30 | `map[K]V` schreibt man `{k: v, …}`; `m[k]` liefert `?V`, `m[k] = v` setzt, die Reihenfolge ist die der Einfügung. | `counts[w] = (counts[w] ?? 0) + 1` |
+| R31 | Ein Wert vom Typ `T` passt dort, wo `?T` oder `T!E` erwartet wird; `ok` und `some` gibt es nur in Mustern. Ein `str` passt dort, wo C `c.str` erwartet, eine benannte Funktion an einen C-Funktionszeiger. Sonst wird nie umgewandelt (R8). | `return n` in `int!AgeErr` · `expect(parse(s) == tasks)` |
 
 ### 3.3 Sonderfälle, die wir aufgelöst haben
 
@@ -193,7 +197,9 @@ void main() {
 - Anweisungen enden am Zeilenende, keine Semikolons. `{}` ist immer Pflicht, Klammern um Bedingungen nicht (`if (x > 0)` kompiliert trotzdem, `dif fmt` entfernt sie).
 - Explizites `return`. Kein Top-Level-Code: ein Programm besteht aus Deklarationen und `void main()`.
 - Kommentare nur `//`, Doku-Kommentare `///` (werden von `dif doc` gelesen und als Doc-Tests ausgeführt).
-- Präzedenz wie C, mit drei Korrekturen: Bit-Operatoren binden stärker als Vergleiche (C-Falle `x & 1 == 0`), `a < b < c` ist ein Fehler, `&&` und `||` gemischt nur mit Klammern.
+- Präzedenz wie C, mit drei Korrekturen: Bit-Operatoren binden stärker als Vergleiche (C-Falle `x & 1 == 0`), `a < b < c` ist ein Fehler, `&&` und `||` gemischt nur mit Klammern. `try` bindet wie ein Vorzeichen (`try a + try b`), `or` gehört zum `try` davor, `??` bindet am schwächsten.
+- Eine Anweisung läuft in der nächsten Zeile weiter, wenn die Zeile mit einem Operator, `(`, `[` oder `,` endet oder die nächste mit `.` beginnt. `\{` schreibt eine wörtliche Klammer in einen String.
+- In Typen bindet `!E` am schwächsten: `[]Task!FileErr` ist eine Liste oder ein Fehler; `?[]T` ist eine optionale Liste, `[]?T` eine Liste von Optionalen.
 - Kein `++`/`--`: `x += 1`. Wrapping-Arithmetik bewusst mit `+%`, `-%`, `*%`.
 
 ### 4.2 Typen
@@ -428,7 +434,7 @@ ok   math.dif:3  doc-test add
 | `dif test [pfad] [filter] [--json]` | jeder Test in eigenem Kindprozess: Panics, Segfaults in C-Code und Timeouts treffen nur diesen Test; parallel per Default (keine veränderlichen Globalen → nichts geteilt) |
 | `dif test --coverage` | nicht getestete Zeilen und Zweige, auf `.dif`-Zeilen abgebildet (gcov über `#line`) |
 | `dif test --sanitize` | AddressSanitizer + UBSan, wichtig für C- und `unsafe`-Code, Fundstellen als `.dif`-Position |
-| Doc-Tests | ` ```dif `-Blöcke in `///`-Kommentaren und Markdown (`llms.txt`, `docs/`) laufen als Tests; ein Block mit `// error[R13]` erwartet genau diese Diagnose. Doku kann nicht veralten |
+| Doc-Tests | Codeblöcke in `///`-Kommentaren und Markdown (`llms.txt`, `docs/`) laufen als Tests, in drei Arten: ` ```dif ` ist ein ganzes Modul, ` ```dif snippet ` wird in `void main()` eingebettet, ` ```dif error R13 ` erwartet genau diese Diagnose. Doku kann nicht veralten |
 
 Nach v0: Benchmarks (`bench "push" { }`, `dif bench`), Property-Tests/Fuzzing.
 
@@ -445,7 +451,7 @@ use c "SDL3/SDL.h" link pkg "sdl3" as sdl             // Flags über pkg-config
 
 void main() {
     print("cbrt(27) = {math.cbrt(27)}")
-    str v = str.from_c(sqlite3.libversion()) ?? "?"    // c.str → str: kopiert + UTF-8-Prüfung
+    str v = c.to_str(sqlite3.libversion()) ?? "?"    // c.str → str: kopiert + UTF-8-Prüfung
     print("SQLite {v}")
 }
 ```
@@ -457,9 +463,9 @@ So funktioniert es: `dif` lässt eine Probe-Datei mit `#include <sqlite3.h>` dur
 | `int32_t`, `uint8_t`, `double`, `_Bool` … | `i32`, `u8`, `f64`, `bool` |
 | `int`, `long`, `size_t` … | `c.int`, `c.long`, `c.size` |
 | `const char*` als Parameter | `?c.str`: man übergibt einfach `str` (oder `none` für `NULL`); dif-Strings sind intern NUL-terminiert, der Pointer gilt, solange der String lebt; ein C-struct hält die dif-Werte in seinen Feldern selbst am Leben |
-| `const char*` als Rückgabe | `?c.str`, lesbar über `str.from_c(p) -> ?str` |
+| `const char*` als Rückgabe | `?c.str`, lesbar über `c.to_str(p) -> ?str` |
 | Pointer auf opakes `struct S` (`rk_view*`) | Griff `?S`; ein Callback-Parameter vom Typ `S` wird beim Aufruf auf `NULL` geprüft (Abbruch wie bei `T(x)`) |
-| andere Pointer `T*` | `?*T`, nur in `unsafe` |
+| andere Pointer `T*` | `*T`, nur in `unsafe`, darf wie in C NULL sein (`p.is_null()`) |
 | `struct S { … }` | struct mit Feldern; nicht genannte Felder im Literal sind 0, `c.sizeof(S)` gibt die Größe |
 | Paar aus Funktionspointer und `void *user` | dif-Funktion plus Kontext-Variable (R24) |
 | `enum`, `#define N 42` | Konstanten |
@@ -605,7 +611,7 @@ void main() {
     print("Wörter: {a.wait() + b.wait()}")
 
     // 2. Kanal: Producer/Consumer
-    chan[int] squares = chan[int](64)
+    chan[int] squares = chan.new[int](64)
     spawn produce(10, squares)
     for int sq in squares {                // endet, wenn produce den Kanal schließt
         print(sq)
@@ -630,7 +636,7 @@ void main() {
 }   // verlässt main den Rumpf, werden noch laufende Tasks abgebrochen und abgewartet
 
 test "producer" {
-    chan[int] ch = chan[int](1)
+    chan[int] ch = chan.new[int](1)
     spawn produce(3, ch)
     []int got = []
     for int x in ch {
@@ -680,7 +686,7 @@ str!net.Err fetch(int tab, str url, chan[Msg] inbox) {
 
 void main() {
     Browser b = Browser{}
-    chan[Msg] inbox = chan[Msg](256)
+    chan[Msg] inbox = chan.new[Msg](256)
     spawn time.every(time.ms(16), inbox, Msg.Tick)
     task[str!net.Err] load = spawn fetch(1, "https://example.org", inbox)
     ui.watch_fd(inbox.fd())
@@ -962,7 +968,7 @@ void main() {
 test "laden und speichern" {
     []Task tasks = [Task{title: "Milch", done: true}, Task{title: "Steuer"}]
     expect(render(tasks) == "[x] Milch\n[ ] Steuer")
-    expect(parse(render(tasks)) == ok(tasks))
+    expect(parse(render(tasks)) == tasks)
     expect(parse("kaputt") == err(FileErr.BadLine(1)))
 }
 
@@ -987,7 +993,7 @@ test "leere Eingabe" {
 
 ### 4.12 Später
 
-Benchmarks in der Sprache (`bench "x" { }`), Export als `.so`/`.dll` (#1821).
+JSON typisiert (#1827): `json.decode[User](text)` und `json.encode(u)`, die Umwandlung leitet der Compiler für structs, enums, Listen, Maps und `?T` ab; fehlende Pflichtfelder und falsche Typen werden Fehlerwerte (`json.Err.Missing("User.name")`). Dazu Benchmarks in der Sprache (`bench "x" { }`) und Export als `.so`/`.dll` (#1821).
 
 ---
 
@@ -1189,6 +1195,8 @@ test "abschluss und befehle" {
         └──────────────── dif check (ohne C-Compiler-Lauf, Ziel < 100 ms / 10k Zeilen) ─┘
 ```
 
+Ausgabe in v0: **ein C-File pro Programm** (Unity-Build). cc optimiert über alles, jede Generic-Instanz entsteht genau einmal, es gibt keine erzeugten Header. Erst wenn `dif run` das Kriterium aus §6.2 reißt (> 500 ms bei typischen Programmen), kommt ein C-File pro Modul mit Cache.
+
 ### 6.2 Backend: C11 an den System-C-Compiler (ADR `adr-difficulty-001-c-backend`, akzeptiert)
 
 | | LLVM | Cranelift | QBE | **C11 → gcc/clang** |
@@ -1362,21 +1370,25 @@ Makros · Klassen, Vererbung, Objekte · Exceptions · Operator-Überladung (v0)
 | `dif run hello.dif` (gcc) | < 300 ms |
 | Compiler-Binary `dif` | ≤ 5 MB |
 | `llms.txt` | ≤ 16 KB |
+| Alltags-Benchmark (Listen, Strings, Maps: Wortzählung über 10 MB Text) | ≤ 2× C, ≤ ½ Python |
 | Agenten-pass@1 im Aufgabenkatalog | ≥ Ease, Ziel ≥ Python |
 
-**Meilensteine**
+**Versionen und Meilensteine** (Entscheidung nach Review: Kern zuerst)
 
-| | Inhalt | Epics |
-|---|---|---|
-| M0 Spec | Spezifikation, ADRs akzeptiert | #1807 |
-| M1 „Hallo, nativ“ | `int`, `bool`, Funktionen, `if`/`while`/`for`, `struct`, `print` → hello und fib als native Binaries, Größe und Laufzeit gemessen | #1808, #1809 (Teil), #1810 |
-| M2 „Kino“ | `enum`, `switch`, Listen, `str`, `T!E`, `test`, `io.lines` → `kino.dif` aus §5 läuft, Tests grün | #1811, #1812, #1814 (io, str) |
-| M3 „Ausdruck“ | benannte Parameter, Funktionswerte und Blöcke, Generics → `filter`/`map`/`sort_by` in std, Builder-Beispiele aus §4.10 laufen | #1817 |
-| M4 „C-Nachbar“ | `extern`, Linken, Laufzeit-Laden, C-Quellen, `use c`, `bindgen`, Callbacks mit Kontext, `defer` | #1813, #1819 |
-| M5 „Werkzeugkasten“ | fmt, `--json`, fix, doc, llms; Coverage, Sanitizer, Doc-Tests; Rest der std; Highlighting für Vim/Neovim und Emacs | #1815, #1820, #1814, #1824 |
-| M6 „UI“ | rekta-Modul: `hello` aus §4.11 läuft | #1822 |
-| M7 „Messen“ | Agenten-Experiment, Benchmarks gegen Ease, C, Python | #1816 |
-| danach | Export als `.so`/`.dll`, Nebenläufigkeit, Benchmarks in der Sprache | #1821, #1818 |
+| Version | Meilenstein | Inhalt | Epics |
+|---|---|---|---|
+| v0 | M0 Spec | Spezifikation entlang R1–R31, ADRs akzeptiert | #1807 |
+| v0 | M1 „Hallo, nativ“ | `int`, `bool`, Funktionen, `if`/`while`/`for`, `struct`, `print` → hello und fib als native Binaries, Größe und Laufzeit gemessen | #1808, #1809 (Teil), #1810 |
+| v0 | M2 „Kino“ | `enum`, `switch`, Listen, Maps, `str`, `T!E`, `test`, `io.lines`; die std-Methoden (`count`, `split`, `filter` …) liefert der Compiler eingebaut, bevor es eigene Generics gibt → `kino.dif` aus §5 läuft, Tests grün; **erste Agenten-Messung** | #1811, #1812, #1814 (Kern), #1816 |
+| v0 | M3 „Ausdruck“ | benannte Parameter, Funktionswerte und Blöcke, eigene Generics → Aufgabenliste aus §4.11 ohne UI läuft | #1817 |
+| v0 | M4 „Werkzeug-Kern“ | `extern` und Linken, `defer`, `dif check --json`, `fmt`, `fix` | #1813 (Teil), #1815 (Teil) |
+| v0.1 | M5 „C-Nachbar“ | `use c`, `bindgen`, Laufzeit-Laden, C-Quellen, Callbacks mit Kontext | #1813 (Rest), #1819 |
+| v0.2 | M6 „Werkzeugkasten“ | Coverage, Sanitizer, Doc-Tests, Prozess-Isolation, `doc`, `llms`, `explain` | #1820, #1815 (Rest) |
+| v0.3 | M7 „UI“ | rekta-Modul, Editoren, `--lang de` | #1822, #1824, #1815 (Rest) |
+| v0.4 | – | Export als `.so`/`.dll`, JSON | #1821, #1827 |
+| v1.x | – | Nebenläufigkeit, Benchmarks in der Sprache | #1818 |
+
+**Agenten-Messung** (ab M2, bei jedem Meilenstein, #1816): Katalog aus Kino, Wortzählung, Zustandsautomat, Textparser, Datei mit Fehlern, ab v0.1 eine C-Bibliothek. Gemessen werden pass@1 (erster Versuch kompiliert und Tests grün, ohne Hilfe), pass@5 (mit `dif check`/`dif test`-Schleife, höchstens 5 Runden), Runden bis grün, Tokens und Regelverstöße je Regel. Verglichen wird mit denselben Aufgaben in Ease und Python. Modelle: Claude Opus, Sonnet, Haiku und ein lokales Modell (Ollama); Kontext nur `llms.txt` und die Aufgabe. Häufige Regelverstöße führen zu besseren Diagnosen oder zu einer Regeländerung.
 
 **Epics und Reihenfolge**
 
@@ -1431,11 +1443,20 @@ Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate)
 | Callbacks mit Zustand | Kontext-Variable, gebunden an den laufenden Aufruf, in den sie mit `mut` ging; Callbacks außerhalb oder aus fremden Threads brechen ab (R24; nach Review geändert, früher main-Lebensdauer) |
 | Fehler mischen | `try x or E.V(…)` übersetzt, kein Sammeltyp `error` (R12) |
 | Zahl-Literale | passen sich ihrer Stelle an, auch Ausdrücke nur aus Literalen (`f64 h = 7 / 2` ist 3.5) (R8) |
-| Aufräumen | `defer` (R23) |
+| Aufräumen | `defer X`: Code wandert ans Blockende, Argumente werden dann ausgewertet; `T!E` braucht `_ =`; kein `defer` bei Abbruch (R23, nach Review präzisiert) |
 | Optionen an Funktionen | benannte Parameter mit Default, beim Aufruf per Name (R25) |
 | Funktionswerte | Literal `bool(Person p) { … }`, nur während des Aufrufs gültig, darf ringsum lesen und ändern (R26); keine impliziten Parameter wie `it` |
 | Blöcke | Literal ohne Parameter als `{ … }` direkt hinter `)`: `ui.tiles() { … }`; Kopfzeile von `if`/`while`/`for`/`switch` endet am ersten `{` (R3, R26; nach Review präzisiert) |
-| Generics | vollständig in v0 (#1817): Typparameter `[A, B]`, Funktionstypen `R(T)`; Einschränkungs-Syntax entscheidet #1817 (R27) |
+| Generics | vollständig in v0 (#1817): Typparameter `[A, B]`, Funktionstypen `R(T)`, Einschränkung vor dem Parameter `[ordered T]` (R27); Fähigkeiten automatisch nach fester Regel (R28) |
+| v0-Umfang | Kern zuerst: v0 = M0–M4, danach v0.1 C-Import, v0.2 Test-Werkzeuge, v0.3 UI/Editoren, v0.4 Export/JSON, v1.x Nebenläufigkeit (§10, nach Review) |
+| Agenten-Messung | ab M2 bei jedem Meilenstein, festes Protokoll (§10, nach Review) |
+| Literale | Ausdrücke nur aus Literalen rechnen im Typ ihrer Stelle, ohne Stelle `int`/`f64` (R8, nach Review präzisiert) |
+| Zahlen | C-Semantik streng: `/` Richtung 0, `%` mit Vorzeichen des Dividenden, IEEE-Floats, Abbruch bei int/0 und zu weiten Shifts, links nach rechts (R29) |
+| Maps | `m[k]` liefert `?V`, Literal `{k: v}`, Schleifen `for K k, V v in m` und `for int i, T x in xs` (R11, R30) |
+| JSON | typisiert, nach v0 (#1827) |
+| C-Ausgabe | ein C-File pro Programm in v0 (§6.1) |
+| Griffe in Tasks | atomar gezählt; C-Griffe nur mit `send T` beim Import (R20) |
+| `mut` | nimmt Orte (Variable, Feld, Element), Überlappung = Fehler bzw. Abbruch (R6) |
 | UI-Muster | Elm-Architektur: Nachrichten + `update(mut App, Msg)` + `view(App, ui.Builder)`; Builder als Parameter und Griff, kein globaler Zustand (nach Review) |
 | C-Sicherheit | sichere Standards: Parameter nicht optional, Strings nur für den Aufruf, Griffe mit Freigeber gezählt, NUL im String bricht ab (R17, nach Review) |
 | Tasks beim Verlassen | erst abbrechen, dann abwarten; `continue` im `switch` erlaubt, `break` nicht (R11, R19, nach Review) |
