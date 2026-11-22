@@ -12,6 +12,21 @@ use diag::Diag;
 /// types are checked only when the file has no lexical or syntax errors, so a
 /// broken statement causes no follow-up diagnostics.
 pub fn check_file(file: &str, src: &str) -> Vec<Diag> {
+    // Parser and checker recurse once per nesting level (bounded by S1/R4 limits);
+    // their own thread gives that depth room in debug builds and small-stack threads.
+    std::thread::scope(|s| {
+        std::thread::Builder::new()
+            .stack_size(STACK)
+            .spawn_scoped(s, || check_now(file, src))
+            .expect("cannot start the checker thread")
+            .join()
+            .unwrap_or_else(|e| std::panic::resume_unwind(e))
+    })
+}
+
+const STACK: usize = 256 << 20;
+
+fn check_now(file: &str, src: &str) -> Vec<Diag> {
     let (toks, mut diags) = lexer::lex(src);
     let (module, pdiags) = parser::parse(src, &toks, &diags);
     diags.extend(pdiags);

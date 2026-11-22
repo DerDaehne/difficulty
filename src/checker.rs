@@ -44,6 +44,9 @@ const LATER_TYPES: &[&str] = &[
 ];
 const BUILTINS: &[&str] = &["print", "range", "repeat", "expect", "assert"];
 
+/// Longest chain of global consts that use each other.
+const MAX_CONST_DEPTH: u32 = 256;
+
 pub fn check(file: &str, src: &str, m: &Module) -> Vec<Diag> {
     let mut c = Checker {
         file,
@@ -55,6 +58,8 @@ pub fn check(file: &str, src: &str, m: &Module) -> Vec<Diag> {
         func: None,
         loops: 0,
         unknown: Vec::new(),
+        const_depth: 0,
+        const_too_deep: false,
         diags: Vec::new(),
     };
     c.module();
@@ -120,6 +125,8 @@ struct Checker<'a> {
     loops: u32,
     /// Unknown names already reported: each once.
     unknown: Vec<String>,
+    const_depth: u32,
+    const_too_deep: bool,
     diags: Vec<Diag>,
 }
 
@@ -266,11 +273,24 @@ impl<'a> Checker<'a> {
                 self.consts.insert(key, ConstState::Busy);
                 None
             }
+            ConstState::Todo(d) if self.const_depth >= MAX_CONST_DEPTH => {
+                // each const checks the ones it uses first: a long chain is deep recursion
+                self.consts.insert(key, ConstState::Todo(d));
+                if !self.const_too_deep {
+                    self.const_too_deep = true;
+                    let msg =
+                        format!("`{key}` depends on more than {MAX_CONST_DEPTH} consts in a row");
+                    self.err("R4", d.pos, msg, Some("compute it in fewer steps".into()));
+                }
+                Some((Ty::Err, Val::Known))
+            }
             ConstState::Todo(d) => {
                 self.consts.insert(key, ConstState::Busy);
                 let scopes = std::mem::take(&mut self.scopes);
                 let ty = self.ty(&d.ty, false);
+                self.const_depth += 1;
                 let (t, v) = self.rvalue(&d.value);
+                self.const_depth -= 1;
                 self.scopes = scopes;
                 let mut v = v;
                 if t == Ty::Err {
@@ -884,7 +904,7 @@ impl<'a> Checker<'a> {
                 args.len()
             );
             self.err("R8", e.pos, msg, None);
-            return (ret, Val::Runtime);
+            return (Ty::Err, Val::Runtime);
         }
         for (a, p) in args.iter().zip(params) {
             let (t, _) = self.rvalue(a);

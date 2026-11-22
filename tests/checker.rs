@@ -223,6 +223,28 @@ fn ten_thousand_lines_are_fast() {
     assert!(src.lines().count() >= 10_000);
     let t = std::time::Instant::now();
     clean(&src);
-    // generous bound for debug builds; the release build is measured in the ticket
+    // generous bound for debug builds; the release build is much faster
     assert!(t.elapsed().as_millis() < 1000, "{:?}", t.elapsed());
+}
+
+#[test]
+fn long_chains_are_bounded() {
+    // a long chain is a deep tree: one diagnostic instead of a stack overflow
+    let sum = vec!["1"; 50_000].join(" + ");
+    let ds = check_source(&in_main(&format!("print({sum})")));
+    assert_eq!(ds.len(), 1, "{ds:?}");
+    assert!(ds[0].msg.contains("more than 1024 operators"));
+    clean(&in_main(&format!("print({})", vec!["1"; 1000].join(" + "))));
+    let mut consts: String = (0..20_000)
+        .map(|k| format!("const int A{k} = A{} + 1\n", k + 1))
+        .collect();
+    consts += "const int A20000 = 0\n";
+    let ds = check_source(&consts);
+    assert_eq!(ds.len(), 1, "{:?}", &ds[..ds.len().min(3)]);
+    assert_eq!(ds[0].code, "R4");
+    // a call with the wrong number of arguments is one mistake, not also R13
+    assert_eq!(
+        one("int f(int a) {\n    return a\n}\n\nvoid main() {\n    f(1, 2)\n}\n").0,
+        "R8"
+    );
 }

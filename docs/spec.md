@@ -37,7 +37,7 @@ Jede Meldung nennt Datei, Zeile und Spalte (beide ab 1; Spalten zählen Zeichen,
 - Lexikfehler werden immer gemeldet. Zerreißt einer den Token-Strom (`L1`, `L5`), entfällt der Syntaxfehler, den er in seiner Anweisung auslöst.
 - Fehlt eine `)` oder `]` und geht es in der nächsten Zeile weiter, steht die Meldung an der öffnenden Klammer.
 - Beginnt in einem Block eine Funktionsdeklaration (`T name(`), fehlt davor eine `}`: gemeldet wird einmal am innersten offenen Block, die Funktion wird normal gelesen.
-- Verschachtelung tiefer als 256 Ebenen (Blöcke und Ausdrücke) ist `S1`.
+- Verschachtelung tiefer als 256 Ebenen (Blöcke und Ausdrücke) ist `S1`, ebenso ein Ausdruck mit mehr als 1024 binären Operatoren und eine Kette von mehr als 256 globalen `const`, die einander verwenden (dort `R4`).
 
 ```
 fib.dif:6:5: error[R13]: result of `fib(3)` is never used
@@ -545,7 +545,7 @@ Teil 1 legt fest (alle für `int`, siehe R29):
 
 - Die Position ist die des Operators. Der Abbruch läuft ohne `defer` (R23) und endet mit Exit-Code 2.
 - `+% -% *%` rechnen bewusst modulo 2⁶⁴ und brechen nie ab.
-- Steht der Abbruch schon beim Kompilieren fest (nur Literale und `const`, z. B. `1 / 0`), meldet ihn der Compiler als `error[R14]`.
+- Steht der Abbruch schon beim Kompilieren fest (nur Literale und `const`, z. B. `1 / 0`, `1 << 64`), meldet ihn der Compiler als `error[R14]`. Ein Überlauf ist dort kein Abbruch: Konstanten rechnen exakt, und ein Ergebnis, das nicht in `int` passt (auch `INT_MIN / -1`), ist `R8` (siehe R8).
 
 ```dif snippet
 int big = 9223372036854775807

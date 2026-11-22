@@ -14,6 +14,9 @@ use crate::lexer::{StrPart, Tok, Token};
 /// Deepest nesting of blocks and expressions; deeper input is S1, not a stack overflow.
 const MAX_DEPTH: u32 = 256;
 
+/// Most binary operators in one expression (a chain is a deep tree as well).
+const MAX_OPS: u32 = 1024;
+
 pub fn parse(src: &str, toks: &[Token], lex: &[Diag]) -> (Module, Vec<Diag>) {
     let breaks = lex
         .iter()
@@ -68,6 +71,9 @@ struct Parser<'a> {
     silent: u32,
     depth: u32,
     too_deep: bool,
+    /// Operators in the current top-level expression and its nesting level.
+    ops: u32,
+    expr_level: u32,
     unclosed: bool,
     /// Reserved words already reported as names; their uses are not reported again.
     reserved: Vec<&'static str>,
@@ -86,6 +92,8 @@ impl<'a> Parser<'a> {
             silent: 0,
             depth: 0,
             too_deep: false,
+            ops: 0,
+            expr_level: 0,
             unclosed: false,
             reserved: Vec::new(),
             out: Vec::new(),
@@ -1005,7 +1013,13 @@ impl<'a> Parser<'a> {
     // ---- expressions ----
 
     fn expr(&mut self) -> Expr {
-        self.binary(1)
+        self.expr_level += 1;
+        if self.expr_level == 1 {
+            self.ops = 0;
+        }
+        let e = self.binary(1);
+        self.expr_level -= 1;
+        e
     }
 
     fn binary(&mut self, min: u8) -> Expr {
@@ -1022,6 +1036,17 @@ impl<'a> Parser<'a> {
                 _ => break,
             };
             let opos = self.pos();
+            // a long chain is a deep tree for every later pass: bounded like nesting
+            self.ops += 1;
+            if self.ops > MAX_OPS {
+                if self.ops == MAX_OPS + 1 {
+                    let msg = format!("an expression has more than {MAX_OPS} operators");
+                    let hint = "split it into several variables".to_string();
+                    self.err("S1", opos, msg, Some(hint));
+                }
+                self.skip_operand();
+                break;
+            }
             self.bump();
             let rhs = self.binary(if op == "??" { lvl } else { lvl + 1 });
             if lvl == 4 && is_binary(&lhs, COMPARISONS) {
