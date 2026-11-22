@@ -151,7 +151,7 @@ Zwei einfache Bilder genügen: Ein Funktionsaufruf `f(x)` liest `x`, `f(mut x)` 
 - Ein neues Schlüsselwort kommt nur, wenn keine Bibliotheksfunktion reicht.
 - Regelnummern sind stabil, weil sie Fehlercodes sind; neue Regeln hängen hinten an.
 
-Schlüsselwörter (24): `const struct enum if else while for in break continue return switch case default try mut use pub test extern unsafe void self defer`, nach v0 dazu `spawn parallel yield`
+Schlüsselwörter (25): `const struct enum if else while for in break continue return switch case default try or mut use pub test extern unsafe void self defer`, nach v0 dazu `spawn parallel yield`. Genaue Einteilung (reservierte Literale, Kontextwörter, vordefinierte Namen): docs/spec.md §1.5
 Nur in `use c`/`extern`-Zeilen: `c link pkg source impl load as strip`
 Literale/Konstruktoren: `true false none some ok err` · eingebaute Funktionen: `print range repeat expect assert`
 

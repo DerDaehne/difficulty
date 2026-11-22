@@ -2,26 +2,52 @@
 
 Stand: 2026-11-22 · Version: v0, Teil 1 („Hallo, nativ“) · Begründungen und Fahrplan: [PLAN.md](../PLAN.md)
 
-Diese Spezifikation ist nach den Regeln R1–R31 gegliedert. Ausgearbeitet sind die Regeln, die der erste Schritt „Hallo, nativ“ braucht; die übrigen stehen mit ihrem Wortlaut da und werden mit den nächsten Schritten ausgearbeitet.
+Diese Spezifikation ist nach den Regeln R1–R31 gegliedert. Ausgearbeitet sind die Regeln, die der erste Schritt „Hallo, nativ“ braucht: R1, R2, R3, R4, R8, R9, R11, R13, R14 und R29. Alle übrigen stehen mit ihrem vollständigen Wortlaut da und werden mit den nächsten Schritten ausgearbeitet.
 
 ## 0. Wie diese Spezifikation zu lesen ist
 
 **Grammatik** steht in EBNF: `a b` Folge, `a | b` Auswahl, `[ a ]` optional, `{ a }` beliebig oft, `"x"` wörtlich, `NL` Zeilenende (siehe §1.3).
 
-**Fehlercodes.** Ein Verstoß gegen eine Regel trägt deren Nummer: `error[R13]`. Reine Schreibfehler, die keine Regel betreffen, tragen `L` (Lexik, §1) oder `S` (Grammatik, §2) mit einer Nummer. Jede Meldung nennt Datei, Zeile und Spalte, eine Ursache und, wo möglich, einen Hinweis, der den Fehler behebt. Meldungen sind englisch (`dif … --lang de` für Deutsch).
+### 0.1 Diagnosen
+
+Ein Verstoß gegen eine Regel trägt deren Nummer: `error[R13]`. Schreibfehler, die keine Regel betreffen, tragen `L` (Lexik) oder `S` (Grammatik):
+
+| Code | Bedeutung |
+|---|---|
+| `L1` | ungültiges UTF-8 oder ein Zeichen, das außerhalb von Strings und Kommentaren nicht vorkommen darf |
+| `L2` | Blockkommentar `/* … */` |
+| `L3` | `;` |
+| `L4` | Ganzzahl-Literal größer als 2⁶⁴ − 1 |
+| `L5` | String reicht über das Zeilenende |
+| `L6` | unbekannte Escape-Sequenz |
+| `L7` | `++` oder `--` |
+| `L8` | Ganzzahl-Literal mit führender Null (`010`) |
+| `S1` | unerwartetes Token |
+| `S2` | Vergleichskette `a < b < c` |
+| `S3` | `&&` und `\|\|` gemischt ohne Klammern |
+| `S4` | Ausdruck als Anweisung, der weder Aufruf noch Zuweisung ist |
+
+Jede Meldung nennt Datei, Zeile und Spalte (beide ab 1), eine Ursache und, wo möglich, einen Hinweis, der den Fehler behebt. Bei Operatoren zeigt die Position auf den Operator. Meldungen sind englisch (`--lang de` für Deutsch).
+
+**Eine Ursache, eine Meldung.** Erkennt der Compiler eine Schreibweise aus einer anderen Sprache als Ganzes (C-Schleife `for (…;…;…)`, `var x = …`, `elif`, `function f(…)`), meldet er nur die Regel, deren Schreibweise sie ersetzt, mit dem passenden Hinweis; die Zeichen darin (etwa `;`) erzeugen keine weitere Meldung. Sonst wird der erste Fehler einer Anweisung gemeldet und der Rest der Anweisung übersprungen.
 
 ```
-fib.dif:4:5: error[R13]: result of `fib(n - 1)` is never used
-  hint: use it, or discard it explicitly with `_ =`
+fib.dif:6:5: error[R13]: result of `fib(3)` is never used
+  hint: use it, or discard it explicitly with `_ = fib(3)`
 ```
 
-**Beispiele** gibt es in drei Arten, die `dif test` als Doc-Tests ausführt:
+### 0.2 Beispiele
+
+Beispiele gibt es in vier Arten, die `dif test` als Doc-Tests ausführt:
 
 - ` ```dif ` — ein vollständiges, gültiges Modul.
-- ` ```dif snippet ` — Anweisungen, die in `void main()` eingebettet werden.
-- ` ```dif error R4 ` — ein Modul, das genau diese Diagnose liefern muss.
+- ` ```dif snippet ` — Anweisungen, die in `void main() { … }` eingebettet werden: Zeile 1 des Ausschnitts ist Zeile 2 der Datei, um 4 Leerzeichen eingerückt. Positionen in Meldungen beziehen sich auf die Datei `main.dif`.
+- ` ```dif error R4 ` — ein Modul, das genau diese Diagnose liefern muss (und keine andere).
+- ` ```dif panic "message" ` — ein Ausschnitt wie bei `snippet`, der mit genau dieser Meldung abbrechen muss.
 
-**Abbruch (Panic).** Programmierfehler (R14) beenden das Programm sofort mit
+### 0.3 Abbruch
+
+Programmierfehler (R14) beenden das Programm sofort mit
 
 ```
 panic: <message> (<file>:<line>:<column>)
@@ -35,15 +61,16 @@ auf stderr und Exit-Code 2. Ein Fehler, der aus `void!E main()` herauskommt, end
 
 ### 1.1 Zeichen
 
-Quelltext ist UTF-8. Ungültiges UTF-8 ist `L1`. Nicht-ASCII-Zeichen sind nur in Strings und Kommentaren erlaubt.
+Quelltext ist UTF-8. Ungültiges UTF-8 ist `L1`. Nicht-ASCII-Zeichen sind nur in Strings und Kommentaren erlaubt, sonst `L1`.
 
 ```ebnf
 letter  = "a" … "z" | "A" … "Z" | "_" ;
 digit   = "0" … "9" ;
+hexdigit = digit | "a" … "f" | "A" … "F" ;
 IDENT   = letter { letter | digit } ;
 ```
 
-Ein Bezeichner, der ein Schlüsselwort ist, ist kein `IDENT`. `_` allein ist der Platzhalter „verwerfen“ (`_ = f()`), kein Name.
+Ein Bezeichner, der ein Schlüsselwort oder ein reserviertes Wort ist (§1.5), ist kein `IDENT`. `_` allein ist der Platzhalter „verwerfen“ (`_ = f()`), kein Name.
 
 ### 1.2 Kommentare
 
@@ -57,46 +84,53 @@ Eine Anweisung endet am Zeilenende (R3). Der Lexer erzeugt dafür ein Token `NL`
 2. die Zeile endet mit einem binären Operator, mit `=` oder einem Zuweisungsoperator, oder mit `,`;
 3. die nächste Zeile beginnt (nach Leerraum) mit `.`.
 
-Leere Zeilen und Zeilen nur mit Kommentar erzeugen kein `NL`. Mehrere Anweisungen in einer Zeile gibt es nicht (`S1`); `;` ist `L3` mit Hinweis `statements end at the end of the line`.
+Leere Zeilen und Zeilen nur mit Kommentar erzeugen kein `NL`; mehrere `NL` hintereinander gelten wie eines. Zwei Anweisungen in einer Zeile sind `R3`. `;` ist `L3`, Hinweis `statements end at the end of the line`.
 
 ### 1.4 Literale
 
 ```ebnf
-INT     = dec | "0x" hexdigit { hexdigit | "_" } | "0b" ("0" | "1") { "0" | "1" | "_" } ;
-dec     = digit { digit | "_" } ;
-FLOAT   = dec "." dec [ exponent ] | dec exponent ;
-exponent = ( "e" | "E" ) [ "+" | "-" ] dec ;
-STRING  = '"' { char | escape | interp } '"' ;
-escape  = "\" ( "n" | "t" | "r" | "\" | '"' | "{" | "}" | "0" ) | "\u{" hexdigit { hexdigit } "}" ;
-interp  = "{" expr [ ":" format ] "}" ;
+INT      = dec | "0x" hexdigit { hexdigit | "_" } | "0b" ( "0" | "1" ) { "0" | "1" | "_" } ;
+dec      = "0" | ( "1" … "9" ) { digit | "_" } ;
+FLOAT    = digit { digit | "_" } "." digit { digit | "_" } [ exponent ] | dec exponent ;
+exponent = ( "e" | "E" ) [ "+" | "-" ] digit { digit } ;
+STRING   = '"' { char | escape | interp } '"' ;
+char     = (* jedes Zeichen außer '"', "\", "{", "}" und dem Zeilenende *) ;
+escape   = "\" ( "n" | "t" | "r" | "\" | '"' | "{" | "}" | "0" ) | "\u{" hexdigit { hexdigit } "}" ;
+interp   = "{" expr [ ":" format ] "}" ;
 ```
 
-- `_` in Zahlen dient nur der Lesbarkeit: `1_000_000`. Ein Literal, das in keinen Ganzzahltyp passt, ist `L4`.
-- Ein String reicht nicht über das Zeilenende hinaus (`L5`). Eine unbekannte Escape-Sequenz ist `L6`. `\{` und `\}` schreiben eine wörtliche Klammer.
+- `_` in Zahlen dient nur der Lesbarkeit: `1_000_000`. Ein Ganzzahl-Literal größer als 2⁶⁴ − 1 ist `L4`; ob ein kleineres an seiner Stelle passt, prüft R8.
+- Eine Ganzzahl mit führender Null (`010`) ist `L8`, Hinweis `write 10; octal literals do not exist`. `0` allein und `0.5` sind erlaubt.
+- Ein String reicht nicht über das Zeilenende hinaus (`L5`). Eine unbekannte Escape-Sequenz ist `L6`. `\{` und `\}` schreiben eine wörtliche Klammer; ein einzelnes `}` ohne `\` ist `L6`.
 - `{expr}` setzt den Wert von `expr` als Text ein; `expr` muss `text` sein (R28). Formatangaben `{x:.2f}` werden in Teil 2 festgelegt.
-- `true` und `false` sind die Werte von `bool`.
 
-### 1.5 Schlüsselwörter
+### 1.5 Wörter
+
+**Schlüsselwörter** (25), nie als Namen nutzbar:
 
 ```
 const struct enum if else while for in break continue return switch case default
-try mut use pub test extern unsafe void self defer
+try or mut use pub test extern unsafe void self defer
 ```
 
-Nach v0 kommen `spawn parallel yield` dazu; sie sind schon jetzt reserviert. Nur in `use c`- und `extern`-Zeilen haben `c link pkg source impl load as strip release with send` eine Bedeutung. Literale und Formen: `true false none some ok err`. Eingebaute Funktionen: `print range repeat expect assert`.
+**Reserviert für nach v0:** `spawn parallel yield`.
 
-Typnamen (`int`, `bool`, `str`, …) sind keine Schlüsselwörter, sondern vordefinierte Namen, die man nicht neu deklarieren darf (R4).
+**Reservierte Literale und Formen**, nie als Namen nutzbar: `true false` (Werte von `bool`), `none some ok err` (Formen von `?T` und `T!E`, R10).
+
+**Kontextwörter** haben nur an einer Stelle eine Bedeutung und sind sonst gewöhnliche Namen: `as` in `use`-Zeilen; `c link pkg source impl load strip release with send` in `use c`- und `extern`-Zeilen; `panics` im Kopf eines `test`.
+
+**Vordefinierte Namen** sind keine Schlüsselwörter, dürfen aber nicht neu deklariert werden (R4): die Typen `int i8 i16 i32 u8 u16 u32 u64 f32 f64 bool str rune` und die eingebauten Funktionen `print range repeat expect assert`.
 
 ### 1.6 Operatoren und Satzzeichen
 
 ```
-+  -  *  /  %  +%  -%  *%  &  |  ^  ~  <<  >>
-== != <  <= >  >=  &&  ||  !  ??
-=  += -= *= /= %=
-(  )  [  ]  {  }  ,  .  :  ;(nur als Fehler L3)
++   -   *   /   %   +%  -%  *%  &   |   ^   ~   <<  >>
+==  !=  <   <=  >   >=  &&  ||  !   ??
+=   +=  -=  *=  /=  %=  &=  |=  ^=  <<= >>=
+(   )   [   ]   {   }   ,   .   :
 ```
 
-`++` und `--` gibt es nicht: `L7`, Hinweis `use x += 1`.
+`;` (`L3`), `++` und `--` (`L7`, Hinweis `use x += 1`) gibt es nicht.
 
 ---
 
@@ -125,7 +159,7 @@ Drei Korrekturen gegenüber C, jeweils ein Fehler mit Hinweis statt stiller Bede
 - **Keine Vergleichsketten:** `a < b < c` ist `S2`, Hinweis `write a < b && b < c`.
 - **`&&` und `||` nie gemischt ohne Klammern:** `a && b || c` ist `S3`, Hinweis `add parentheses: (a && b) || c`.
 
-`or` gehört zu `try` (`try x or E.V(…)`, Teil 2). Klammern um einen Ausdruck sind immer erlaubt; `dif fmt` entfernt sie um Bedingungen.
+`or` gehört zu einem vorangehenden `try` (`try x or E.V(…)`, Teil 2). Klammern um einen Ausdruck sind immer erlaubt; `dif fmt` entfernt sie um Bedingungen.
 
 ```ebnf
 expr     = binary ;
@@ -147,11 +181,11 @@ Ausdrücke und Argumente werden **von links nach rechts** ausgewertet (R29).
 **Regel.** Ein Programm besteht nur aus Deklarationen: `const`, `struct`, `enum`, Funktionen, `test`, `use`, `extern`. Es startet in `void main()` oder `void!E main()`.
 
 ```ebnf
-module   = { NL } { decl { NL } } ;
+module   = { NL } [ decl { NL { NL } decl } { NL } ] ;
 decl     = const_decl | func_decl ;         (* Teil 1; struct, enum, test, use, extern folgen *)
 ```
 
-- Eine Anweisung auf oberster Ebene ist `R1`, Hinweis `move it into a function, e.g. void main()`.
+- Eine Anweisung auf oberster Ebene ist `R1`, Hinweis `move it into a function, e.g. void main() { … }`.
 - Ein ausführbares Programm hat genau eine Funktion `void main()` ohne Parameter; fehlt sie, ist das `R1` (bei `dif run`/`dif build`, nicht bei `dif check` einer Bibliothek).
 - Die Reihenfolge der Deklarationen spielt keine Rolle: eine Funktion darf eine weiter unten deklarierte aufrufen.
 
@@ -166,7 +200,7 @@ print("Hallo")
 ```
 
 ```
-hello.dif:1:1: error[R1]: statement outside a function
+main.dif:1:1: error[R1]: statement outside a function
   hint: move it into a function, e.g. void main() { … }
 ```
 
@@ -215,23 +249,25 @@ main.dif:2:5: error[R2]: declarations name their type
 **Regel.** Anweisungen enden am Zeilenende. Blöcke stehen in `{}`, Bedingungen ohne Klammern. Die Kopfzeile von `if`, `while`, `for` und `switch` endet am ersten `{`.
 
 ```ebnf
-block      = "{" { NL } [ stmt { NL { NL } stmt } { NL } ] "}" ;
-stmt       = var_decl | assign | if_stmt | while_stmt | for_stmt
-           | "break" | "continue" | return_stmt | call_stmt | discard ;
-if_stmt    = "if" expr block { "else" "if" expr block } [ "else" block ] ;
-assign     = place assign_op expr ;
-assign_op  = "=" | "+=" | "-=" | "*=" | "/=" | "%=" ;
-place      = IDENT { "." IDENT | "[" expr "]" } ;
+block       = "{" { NL } [ stmt { NL { NL } stmt } { NL } ] "}" ;
+stmt        = var_decl | assign | if_stmt | while_stmt | for_stmt
+            | "break" | "continue" | return_stmt | call_stmt | discard ;
+if_stmt     = "if" expr block { "else" "if" expr block } [ "else" block ] ;
+assign      = place assign_op expr ;
+assign_op   = "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
+place       = IDENT { "." IDENT | "[" expr "]" } ;
 return_stmt = "return" [ expr ] ;
-call_stmt  = postfix ;                      (* muss ein Aufruf sein *)
-discard    = "_" "=" expr ;
+call_stmt   = postfix ;                      (* muss mit einem Aufruf enden *)
+discard     = "_" "=" expr ;
 ```
 
-- Jeder Block steht in `{ }`, auch bei einer einzigen Anweisung. `if x > 0 print(x)` ist `S1`.
+- Jeder Block steht in `{ }`, auch bei einer einzigen Anweisung: `if x > 0 print(x)` ist `R3`, Hinweis `put the body in braces: if x > 0 { … }`.
+- Das `{` eines Blocks steht in derselben Zeile wie seine Kopfzeile; `}` und `else` stehen in einer Zeile (`} else {`).
+- Zwei Anweisungen in einer Zeile sind `R3`, Hinweis `put each statement on its own line`.
 - Die Kopfzeile endet am ersten `{` auf Klammerebene 0. Darum ist `if hall.is_full() { … }` immer eine Bedingung mit Rumpf, nie ein Aufruf mit Block-Argument (R26).
 - Klammern um die Bedingung sind erlaubt (`if (x > 0) {` ist ein Klammerausdruck); `dif fmt` entfernt sie.
-- `elif` und `else if` ohne Leerzeichen-Form: `elif` ist `S1`, Hinweis `use else if`.
-- Eine Anweisung, die kein Aufruf, keine Zuweisung und keine Deklaration ist (z. B. `x + 1` allein), ist `S4`.
+- `elif` (Python) und `elsif` (Ruby, Perl) sind `R3`, Hinweis `use else if`.
+- Eine Anweisung, die weder Aufruf noch Zuweisung noch Deklaration ist (z. B. `x + 1` allein), ist `S4`.
 
 ```dif snippet
 int n = 3
@@ -255,7 +291,7 @@ void main() {
 ```
 
 ```
-main.dif:3:13: error[R3]: the block of `if` starts on the same line
+main.dif:3:13: error[R3]: the body of `if` must start on the same line
   hint: if n > 0 {
 ```
 
@@ -271,7 +307,7 @@ var_decl   = [ "const" ] type IDENT "=" expr ;      (* nur in Blöcken, siehe R2
 - Auf oberster Ebene ist nur `const` erlaubt; `int x = 1` dort ist `R4`, Hinweis `make it const, or move it into a function`.
 - Eine Zuweisung an eine `const`-Variable ist `R4`.
 - Ein Name gilt von seiner Deklaration bis zum Ende des Blocks, in dem er steht, einschließlich innerer Blöcke. Ihn darin noch einmal zu deklarieren — auch in einem inneren Block, auch als Parameter- oder Schleifenvariable — ist `R4` (kein Verdecken).
-- Funktionen, Konstanten und vordefinierte Namen (`int`, `print`, …) leben im Modul; eine lokale Variable mit demselben Namen ist `R4`.
+- Funktionen, Konstanten und vordefinierte Namen (§1.5) leben im Modul; eine lokale Variable oder ein Parameter mit demselben Namen ist `R4`.
 - Eine globale `const` braucht einen Wert, der beim Kompilieren feststeht: Literale, andere `const` und Operatoren darauf.
 
 ```dif
@@ -297,19 +333,19 @@ void main() {
 ```
 
 ```
-main.dif:4:13: error[R4]: `n` is already declared in this function (main.dif:2:9)
-  hint: choose another name
+main.dif:4:13: error[R4]: `n` is already declared at main.dif:2:9
+  hint: names are not redeclared inside their block; choose another name
 ```
 
 ### R5 — Werte und Griffe
 
 **Regel.** Zuweisung und Rückgabe kopieren den Wert; die Kopie ist unabhängig, intern aber billig. Ein Griff (Kanal, Task, `shared`, Datei, Bibliothek, C-Objekt) ist ein Wert, der auf etwas außerhalb zeigt: kopiert wird der Griff, nicht das Ding. Parameter ohne `mut` sind lokale Kopien, wie in C.
 
-*Teil 1: Für `int`, `bool` und `str` gilt die Regel ohne Sonderfall — Parameter sind lokale Kopien und dürfen im Rumpf geändert werden. Ausarbeitung mit Speichermodell in Teil 2 (M2).*
+*Teil 1: Für `int`, `bool` und `str` gilt die Regel unmittelbar — Parameter sind lokale Kopien und dürfen im Rumpf geändert werden. Ausarbeitung mit dem Speichermodell in Teil 2 (M2).*
 
 ### R6 — `mut`
 
-**Regel.** Soll eine Funktion ein Argument ändern, steht `mut` in der Signatur und am Aufruf; die Änderung landet beim Aufrufer. Eine Änderung, die danach nie gelesen wird, ist ein Fehler. `mut` nimmt Orte: Variablen, Felder und Elemente. Ein Ort geht höchstens einmal veränderbar in einen Aufruf; überlappende Orte sind ein Fehler bzw. ein Abbruch; ein zusätzlich gelesener Ort wird als Schnappschuss übergeben.
+**Regel.** Soll eine Funktion ein Argument ändern, steht `mut` in der Signatur und am Aufruf; die Änderung landet beim Aufrufer. Eine Änderung, die danach nie gelesen wird, ist ein Fehler (sie träfe nur eine Kopie). `mut` nimmt Orte: Variablen, Felder und Elemente. Ein Ort geht höchstens einmal veränderbar in einen Aufruf: als `self`, als `mut`-Argument oder über ein Funktionsliteral, das ihn ändert; überlappen zwei Orte, ist das ein Fehler, bei Elementen mit Laufzeit-Index ein Abbruch. Liest derselbe Aufruf einen Ort zusätzlich, bekommt der lesende Teil einen Schnappschuss.
 
 *Ausarbeitung in Teil 2 (M2).*
 
@@ -332,19 +368,20 @@ Teil 1 legt fest:
 | `+ - * / %`, `+% -% *%` | `int, int` | `int` |
 | `& \| ^ << >>` | `int, int` | `int` |
 | `~`, Vorzeichen `-` | `int` | `int` |
-| `+` | `str, str` | `str` |
+| `+` (Verkettung) | `str, str` | `str` |
 | `== !=` | gleicher Typ (`int`, `bool`, `str`) | `bool` |
 | `< <= > >=` | `int, int` oder `str, str` | `bool` |
-| `&& \|\|`, `!` | `bool` | `bool` |
 
-- Jede andere Kombination ist `R8`, z. B. `"41" + 1` mit Hinweis `use "{a}{b}" to build text`.
-- **Stelle** eines Ausdrucks ist der Typ, den sein Ziel verlangt: die deklarierte Variable, der Parameter, der Rückgabetyp, der andere Operand eines Vergleichs. Ein Ausdruck nur aus Literalen wird im Typ seiner Stelle gerechnet (`int k = 7 / 2` ist `3`); ohne Stelle (`print(7 / 2)`) ist er `int`.
-- Ein Literal, das an seiner Stelle nicht passt (`bool b = 1`), ist `R8`.
+- Jede andere Kombination ist `R8`, z. B. `"41" + 1` mit Hinweis `build text with interpolation: "{a}{b}"`. Die Operanden von `&&`, `||` und `!` prüft R9.
+- `+` verbindet zwei `str`. Werte anderer Typen kommen nur über `"{x}"` in einen Text; das meint die Regel mit „Text baut man mit `"{x}"`“.
+- **Stelle** eines Ausdrucks ist der Typ, den sein Ziel verlangt: die deklarierte Variable, der Parameter, der Rückgabetyp, der andere Operand eines Vergleichs. Ohne Stelle (`print(7 / 2)`) ist ein Literal `int`.
+- **Ausdrücke nur aus Literalen und `const`** rechnet der Compiler exakt aus, ohne Überlauf zwischendurch, mit der Division des Typs ihrer Stelle (`int k = 7 / 2` ist `3`). Erst das Ergebnis muss in den Typ passen, sonst `R8` (`int x = 9223372036854775808`, Hinweis `the value does not fit in int`). Darum ist `-9223372036854775808` ein gültiges `int`.
+- Ein Literal, dessen Art nicht zur Stelle passt (`bool b = 1`), ist `R8`.
 
 ```dif snippet
 int a = 7 / 2
 str s = "a ist {a}"
-print(s)
+print(s + "!")
 ```
 
 ```dif error R8
@@ -354,7 +391,7 @@ void main() {
 ```
 
 ```
-main.dif:2:11: error[R8]: cannot apply `+` to str and int
+main.dif:2:16: error[R8]: cannot apply `+` to str and int
   hint: build text with interpolation: "{a}{b}"
 ```
 
@@ -370,7 +407,7 @@ Bedingungen stehen in `if`, `else if`, `while` und als Operanden von `&&`, `||`,
 
 ```dif snippet
 int n = 3
-while n > 0 {
+while n > 0 && n != 7 {
     n -= 1
 }
 ```
@@ -391,13 +428,13 @@ main.dif:3:11: error[R9]: condition is int, not bool
 
 ### R10 — `switch`
 
-**Regel.** `switch` deckt jeden möglichen Wert ab: alle Varianten oder `default`. Jeder `case` ist ein eigener Block und endet von selbst. Varianten eines `enum` schreibt man mit ihrem Typ; `T!E` und `?T` haben die eingebauten Formen `ok`, `err`, `some`, `none`.
+**Regel.** `switch` deckt jeden möglichen Wert ab: alle Varianten oder `default`. Jeder `case` ist ein eigener Block und endet von selbst. Varianten eines `enum` schreibt man mit ihrem Typ; `T!E` und `?T` sind keine `enum`s, sie haben die eingebauten Formen `ok`, `err`, `some`, `none`.
 
 *Ausarbeitung in Teil 2 (M2).*
 
 ### R11 — Schleifen
 
-**Regel.** Schleifen: `for T x in …` (über `range(n)`, `range(a, b)`, Listen, `io.lines()`, Kanäle), `for int i, T x in xs`, `for K k, V v in m` und `while cond`. `break` und `continue` gehören zur innersten Schleife; `break` steht nie direkt in einem `switch`.
+**Regel.** Schleifen: `for T x in …` (über `range(n)`, `range(a, b)`, Listen, `io.lines()`, Kanäle), `for int i, T x in xs` (Index und Element), `for K k, V v in m` (Schlüssel und Wert) und `while cond`. `break` und `continue` gehören zur innersten Schleife; `break` steht nie direkt in einem `switch`, weil es dort in C und Go den `switch` verließe.
 
 ```ebnf
 while_stmt = "while" expr block ;
@@ -406,10 +443,10 @@ for_stmt   = "for" type IDENT [ "," type IDENT ] "in" expr block ;
 
 Teil 1 legt fest:
 
-- `range(n)` liefert die Ganzzahlen `0 … n-1`, `range(a, b)` die Ganzzahlen `a … b-1`; ist das Ende nicht größer als der Anfang, läuft die Schleife nicht. Grenzen werden einmal vor der Schleife ausgewertet.
+- `range(n)` liefert die Ganzzahlen `0 … n-1`, `range(a, b)` die Ganzzahlen `a … b-1`; ist das Ende nicht größer als der Anfang, läuft die Schleife nicht. Die Grenzen werden einmal vor der Schleife ausgewertet. In Teil 1 steht `range` nur als Quelle einer `for`-Schleife.
 - Die Schleifenvariable ist eine neue Variable im Schleifenblock (R4); ändert der Rumpf sie, wirkt das nur bis zum nächsten Durchlauf.
-- `break` verlässt, `continue` beendet den Durchlauf der innersten Schleife. Außerhalb einer Schleife sind beide `R11`.
-- Die C-Schleife `for (int i = 0; i < n; i++)` ist `R11`, Hinweis `for int i in range(n)`.
+- `break` verlässt die innerste Schleife, `continue` beginnt ihren nächsten Durchlauf. Außerhalb einer Schleife sind beide `R11`.
+- Die C-Schleife `for (…; …; …)` ist `R11`, Hinweis mit der passenden `range`-Form.
 
 ```dif snippet
 for int i in range(1, 4) {
@@ -429,13 +466,13 @@ void main() {
 ```
 
 ```
-main.dif:2:9: error[R11]: C-style for loop
+main.dif:2:5: error[R11]: C-style for loop
   hint: for int i in range(3)
 ```
 
 ### R12 — Scheitern steht im Typ
 
-**Regel.** Kann eine Funktion scheitern, steht es im Rückgabetyp: `T!E` heißt Wert oder `err(e)`, `?T` heißt Wert oder `none`. Erfolg gibt man einfach zurück. `try x` reicht einen Fehler gleichen Typs weiter; `try x or E.V(…)` übersetzt ihn vorher.
+**Regel.** Kann eine Funktion scheitern, steht es im Rückgabetyp: `T!E` heißt Wert oder `err(e)`, `?T` heißt Wert oder `none`. Erfolg gibt man einfach zurück. `try x` reicht einen Fehler gleichen Typs weiter; `try x or E.V(…)` übersetzt ihn vorher in einen eigenen.
 
 *Ausarbeitung in Teil 2 (M2).*
 
@@ -445,25 +482,37 @@ main.dif:2:9: error[R11]: C-style for loop
 
 **Grammatik:** `call_stmt` und `discard` aus R3.
 
-Teil 1 legt fest:
+Teil 1 legt fest (**vorläufig strenger als die Regel**, bis die Wirkungsanalyse in Teil 2 kommt):
 
-- Ein Aufruf als Anweisung, dessen Ergebnis nicht `void` ist, ist `R13`, Hinweis `use it, or discard it explicitly with _ =`.
+- Ein Aufruf als Anweisung, dessen Ergebnis nicht `void` ist, ist `R13`, Hinweis `use it, or discard it explicitly with _ = …`. Ab Teil 2 ist er erlaubt, wenn die Funktion eine Wirkung hat.
 - `_ = f()` verwirft ein Ergebnis bewusst.
-- Ein Aufruf einer `void`-Funktion als Anweisung ist erlaubt. (Die Prüfung „ohne Wirkung“ für `void`-Funktionen folgt mit der Wirkungsanalyse in Teil 2.)
+- Ein Aufruf einer `void`-Funktion als Anweisung ist erlaubt.
 
-```dif error R13
-int fib(int n) {
-    return n
+```dif
+int square(int n) {
+    return n * n
 }
 
 void main() {
-    fib(3)
+    int a = square(3)
+    _ = square(4)
+    print(a)
+}
+```
+
+```dif error R13
+int square(int n) {
+    return n * n
+}
+
+void main() {
+    square(3)
 }
 ```
 
 ```
-main.dif:6:5: error[R13]: result of `fib(3)` is never used
-  hint: use it, or discard it explicitly with `_ =`
+main.dif:6:5: error[R13]: result of `square(3)` is never used
+  hint: use it, or discard it explicitly with `_ = square(3)`
 ```
 
 ### R14 — Abbruch bei Programmierfehlern
@@ -478,17 +527,24 @@ Teil 1 legt fest (alle für `int`, siehe R29):
 |---|---|
 | Überlauf bei `+ - *` und Vorzeichen `-` | `integer overflow in +` (bzw. `-`, `*`) |
 | Division oder `%` durch 0 | `division by zero` |
-| `INT_MIN / -1`, `INT_MIN % -1` | `integer overflow in /` (bzw. `%`) |
+| `INT_MIN / -1` | `integer overflow in /` |
 | Shift mit Weite < 0 oder ≥ 64 | `shift by <n> out of range 0..63` |
 
-Die Position ist die des Operators im Quelltext. Der Abbruch läuft ohne `defer` (R23) und endet mit Exit-Code 2. `+% -% *%` rechnen bewusst modulo 2⁶⁴ und brechen nie ab.
+- Die Position ist die des Operators. Der Abbruch läuft ohne `defer` (R23) und endet mit Exit-Code 2.
+- `+% -% *%` rechnen bewusst modulo 2⁶⁴ und brechen nie ab.
+- Steht der Abbruch schon beim Kompilieren fest (nur Literale und `const`, z. B. `1 / 0`), meldet ihn der Compiler als `error[R14]`.
 
 ```dif snippet
 int big = 9223372036854775807
 print(big +% 1)
 ```
 
-Ausgabe: `-9223372036854775808`. Ohne `%`:
+Ausgabe: `-9223372036854775808`.
+
+```dif panic "integer overflow in +"
+int big = 9223372036854775807
+print(big + 1)
+```
 
 ```
 panic: integer overflow in + (main.dif:3:15)
@@ -502,13 +558,13 @@ panic: integer overflow in + (main.dif:3:15)
 
 ### R16 — Module
 
-**Regel.** Eine Datei ist ein Modul. `use name` lädt `name.dif` neben der Datei, `use std.x` die Standardbibliothek, `use c "x.h"` einen C-Header; `as` gibt jedem Modul einen anderen Namen; zyklische `use` sind ein Fehler. `pub` vor Typen, Funktionen, Feldern und Methoden macht sie sichtbar. Funktionen ohne `self` gehören in ein Modul, nicht an einen Typ.
+**Regel.** Eine Datei ist ein Modul. `use name` lädt `name.dif` neben der Datei, `use std.x` die Standardbibliothek, `use c "x.h"` einen C-Header; `as` gibt jedem Modul einen anderen Namen; zyklische `use` sind ein Fehler. `pub` vor Typen, Funktionen, Feldern und Methoden macht sie sichtbar. Funktionen ohne `self` gehören in ein Modul, nicht an einen Typ (`c.to_str(p)`, `chan.new[int](64)`).
 
 *Ausarbeitung in Teil 2/3.*
 
 ### R17 — C, Pointer, `unsafe`
 
-**Regel.** Pointer gibt es nur in `unsafe { }` und in C-Deklarationen; dort gelten C-Regeln, ein roher Pointer `*T` darf wie in C NULL sein. Strings und Griffe, die C zurückgibt, sind `?T`; Parameter an C sind nicht optional, außer `extern` erlaubt `?`. Pointer auf opake C-Typen sind Griffe; mit Freigeber (`release T with f`) gezählt, `f` läuft genau einmal. Strings an C gelten nur für die Dauer des Aufrufs, ein NUL-Byte darin bricht ab. Nicht genannte Felder eines C-structs sind 0.
+**Regel.** Pointer gibt es nur in `unsafe { }` und in C-Deklarationen; dort gelten C-Regeln, ein roher Pointer `*T` darf wie in C NULL sein (`p.is_null()`). Strings und Griffe, die C zurückgibt, sind `?T`; Parameter an C sind nicht optional, außer eine `extern`-Deklaration erlaubt `?`. Pointer auf opake C-Typen sind Griffe; nennt der Import einen Freigeber (`release T with f`), werden sie gezählt und `f` läuft genau einmal. Strings an C gelten nur für die Dauer des Aufrufs, ein NUL-Byte darin bricht ab. Nicht genannte Felder eines C-structs sind 0.
 
 *Ausarbeitung mit M4 (`extern`) und v0.1 (`use c`).*
 
@@ -518,9 +574,29 @@ panic: integer overflow in + (main.dif:3:15)
 
 *Ausarbeitung in Teil 2 (M2).*
 
-### R19–R22 — Nebenläufigkeit *(nach v0)*
+### R19 — Tasks *(nach v0)*
 
-Wortlaut in PLAN.md §3.2. Die Schlüsselwörter `spawn`, `parallel`, `yield` sind reserviert.
+**Regel.** `spawn f(args)` startet `f` parallel und liefert `task[T]`; `t.wait()` holt das Ergebnis. Argumente gehen ohne `mut` hinein. Ein Task lebt nur in der Funktion, die ihn gestartet hat: verlässt sie ihren Rumpf, werden ihre noch laufenden Tasks erst abgebrochen, dann abgewartet. Ein Abbruch im Task kommt beim Warten an. Nach `t.cancel()` kehrt jeder blockierende std-Aufruf im Task mit Fehler zurück. `main` läuft immer im Hauptthread des Betriebssystems, Tasks nie.
+
+*Ausarbeitung nach v0; `spawn` ist reserviert.*
+
+### R20 — Kanäle *(nach v0)*
+
+**Regel.** Tasks tauschen Werte nur über Kanäle aus: `chan[T]`, `ch.send(v)`, `for T x in ch` (endet nach `ch.close()`). Ein Kanal ist ein Griff: Kopien zeigen auf denselben Kanal. Gesendete Werte gehören danach dem Empfänger. Griffe zählen atomar; ein C-Griff darf nur in einen Task, wenn sein Import `send T` sagt.
+
+*Ausarbeitung nach v0.*
+
+### R21 — Parallele Schleife *(nach v0)*
+
+**Regel.** `parallel for T x in xs { … yield v }` verteilt die Durchläufe auf alle Kerne und liefert die `yield`-Werte als Liste in Eingabereihenfolge. Der Rumpf liest Variablen von außen nur.
+
+*Ausarbeitung nach v0; `parallel` und `yield` sind reserviert.*
+
+### R22 — Geteilte Werte *(nach v0)*
+
+**Regel.** `share(x)` friert einen Wert ein und liefert `shared[T]`: nur lesbar, und ohne Kopie an beliebig viele Tasks übergebbar. Ändern heißt, eine neue Version zu bauen und erneut zu teilen.
+
+*Ausarbeitung nach v0.*
 
 ### R23 — `defer`
 
@@ -530,7 +606,7 @@ Wortlaut in PLAN.md §3.2. Die Schlüsselwörter `spawn`, `parallel`, `yield` si
 
 ### R24 — C-Callbacks mit Kontext
 
-**Regel.** Erwartet C ein Paar aus Funktion und `void *user`, übergibt man eine dif-Funktion und, wenn sie Zustand braucht, eine Variable; die Funktion bekommt sie als ersten Parameter, mit `mut`, wenn sie sie ändert. Keine Funktion: `none`. Der Kontext gilt, solange der Aufruf läuft, in den die Variable mit `mut` hineinging; ein Callback außerhalb oder aus einem anderen Thread bricht ab.
+**Regel.** Erwartet C ein Paar aus Funktion und `void *user`, übergibt man eine dif-Funktion und, wenn sie Zustand braucht, eine Variable; die Funktion bekommt die Variable als ersten Parameter, mit `mut`, wenn sie sie ändert (R6). Keine Funktion: `none`. Der Kontext gilt, solange der Aufruf läuft, in den die Variable mit `mut` hineinging; ein Callback außerhalb dieses Aufrufs oder aus einem anderen Thread bricht mit Meldung ab.
 
 *Ausarbeitung mit v0.1.*
 
@@ -542,13 +618,13 @@ Wortlaut in PLAN.md §3.2. Die Schlüsselwörter `spawn`, `parallel`, `yield` si
 
 ### R26 — Funktionswerte und Blöcke
 
-**Regel.** Ein Funktionswert hat den Typ `R(T1, T2)` und wird geschrieben wie eine Funktion ohne Namen: `R(T1 a, T2 b) { … }`. Ein Literal steht nur direkt als Argument eines Aufrufs und lebt nur während dieses Aufrufs; es darf ringsum lesen und ändern. Ein Literal ohne Parameter darf als Block `{ … }` direkt hinter der schließenden Klammer stehen; `return` und `try` darin beenden den Block. Benannte Funktionen und Varianten-Konstruktoren sind gewöhnliche Werte. Ändert ein Funktionswert einen Parameter, steht `mut` in seinem Typ.
+**Regel.** Ein Funktionswert hat den Typ `R(T1, T2)` und wird geschrieben wie eine Funktion ohne Namen: `R(T1 a, T2 b) { … }`. Ein Literal steht nur direkt als Argument eines Aufrufs (nie in einer Variable, einem struct, einer Liste, in `spawn` oder als Typargument) und lebt nur während dieses Aufrufs: es darf ringsum lesen und ändern. Ein Literal ohne Parameter darf als Block `{ … }` direkt hinter der schließenden Klammer stehen; `return` und `try` darin beenden den Block. Benannte Funktionen und Varianten-Konstruktoren haben keine Umgebung und sind gewöhnliche Werte, die man speichern darf. Ändert ein Funktionswert einen Parameter, steht `mut` in seinem Typ.
 
 *Ausarbeitung mit M3.*
 
 ### R27 — Generics
 
-**Regel.** Typparameter stehen in eckigen Klammern hinter dem Namen und werden beim Aufruf meist abgeleitet; jede Instanz wird eigener Code. Eine Einschränkung steht vor dem Typparameter: `equal`, `ordered`, `hashable`, `text`.
+**Regel.** Typparameter stehen in eckigen Klammern hinter dem Namen und werden beim Aufruf meist abgeleitet; jede Instanz wird eigener Code. Eine Einschränkung steht vor dem Typparameter wie ein Typ vor dem Namen: `equal`, `ordered`, `hashable`, `text`.
 
 *Ausarbeitung mit M3.*
 
@@ -556,18 +632,18 @@ Wortlaut in PLAN.md §3.2. Die Schlüsselwörter `spawn`, `parallel`, `yield` si
 
 **Regel.** Jeder Typ ohne Funktionswert-Felder ist `equal` (`==`) und `text` (Ausgabe, `"{x}"`); `ordered` (`<`) sind Zahlen und `str`; `hashable` ist alles, was `equal` ist. Griffe vergleichen ihre Identität, Maps sind gleich, wenn ihre Einträge gleich sind.
 
-Teil 1 legt die Textform fest: `int` dezimal mit `-` für negative Zahlen, `bool` als `true`/`false`, `str` unverändert.
+Teil 1 legt die Textform fest: `int` dezimal mit `-` für negative Zahlen, `bool` als `true`/`false`, `str` unverändert. `str` vergleicht `<` bytweise (UTF-8).
 
 ### R29 — Zahlen
 
-**Regel.** Ganzzahl-`/` rundet Richtung 0, `%` hat das Vorzeichen des Dividenden; Floats folgen IEEE 754; Ganzzahl-Division durch 0, `INT_MIN / -1` und Shifts ab der Bitbreite brechen ab. Ausdrücke und Argumente werden von links nach rechts ausgewertet.
+**Regel.** Zahlen: Ganzzahl-`/` rundet Richtung 0, `%` hat das Vorzeichen des Dividenden; Floats folgen IEEE 754 (`inf`, `NaN`, `NaN == NaN` ist false); Ganzzahl-Division durch 0, `INT_MIN / -1` und Shifts ab der Bitbreite brechen ab. Ausdrücke und Argumente werden von links nach rechts ausgewertet.
 
 **Grammatik:** `INT` aus §1.4 und die Operatoren aus §2.
 
 Teil 1 legt den Ganzzahl-Teil fest:
 
 - `int` ist immer 64 Bit mit Zweierkomplement, Bereich `-9223372036854775808 … 9223372036854775807`.
-- `a / b` rundet Richtung 0, `a % b` hat das Vorzeichen von `a`, es gilt `(a / b) * b + a % b == a`.
+- `a / b` rundet Richtung 0, `a % b` hat das Vorzeichen von `a`, es gilt `(a / b) * b + a % b == a`. `INT_MIN % -1` ist `0`.
 - `<<` und `>>` verschieben um `0 … 63` Stellen; `>>` ist arithmetisch (füllt mit dem Vorzeichen). Andere Weiten brechen ab (R14).
 - `+% -% *%` rechnen modulo 2⁶⁴.
 - Auswertungsreihenfolge: Operanden von links nach rechts, Argumente von links nach rechts, bei einer Zuweisung erst der Ort, dann der Wert.
@@ -580,9 +656,7 @@ print(1 << 62)
 
 Ausgabe: `-3`, `-1`, `4611686018427387904`.
 
-Verstoß zur Laufzeit (R14):
-
-```dif snippet
+```dif panic "shift by 64 out of range 0..63"
 int w = 64
 print(1 << w)
 ```
@@ -590,8 +664,6 @@ print(1 << w)
 ```
 panic: shift by 64 out of range 0..63 (main.dif:3:13)
 ```
-
-Ein Literal, das in `int` nicht passt (`9223372036854775808`), ist schon beim Kompilieren `L4`.
 
 ### R30 — Maps
 
