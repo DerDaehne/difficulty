@@ -47,7 +47,10 @@ const BUILTINS: &[&str] = &["print", "range", "repeat", "expect", "assert"];
 /// Longest chain of global consts that use each other.
 const MAX_CONST_DEPTH: u32 = 256;
 
-pub fn check(file: &str, src: &str, m: &Module) -> Vec<Diag> {
+/// Constant `int` values by expression span (byte offsets), for the C emitter.
+pub type Folded = HashMap<(u32, u32), i64>;
+
+pub fn check(file: &str, src: &str, m: &Module) -> (Vec<Diag>, Folded) {
     let mut c = Checker {
         file,
         src,
@@ -61,9 +64,10 @@ pub fn check(file: &str, src: &str, m: &Module) -> Vec<Diag> {
         const_depth: 0,
         const_too_deep: false,
         diags: Vec::new(),
+        folded: HashMap::new(),
     };
     c.module();
-    c.diags
+    (c.diags, c.folded)
 }
 
 /// `void main()` for `dif run`/`dif build` (R1); `dif check` of a library does not need it.
@@ -128,6 +132,7 @@ struct Checker<'a> {
     const_depth: u32,
     const_too_deep: bool,
     diags: Vec<Diag>,
+    folded: Folded,
 }
 
 impl<'a> Checker<'a> {
@@ -642,12 +647,21 @@ impl<'a> Checker<'a> {
     fn rvalue(&mut self, e: &'a Expr) -> (Ty, Val) {
         let (t, v) = self.expr(e);
         if let Val::Int(n) = v {
-            if !fits(n) {
-                self.out_of_range(e.pos);
+            if !self.place(n, e) {
                 return (Ty::Err, Val::Runtime);
             }
         }
         (t, v)
+    }
+
+    /// A constant `int` at its place: it must fit, and the C emitter uses its value.
+    fn place(&mut self, n: i128, e: &Expr) -> bool {
+        if !fits(n) {
+            self.out_of_range(e.pos);
+            return false;
+        }
+        self.folded.insert((e.pos.offset, e.end), n as i64);
+        true
     }
 
     fn out_of_range(&mut self, pos: Pos) {
@@ -777,8 +791,7 @@ impl<'a> Checker<'a> {
         // a constant operand next to a runtime one is used at its place: it must fit
         for (v, e) in [(lv, l), (rv, r)] {
             if let Val::Int(n) = v {
-                if !fits(n) {
-                    self.out_of_range(e.pos);
+                if !self.place(n, e) {
                     return (Ty::Err, Val::Runtime);
                 }
             }

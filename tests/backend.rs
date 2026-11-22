@@ -1,0 +1,184 @@
+//! The C backend: generated C compiles without warnings, programs run with the
+//! semantics of R11, R14 and R29, and `dif run` reports panics and missing compilers.
+
+use std::path::PathBuf;
+use std::process::Command;
+
+fn work(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("dif-test-{}-{name}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// Compiles with all warnings as errors, runs, and returns (stdout, stderr, exit code).
+fn run(name: &str, src: &str) -> (String, String, i32) {
+    let c = dif::compile("main.dif", src.as_bytes()).unwrap_or_else(|d| panic!("{d:#?}"));
+    let dir = work(name);
+    let (c_file, exe) = (dir.join("main.c"), dir.join("main"));
+    std::fs::write(&c_file, c).unwrap();
+    let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
+    let out = Command::new(cc)
+        .args(["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-o"])
+        .arg(&exe)
+        .arg(&c_file)
+        .output()
+        .expect("a C compiler (cc) is needed for these tests");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let r = Command::new(&exe).output().unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    (
+        String::from_utf8_lossy(&r.stdout).into_owned(),
+        String::from_utf8_lossy(&r.stderr).into_owned(),
+        r.status.code().unwrap_or(-1),
+    )
+}
+
+fn example(name: &str) -> String {
+    std::fs::read_to_string(format!("{}/examples/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
+}
+
+#[test]
+fn examples_run() {
+    assert_eq!(
+        run("hello", &example("hello.dif")),
+        ("Hallo, Welt\n".into(), String::new(), 0)
+    );
+    let (out, _, code) = run("fib", &example("fib.dif"));
+    assert_eq!(code, 0);
+    assert!(
+        out.starts_with("fib(0) = 0\nfib(1) = 1\nfib(2) = 1\n"),
+        "{out}"
+    );
+    assert!(out.ends_with("fib(9) = 34\n832040\n"), "{out}");
+}
+
+#[test]
+fn semantics() {
+    let src = r#"int f(int x) {
+    print(x)
+    return x
+}
+
+const int K = 2 * L
+const int L = 21
+
+void main() {
+    int big = 9223372036854775807
+    print(big +% 1)
+    print(-7 / 2)
+    print(-7 % 3)
+    print(1 << 62)
+    print(-9223372036854775808)
+    print(f(1) + f(2))
+    str s = "k={K} ok={K == 42} {f(3)}" + "!"
+    print(s)
+    print(s < "l")
+    for int i in range(3) {
+        if i == 1 {
+            continue
+        }
+        i += 10
+        print(i)
+    }
+    int n = 0
+    while true {
+        n += 1
+        if n == 3 {
+            break
+        }
+    }
+    print(n)
+}
+"#;
+    let (out, err, code) = run("semantics", src);
+    let want = "-9223372036854775808\n-3\n-1\n4611686018427387904\n-9223372036854775808\n1\n2\n3\n3\nk=42 ok=true 3!\ntrue\n10\n12\n3\n";
+    assert_eq!((out.as_str(), err.as_str(), code), (want, "", 0));
+}
+
+#[test]
+fn panics() {
+    let cases = [
+        (
+            "int big = 9223372036854775807\nprint(big + 1)",
+            "integer overflow in + (main.dif:3:15)",
+        ),
+        (
+            "int w = 64\nprint(1 << w)",
+            "shift by 64 out of range 0..63 (main.dif:3:13)",
+        ),
+        (
+            "int z = 0\nprint(10 / z)",
+            "division by zero (main.dif:3:14)",
+        ),
+        (
+            "int z = 0\nprint(10 % z)",
+            "division by zero (main.dif:3:14)",
+        ),
+        (
+            "int m = -9223372036854775807 - 1\nint d = -1\nprint(m / d)",
+            "integer overflow in / (main.dif:4:13)",
+        ),
+        (
+            "int m = -9223372036854775807 - 1\nprint(-m)",
+            "integer overflow in - (main.dif:3:11)",
+        ),
+        (
+            "int m = 3037000500\nprint(m * m)",
+            "integer overflow in * (main.dif:3:13)",
+        ),
+    ];
+    for (k, (body, msg)) in cases.iter().enumerate() {
+        let lines: Vec<String> = body.lines().map(|l| format!("    {l}")).collect();
+        let src = format!("void main() {{\n{}\n}}\n", lines.join("\n"));
+        let (out, err, code) = run(&format!("panic{k}"), &src);
+        assert_eq!(
+            (out.as_str(), err.as_str(), code),
+            ("", format!("panic: {msg}\n").as_str(), 2),
+            "{body}"
+        );
+    }
+    // INT_MIN % -1 is 0, not an abort (R29)
+    let (out, _, _) = run("modmin", "void main() {\n    int m = -9223372036854775807 - 1\n    int d = -1\n    print(m % d)\n}\n");
+    assert_eq!(out, "0\n");
+}
+
+#[test]
+fn driver() {
+    let dif = env!("CARGO_BIN_EXE_dif");
+    let hello = format!("{}/examples/hello.dif", env!("CARGO_MANIFEST_DIR"));
+    let r = Command::new(dif).args(["run", &hello]).output().unwrap();
+    assert_eq!(
+        (String::from_utf8_lossy(&r.stdout).as_ref(), r.status.code()),
+        ("Hallo, Welt\n", Some(0))
+    );
+    let r = Command::new(dif)
+        .args(["run", &hello])
+        .env("CC", "no-such-cc")
+        .output()
+        .unwrap();
+    assert_eq!(r.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&r.stderr).contains("no C compiler found"));
+    // build writes a program; a file without main is R1
+    let dir = work("driver");
+    let exe = dir.join("hello");
+    let r = Command::new(dif)
+        .args(["build", &hello, "-o"])
+        .arg(&exe)
+        .output()
+        .unwrap();
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    assert_eq!(
+        Command::new(&exe).output().unwrap().stdout,
+        b"Hallo, Welt\n"
+    );
+    let lib = dir.join("lib.dif");
+    std::fs::write(&lib, "int f() {\n    return 1\n}\n").unwrap();
+    let r = Command::new(dif).arg("run").arg(&lib).output().unwrap();
+    assert_eq!(r.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&r.stderr).contains("error[R1]: no `main` function"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
