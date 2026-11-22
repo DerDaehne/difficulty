@@ -198,7 +198,7 @@ void main() {
 - Explizites `return`. Kein Top-Level-Code: ein Programm besteht aus Deklarationen und `void main()`.
 - Kommentare nur `//`, Doku-Kommentare `///` (werden von `dif doc` gelesen und als Doc-Tests ausgeführt).
 - Präzedenz wie C, mit drei Korrekturen: Bit-Operatoren binden stärker als Vergleiche (C-Falle `x & 1 == 0`), `a < b < c` ist ein Fehler, `&&` und `||` gemischt nur mit Klammern. `try` bindet wie ein Vorzeichen (`try a + try b`), `or` gehört zum `try` davor, `??` bindet am schwächsten.
-- Eine Anweisung läuft in der nächsten Zeile weiter, wenn die Zeile mit einem Operator, `(`, `[` oder `,` endet oder die nächste mit `.` beginnt. `\{` schreibt eine wörtliche Klammer in einen String.
+- Eine Anweisung läuft in der nächsten Zeile weiter, wenn die Zeile mit einem Operator oder `,` endet, die nächste mit `.` beginnt oder man innerhalb von `( … )` bzw. `[ … ]` ist. `\{` schreibt eine wörtliche Klammer in einen String. Genaue Regeln: docs/spec.md §1.
 - In Typen bindet `!E` am schwächsten: `[]Task!FileErr` ist eine Liste oder ein Fehler; `?[]T` ist eine optionale Liste, `[]?T` eine Liste von Optionalen.
 - Kein `++`/`--`: `x += 1`. Wrapping-Arithmetik bewusst mit `+%`, `-%`, `*%`.
 
