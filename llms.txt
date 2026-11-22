@@ -162,8 +162,8 @@ void main() {
 
 ## Limits
 
-Nesting deeper than 256 levels, more than 1024 operators in one expression, or a chain
-of more than 256 `const` using each other is an error: split the code.
+Nesting deeper than 256 levels or more than 1024 operators in one expression is S1;
+a chain of more than 256 `const` using each other is R4. Split the code.
 
 ## Not yet in part 1
 
