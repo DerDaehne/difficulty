@@ -10,7 +10,7 @@ use diag::Diag;
 /// Lexes and parses one source file; returns all diagnostics in source order.
 pub fn check_source(src: &str) -> Vec<Diag> {
     let (toks, mut diags) = lexer::lex(src);
-    let (_module, pdiags) = parser::parse(src, &toks);
+    let (_module, pdiags) = parser::parse(src, &toks, &diags);
     diags.extend(pdiags);
     diags.sort_by_key(|d| d.pos.offset);
     diags

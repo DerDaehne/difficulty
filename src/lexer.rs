@@ -103,6 +103,8 @@ struct Lexer<'a> {
     /// Inside an interpolation: no `Nl` tokens.
     fragment: bool,
     brackets: Vec<char>,
+    /// Names with non-ASCII letters already reported (L1).
+    foreign_words: Vec<String>,
     toks: Vec<Token>,
     diags: Vec<Diag>,
 }
@@ -118,6 +120,7 @@ impl<'a> Lexer<'a> {
             base: start.offset,
             fragment,
             brackets: Vec::new(),
+            foreign_words: Vec::new(),
             toks: Vec::new(),
             diags: Vec::new(),
         }
@@ -181,7 +184,7 @@ impl<'a> Lexer<'a> {
                 '/' if self.peek_at(1) == Some('*') => self.block_comment(),
                 '"' => self.string(),
                 '0'..='9' => self.number(),
-                c if c.is_ascii_alphabetic() || c == '_' => self.ident(),
+                c if c.is_alphabetic() || c == '_' => self.ident(),
                 ';' => {
                     let p = self.pos();
                     self.adv();
@@ -197,6 +200,11 @@ impl<'a> Lexer<'a> {
     fn newline(&mut self) {
         let p = self.pos();
         self.adv();
+        self.line_end(p);
+    }
+
+    /// The end of a line at `p`: an `Nl` token unless §1.3 continues the line.
+    fn line_end(&mut self, p: Pos) {
         if self.fragment || matches!(self.brackets.last(), Some('(') | Some('[')) {
             return;
         }
@@ -243,25 +251,57 @@ impl<'a> Lexer<'a> {
             "block comments `/* … */` do not exist",
             Some("use // for comments"),
         );
+        if !self.src[self.chars[self.i].0..].contains("*/") {
+            // never closed: it ends with its line instead of swallowing the file
+            while !matches!(self.peek(), None | Some('\n')) {
+                self.adv();
+            }
+            return;
+        }
         self.adv();
         self.adv();
+        let mut line_break = None;
         while let Some(c) = self.peek() {
             if c == '*' && self.peek_at(1) == Some('/') {
                 self.adv();
                 self.adv();
-                return;
+                break;
+            }
+            if c == '\n' && line_break.is_none() {
+                line_break = Some(self.pos());
             }
             self.adv();
         }
+        // a comment over several lines ends its line like a line break
+        if let Some(q) = line_break {
+            self.line_end(q);
+        }
     }
 
+    /// A word. Letters outside ASCII are `L1` once per word; the word stays one token.
     fn ident(&mut self) {
         let p = self.pos();
         let start = self.i;
-        while matches!(self.peek(), Some(c) if c.is_ascii_alphanumeric() || c == '_') {
+        let mut foreign = None;
+        while let Some(c) = self.peek().filter(|&c| c.is_alphanumeric() || c == '_') {
+            if !c.is_ascii() && foreign.is_none() {
+                foreign = Some((c, self.pos()));
+            }
             self.adv();
         }
         let text: String = self.chars[start..self.i].iter().map(|&(_, c)| c).collect();
+        if let Some((c, q)) = foreign {
+            // a name is reported where it first occurs, not at every use
+            if !self.foreign_words.contains(&text) {
+                self.foreign_words.push(text.clone());
+                self.err(
+                    "L1",
+                    q,
+                    format!("`{c}` is only allowed in strings and comments"),
+                    Some("names use ASCII letters, digits and _"),
+                );
+            }
+        }
         let tok = match KEYWORDS.iter().find(|&&k| k == text) {
             Some(k) => Tok::Kw(k),
             None => Tok::Ident(text),
@@ -269,48 +309,77 @@ impl<'a> Lexer<'a> {
         self.push(tok, p);
     }
 
+    /// Number literals exactly as in spec §1.4; every other form is `L8` and still
+    /// one token, so the parser sees no follow-up error.
     fn number(&mut self) {
         let p = self.pos();
-        let first = self.peek().unwrap_or('0');
-        if first == '0' && matches!(self.peek_at(1), Some('x' | 'X' | 'b' | 'B')) {
-            let radix = if matches!(self.peek_at(1), Some('x' | 'X')) {
-                16
+        let start = self.i;
+        if self.peek() == Some('0') && matches!(self.peek_at(1), Some('x' | 'X' | 'b' | 'B')) {
+            let mark = self.peek_at(1).unwrap_or('x');
+            let (radix, prefix, kind) = if mark.eq_ignore_ascii_case(&'x') {
+                (16, "0x", "hex")
             } else {
-                2
+                (2, "0b", "binary")
             };
             self.adv();
             self.adv();
+            let underscore = self.peek() == Some('_');
             let digits = self.take_digits(|c| c.is_digit(radix));
+            if self.bad_tail(p, kind) {
+                return;
+            }
+            if digits.is_empty() {
+                let msg = format!("`{prefix}` without digits");
+                self.err("L8", p, msg, None);
+            } else if mark.is_ascii_uppercase() || underscore {
+                let msg = format!("write the prefix as `{prefix}`, directly followed by a digit");
+                let hint = format!("write {prefix}{}", digits.to_lowercase());
+                self.err("L8", p, msg, Some(&hint));
+            }
             self.push_int(&digits, radix, p);
             return;
         }
         let int_part = self.take_digits(|c| c.is_ascii_digit());
-        let is_float =
-            self.peek() == Some('.') && matches!(self.peek_at(1), Some(c) if c.is_ascii_digit());
-        let has_exp = matches!(self.peek(), Some('e' | 'E'))
-            && (matches!(self.peek_at(1), Some(c) if c.is_ascii_digit())
-                || (matches!(self.peek_at(1), Some('+' | '-'))
-                    && matches!(self.peek_at(2), Some(c) if c.is_ascii_digit())));
-        if is_float || has_exp {
-            let mut text = int_part;
-            if is_float {
+        let mut text = int_part.clone();
+        let mut float = false;
+        if self.peek() == Some('.') && matches!(self.peek_at(1), Some(c) if c.is_ascii_digit()) {
+            float = true;
+            self.adv();
+            text.push('.');
+            text.push_str(&self.take_digits(|c| c.is_ascii_digit()));
+        }
+        let exp_digit = |c: Option<char>| matches!(c, Some(c) if c.is_ascii_digit());
+        if matches!(self.peek(), Some('e' | 'E'))
+            && (exp_digit(self.peek_at(1))
+                || (matches!(self.peek_at(1), Some('+' | '-')) && exp_digit(self.peek_at(2))))
+        {
+            float = true;
+            self.adv();
+            text.push('e');
+            if let Some(s @ ('+' | '-')) = self.peek() {
+                text.push(s);
                 self.adv();
-                text.push('.');
-                text.push_str(&self.take_digits(|c| c.is_ascii_digit()));
             }
-            if matches!(self.peek(), Some('e' | 'E')) {
-                text.push('e');
+            while let Some(c) = self.peek().filter(|c| c.is_ascii_digit()) {
+                text.push(c);
                 self.adv();
-                if let Some(s @ ('+' | '-')) = self.peek() {
-                    text.push(s);
-                    self.adv();
-                }
-                text.push_str(&self.take_digits(|c| c.is_ascii_digit()));
             }
+            if self.peek() == Some('_') {
+                self.skip_word();
+                self.err("L8", p, "`_` is not allowed in an exponent", None);
+                self.push(Tok::Float(text), p);
+                return;
+            }
+        }
+        if self.bad_tail(p, "decimal") {
+            return;
+        }
+        if float {
             self.push(Tok::Float(text), p);
             return;
         }
-        if int_part.len() > 1 && int_part.starts_with('0') {
+        let raw: String = self.chars[start..self.i].iter().map(|&(_, c)| c).collect();
+        if raw.len() > 1 && raw.starts_with('0') {
             let trimmed = int_part.trim_start_matches('0');
             let hint = format!(
                 "write {}; octal literals do not exist",
@@ -319,6 +388,34 @@ impl<'a> Lexer<'a> {
             self.err("L8", p, "integer literal with a leading zero", Some(&hint));
         }
         self.push_int(&int_part, 10, p);
+    }
+
+    /// Letters, digits or `_` directly after a number: one `L8` for the whole word.
+    fn bad_tail(&mut self, p: Pos, kind: &str) -> bool {
+        let Some(c) = self.peek().filter(|&c| c.is_alphanumeric() || c == '_') else {
+            return false;
+        };
+        let exponent = kind == "decimal" && matches!(c, 'e' | 'E');
+        self.skip_word();
+        if exponent && matches!(self.peek(), Some('+' | '-')) {
+            self.adv();
+        }
+        let msg = if exponent {
+            "exponent without digits".to_string()
+        } else if kind != "decimal" && c.is_ascii_alphanumeric() {
+            format!("`{c}` is not a {kind} digit")
+        } else {
+            format!("a number cannot be directly followed by `{c}`")
+        };
+        self.err("L8", p, msg, None);
+        self.push(Tok::Int(0), p);
+        true
+    }
+
+    fn skip_word(&mut self) {
+        while matches!(self.peek(), Some(c) if c.is_alphanumeric() || c == '_') {
+            self.adv();
+        }
     }
 
     /// Digits accepted by `ok`, with `_` separators removed.
@@ -348,8 +445,6 @@ impl<'a> Lexer<'a> {
         }
         if too_big {
             self.err("L4", p, "integer literal is larger than 2^64 - 1", None);
-        } else if digits.is_empty() {
-            self.err("S1", p, "number prefix without digits", None);
         }
         self.push(Tok::Int(v), p);
     }
@@ -368,6 +463,10 @@ impl<'a> Lexer<'a> {
                         "string is not closed on this line",
                         Some("add `\"` at the end of the string"),
                     );
+                    // the line ends here: brackets opened on it cannot hold the next lines
+                    while matches!(self.brackets.last(), Some('(' | '[')) {
+                        self.brackets.pop();
+                    }
                     break;
                 }
                 Some('"') => {
@@ -417,18 +516,37 @@ impl<'a> Lexer<'a> {
             Some('u') if self.peek_at(1) == Some('{') => {
                 self.adv();
                 self.adv();
-                let hex = self.take_digits(|c| c.is_ascii_hexdigit());
-                if self.peek() == Some('}') {
+                let mut hex = String::new();
+                while let Some(c) = self.peek().filter(|c| c.is_ascii_hexdigit()) {
+                    hex.push(c);
+                    self.adv();
+                }
+                if self.peek() == Some('}') && !hex.is_empty() {
                     self.adv();
                     match u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
                         Some(c) => lit.push(c),
-                        None => self.err("L6", p, "invalid unicode escape", None),
+                        None => {
+                            let msg = format!("`\\u{{{hex}}}` is not a valid character");
+                            self.err("L6", p, msg, None);
+                        }
                     }
                 } else {
-                    self.err("L6", p, "unclosed unicode escape", Some("write \\u{1F600}"));
+                    self.err(
+                        "L6",
+                        p,
+                        "invalid unicode escape",
+                        Some("write hex digits in braces: \\u{1F600}"),
+                    );
+                    while !matches!(self.peek(), None | Some('\n' | '"' | '}')) {
+                        self.adv();
+                    }
+                    if self.peek() == Some('}') {
+                        self.adv();
+                    }
                 }
                 return;
             }
+            None | Some('\n') => return, // the caller reports the open string (L5)
             _ => {
                 self.err(
                     "L6",
@@ -453,6 +571,16 @@ impl<'a> Lexer<'a> {
             match self.peek() {
                 Some('}') => break,
                 None | Some('\n') => return None, // reported as L5 by the caller
+                Some('"') if !self.rest_of_line_has('}') => {
+                    // the string ends here; the `{` was meant literally or never closed
+                    self.err(
+                        "L6",
+                        open,
+                        "`{` in a string is not closed",
+                        Some("close it with `}`, or write \\{ for a literal brace"),
+                    );
+                    return None;
+                }
                 Some(c @ ('"' | '{')) => {
                     let q = self.pos();
                     self.err(
@@ -474,8 +602,21 @@ impl<'a> Lexer<'a> {
         }
         let a = self.chars[from].0;
         let b = self.chars[self.i].0;
-        let text = &self.src[a..b];
+        let mut text = &self.src[a..b];
         self.adv();
+        if let Some(k) = text.find(':') {
+            let q = Pos {
+                line: start.line,
+                col: start.col + text[..k].chars().count() as u32,
+                offset: start.offset + k as u32,
+            };
+            let msg = "format specifications like `{x:.2f}` are not available yet";
+            self.err("S1", q, msg, None);
+            text = &text[..k];
+            if text.trim().is_empty() {
+                return None;
+            }
+        }
         if text.trim().is_empty() {
             self.err(
                 "S1",
@@ -502,8 +643,19 @@ impl<'a> Lexer<'a> {
                 "(" => self.brackets.push('('),
                 "[" => self.brackets.push('['),
                 "{" => self.brackets.push('{'),
-                ")" | "]" | "}" => {
+                ")" if self.brackets.last() == Some(&'(') => {
                     self.brackets.pop();
+                }
+                "]" if self.brackets.last() == Some(&'[') => {
+                    self.brackets.pop();
+                }
+                "}" => {
+                    // also closes `(`/`[` left open inside the block
+                    while let Some(b) = self.brackets.pop() {
+                        if b == '{' {
+                            break;
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -512,16 +664,37 @@ impl<'a> Lexer<'a> {
         }
         let c = self.peek().unwrap_or(' ');
         self.adv();
-        if c.is_ascii() {
-            self.err("L1", p, format!("unexpected character `{c}`"), None);
+        let invisible = c.is_whitespace()
+            || c.is_control()
+            || matches!(c, '\u{200B}'..='\u{200F}' | '\u{2060}' | '\u{FEFF}');
+        let (msg, hint) = if invisible {
+            let hint = match c {
+                '\u{FEFF}' => "save the file as UTF-8 without BOM",
+                c if c.is_whitespace() => "replace it with a normal space",
+                _ => "remove it",
+            };
+            let msg = format!(
+                "invisible character U+{:04X} is only allowed in strings and comments",
+                c as u32
+            );
+            (msg, Some(hint))
+        } else if c.is_ascii() {
+            (format!("unexpected character `{c}`"), None)
         } else {
-            self.err(
-                "L1",
-                p,
+            (
                 format!("`{c}` is only allowed in strings and comments"),
                 None,
-            );
-        }
+            )
+        };
+        self.err("L1", p, msg, hint);
+    }
+
+    fn rest_of_line_has(&self, want: char) -> bool {
+        self.chars[self.i..]
+            .iter()
+            .map(|&(_, c)| c)
+            .take_while(|&c| c != '\n')
+            .any(|c| c == want)
     }
 }
 
@@ -565,12 +738,55 @@ mod tests {
         assert_eq!(codes("010"), ["L8"]);
         assert_eq!(codes("@"), ["L1"]);
         assert_eq!(codes("ä"), ["L1"]);
+        // one L1 per word, and the word stays one token
+        assert_eq!(codes("größe"), ["L1"]);
+        assert_eq!(kinds("größe").len(), 2);
+        let d = &lex("\u{FEFF}x").1[0];
+        assert!(d.msg.starts_with("invisible character U+FEFF"), "{}", d.msg);
+        // \u{…} takes hex digits only
+        assert_eq!(codes("\"\\u{1_F600}\""), ["L6"]);
+        assert_eq!(codes("\"\\u{1F600}\""), [] as [&str; 0]);
+        // an unclosed `{` ends at the string's end, without L5
+        assert_eq!(codes("\"a {x\""), ["L6"]);
+    }
+
+    #[test]
+    fn number_forms() {
+        // every form outside the grammar of spec §1.4 is one L8, and one token
+        for src in [
+            "0X10", "0B11", "0x_ff", "0b_1", "0x", "0b", "1e1_0", "0b102", "0xfg", "1e", "1e+",
+            "12ab", "0_1", "0_",
+        ] {
+            assert_eq!(codes(src), ["L8"], "{src}");
+            assert_eq!(kinds(src).len(), 2, "{src}");
+        }
+        for src in [
+            "0", "0.5", "1_000", "0xff_ff", "0b1_0", "1e10", "2.5e-3", "1_0.0_1",
+        ] {
+            assert_eq!(codes(src), [] as [&str; 0], "{src}");
+        }
+    }
+
+    #[test]
+    fn brackets_close_in_order() {
+        // `}` closes a `(` left open in its block, so later lines get their Nl again
+        let n = kinds("{ f(\n}\na\nb")
+            .iter()
+            .filter(|t| **t == Tok::Nl)
+            .count();
+        assert_eq!(n, 2);
+        // an unclosed string ends its line and the brackets opened on it
+        let n = kinds("f(\"abc\nb\nc")
+            .iter()
+            .filter(|t| **t == Tok::Nl)
+            .count();
+        assert_eq!(n, 2);
     }
 
     #[test]
     fn literals_and_interpolation() {
         assert_eq!(
-            kinds("1_000 0x_ff 0b101 2.5 1e3")[..5],
+            kinds("1_000 0xff 0b101 2.5 1e3")[..5],
             [
                 Tok::Int(1000),
                 Tok::Int(255),

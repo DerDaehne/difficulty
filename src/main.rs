@@ -18,8 +18,18 @@ fn main() -> ExitCode {
 }
 
 fn check(args: &[String]) -> ExitCode {
-    let json = args.iter().any(|a| a == "--json");
-    let files: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
+    let mut json = false;
+    let mut files = Vec::new();
+    for a in args {
+        match a.as_str() {
+            "--json" => json = true,
+            o if o.starts_with('-') => {
+                eprintln!("dif: unknown option {o}\n{USAGE}");
+                return ExitCode::from(2);
+            }
+            _ => files.push(a),
+        }
+    }
     let [file] = files.as_slice() else {
         eprintln!("{USAGE}");
         return ExitCode::from(2);

@@ -19,9 +19,9 @@ Ein Verstoß gegen eine Regel trägt deren Nummer: `error[R13]`. Schreibfehler, 
 | `L3` | `;` |
 | `L4` | Ganzzahl-Literal größer als 2⁶⁴ − 1 |
 | `L5` | String reicht über das Zeilenende |
-| `L6` | unbekannte Escape-Sequenz oder einzelnes `}` im String |
+| `L6` | unbekannte Escape-Sequenz, einzelnes `}` oder nicht geschlossenes `{` im String |
 | `L7` | `++` oder `--` |
-| `L8` | Ganzzahl-Literal mit führender Null (`010`) |
+| `L8` | Zahl-Literal in falscher Form: führende Null (`010`), Präfix `0X`/`0B`, `_` direkt nach dem Präfix oder im Exponenten, fehlende oder falsche Ziffern (`0x`, `0b12`, `1e`), Buchstaben direkt nach der Zahl |
 | `S1` | unerwartetes Token |
 | `S2` | Vergleichskette `a < b < c` |
 | `S3` | `&&` und `\|\|` gemischt ohne Klammern |
@@ -31,7 +31,13 @@ Jede Meldung nennt Datei, Zeile und Spalte (beide ab 1; Spalten zählen Zeichen,
 
 **Eine Ursache, eine Meldung.** Erkennt der Compiler eine Schreibweise aus einer anderen Sprache als Ganzes (C-Schleife `for (…;…;…)`, `var x = …`, `elif`, `function f(…)`), meldet er nur die Regel, deren Schreibweise sie ersetzt, mit dem passenden Hinweis; die Zeichen darin (etwa `;`) erzeugen keine weitere Meldung. Sonst wird der erste Fehler einer Anweisung gemeldet.
 
-**Weiterlesen nach einem Fehler.** Der Parser überspringt den Rest der Anweisung bis zum Zeilenende auf derselben Klammerebene und einen dort direkt folgenden Block. Eine Deklaration in fremder Schreibweise (`var x = 5`) gilt danach als Deklaration mit dem abgeleiteten Typ, damit keine Folgefehler entstehen.
+**Weiterlesen nach einem Fehler.** Der Parser überspringt den Rest der Anweisung bis zum Zeilenende auf derselben Klammerebene und einen dort direkt folgenden Block. Eine Deklaration in fremder Schreibweise (`var x = 5`) gilt danach als Deklaration mit dem abgeleiteten Typ, damit keine Folgefehler entstehen; ebenso ein reserviertes Wort als Name (`bool ok = true`), dessen spätere Benutzungen nicht erneut gemeldet werden.
+
+- Jede Anweisung und jede Deklaration meldet höchstens einen Syntaxfehler. Die Anweisungen eines Blocks darin zählen für sich.
+- Lexikfehler werden immer gemeldet. Zerreißt einer den Token-Strom (`L1`, `L5`), entfällt der Syntaxfehler, den er in seiner Anweisung auslöst.
+- Fehlt eine `)` oder `]` und geht es in der nächsten Zeile weiter, steht die Meldung an der öffnenden Klammer.
+- Beginnt in einem Block eine Funktionsdeklaration (`T name(`), fehlt davor eine `}`: gemeldet wird einmal am innersten offenen Block, die Funktion wird normal gelesen.
+- Verschachtelung tiefer als 256 Ebenen (Blöcke und Ausdrücke) ist `S1`.
 
 ```
 fib.dif:6:5: error[R13]: result of `fib(3)` is never used
@@ -72,11 +78,11 @@ hexdigit = digit | "a" … "f" | "A" … "F" ;
 IDENT   = letter { letter | digit } ;
 ```
 
-Ein Bezeichner, der ein Schlüsselwort oder ein reserviertes Wort ist (§1.5), ist kein `IDENT`. `_` allein ist der Platzhalter „verwerfen“ (`_ = f()`), kein Name.
+Ein Bezeichner, der ein Schlüsselwort oder ein reserviertes Wort ist (§1.5), ist kein `IDENT`; an der Stelle eines Namens ist er `S1`, Hinweis `choose another name`. Ein Wort mit Buchstaben außerhalb von ASCII (`größe`) ist einmal pro Wort `L1`. `_` allein ist der Platzhalter „verwerfen“ (`_ = f()`), kein Name.
 
 ### 1.2 Kommentare
 
-`//` bis Zeilenende. `///` ist ein Doku-Kommentar und gehört zur folgenden Deklaration (`dif doc`, Doc-Tests). `/* … */` gibt es nicht: `L2`, Hinweis `use // for comments`.
+`//` bis Zeilenende. `///` ist ein Doku-Kommentar und gehört zur folgenden Deklaration (`dif doc`, Doc-Tests). `/* … */` gibt es nicht: `L2`, Hinweis `use // for comments`. Ein `/* …` ohne `*/` endet mit seiner Zeile; ein `/* … */` über mehrere Zeilen beendet die Zeile wie ein Zeilenumbruch.
 
 ### 1.3 Zeilenende und Fortsetzung
 
@@ -103,8 +109,9 @@ interp   = "{" expr [ ":" format ] "}" ;
 
 - `_` in Zahlen dient nur der Lesbarkeit: `1_000_000`. Ein Ganzzahl-Literal größer als 2⁶⁴ − 1 ist `L4`; ob ein kleineres an seiner Stelle passt, prüft R8.
 - Eine Ganzzahl mit führender Null (`010`) ist `L8`, Hinweis `write 10; octal literals do not exist`. `0` allein und `0.5` sind erlaubt.
+- Jede andere Form außerhalb der Grammatik ist ebenfalls `L8` und bleibt ein Token: `0X10`, `0x_ff`, `0x`, `0b102`, `1e`, `1e1_0`, `12ab`.
 - Ein String reicht nicht über das Zeilenende hinaus (`L5`). Eine unbekannte Escape-Sequenz ist `L6`. `\{` und `\}` schreiben eine wörtliche Klammer; ein einzelnes `}` ohne `\` ist `L6`.
-- `{expr}` setzt den Wert von `expr` als Text ein; `expr` muss `text` sein (R28). Im Ausdruck einer Interpolation stehen keine Strings und keine geschweiften Klammern (`S1`). Formatangaben `{x:.2f}` werden in Teil 2 festgelegt.
+- `{expr}` setzt den Wert von `expr` als Text ein; `expr` muss `text` sein (R28). Im Ausdruck einer Interpolation stehen keine Strings und keine geschweiften Klammern (`S1`). Formatangaben `{x:.2f}` werden in Teil 2 festgelegt; bis dahin sind sie `S1`.
 
 ### 1.5 Wörter
 
@@ -221,6 +228,8 @@ var_decl   = [ "const" ] type IDENT "=" expr ;
 - `void` steht nur als Rückgabetyp.
 - Eine Variable wird bei der Deklaration immer initialisiert; `int n` ohne `=` ist `R2`, Hinweis `give it a value: int n = 0`.
 - Schreibweisen aus anderen Sprachen: `var x = 1`, `let x = 1`, `auto x = 1` sind `R2`, Hinweis mit dem abgeleiteten Typ (`int x = 1`, per `dif fix`). `def`, `fn`, `function`, `func` vor einer Funktion sind `R2`, Hinweis `the return type comes first: int add(int a, int b)`.
+- `name: T` in einer Parameterliste und `-> T` nach ihr sind `R2`, Hinweis mit der ganzen Kopfzeile in Typ-vorn-Schreibweise (`int add(int a, int b) {`). `void main(void)` ist `S1`, Hinweis `void main() {`.
+- Schleifenvariablen ohne Typ (`for i in range(10)`) sind `R2`, Hinweis `for int i in range(10)`.
 - Eine Zuweisung an einen unbekannten Namen ist `R2`, Hinweis `declare it with a type: int x = …`.
 
 ```dif
@@ -265,10 +274,11 @@ discard     = "_" "=" expr ;
 
 - Jeder Block steht in `{ }`, auch bei einer einzigen Anweisung: `if x > 0 print(x)` ist `R3`, Hinweis `put the body in braces: if x > 0 { … }`.
 - Das `{` eines Blocks steht in derselben Zeile wie seine Kopfzeile; `}` und `else` stehen in einer Zeile (`} else {`).
-- Zwei Anweisungen in einer Zeile sind `R3`, Hinweis `put each statement on its own line`.
+- Zwei Anweisungen in einer Zeile sind `R3`, Hinweis `put each statement on its own line`. Folgt einer Anweisung ein Token, das keine Anweisung beginnen kann (`)`, `=`), ist das `S1`.
 - Die Kopfzeile endet am ersten `{` auf Klammerebene 0. Darum ist `if hall.is_full() { … }` immer eine Bedingung mit Rumpf, nie ein Aufruf mit Block-Argument (R26).
 - Klammern um die Bedingung sind erlaubt (`if (x > 0) {` ist ein Klammerausdruck); `dif fmt` entfernt sie.
-- `elif` (Python) und `elsif` (Ruby, Perl) sind `R3`, Hinweis `use else if`.
+- `elif` (Python) und `elsif` (Ruby, Perl) sind `R3`, Hinweis `use else if`, auch direkt nach `}`; der Zweig wird danach wie `else if` gelesen.
+- `=` in einer Bedingung (`if x = 1 {`) ist `S1`, Hinweis `if x == 1 {`.
 - Eine Anweisung, die weder Aufruf noch Zuweisung noch Deklaration ist (z. B. `x + 1` allein), ist `S4`.
 
 ```dif snippet

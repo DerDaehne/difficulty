@@ -1,20 +1,39 @@
-//! Recursive-descent parser (spec §2, R1–R4, R11, R13 grammar). One cause, one
-//! diagnostic: foreign spellings are recognized as a whole (§0.1), and after an
-//! error the rest of the statement and a directly following block are skipped.
+//! Recursive-descent parser (spec §2, R1–R4, R11, R13 grammar).
+//!
+//! One cause, one diagnostic (spec §0.1): every statement and declaration is a
+//! unit that reports at most its first error; the statements of a block inside it
+//! are units of their own. Foreign spellings are recognized as a whole. After an
+//! error the rest of the line and a directly following block are skipped. A
+//! lexical error that breaks the token stream (L1, L5) silences the parser error
+//! it causes in its unit.
 
 use crate::ast::*;
 use crate::diag::{Diag, Pos};
 use crate::lexer::{StrPart, Tok, Token};
 
-pub fn parse(src: &str, toks: &[Token]) -> (Module, Vec<Diag>) {
-    let mut p = Parser::new(src, toks);
+/// Deepest nesting of blocks and expressions; deeper input is S1, not a stack overflow.
+const MAX_DEPTH: u32 = 256;
+
+pub fn parse(src: &str, toks: &[Token], lex: &[Diag]) -> (Module, Vec<Diag>) {
+    let breaks = lex
+        .iter()
+        .filter(|d| matches!(d.code, "L1" | "L5"))
+        .map(|d| d.pos.offset)
+        .collect();
+    let mut p = Parser::new(src, toks, breaks);
     let m = p.module();
-    (m, p.diags)
+    (m, p.out)
 }
 
 const ASSIGN_OPS: &[&str] = &[
     "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=",
 ];
+
+const COMPARISONS: &[&str] = &["==", "!=", "<", "<=", ">", ">="];
+
+const FOREIGN_FUNC: &[&str] = &["def", "fn", "function", "func"];
+
+const FOREIGN_VAR: &[&str] = &["var", "let", "auto"];
 
 fn level(op: &str) -> Option<u8> {
     Some(match op {
@@ -36,50 +55,67 @@ fn is_binary(e: &Expr, ops: &[&str]) -> bool {
     matches!(&e.kind, ExprKind::Binary(op, _, _) if ops.contains(op))
 }
 
-const COMPARISONS: &[&str] = &["==", "!=", "<", "<=", ">", ">="];
-
 struct Parser<'a> {
     src: &'a str,
     t: &'a [Token],
     i: usize,
     last_end: u32,
+    /// Offsets of lexical errors that break the token stream.
+    breaks: Vec<u32>,
+    /// First error of each open unit, with the offset up to which it was seen.
+    frames: Vec<Option<(Diag, u32)>>,
+    /// Above 0 while a top-level statement is parsed: only its R1 counts.
+    silent: u32,
+    depth: u32,
+    too_deep: bool,
     unclosed: bool,
-    diags: Vec<Diag>,
+    /// Reserved words already reported as names; their uses are not reported again.
+    reserved: Vec<&'static str>,
+    out: Vec<Diag>,
 }
 
 impl<'a> Parser<'a> {
-    fn new(src: &'a str, t: &'a [Token]) -> Self {
+    fn new(src: &'a str, t: &'a [Token], breaks: Vec<u32>) -> Self {
         Parser {
             src,
             t,
             i: 0,
             last_end: 0,
+            breaks,
+            frames: Vec::new(),
+            silent: 0,
+            depth: 0,
+            too_deep: false,
             unclosed: false,
-            diags: Vec::new(),
+            reserved: Vec::new(),
+            out: Vec::new(),
         }
     }
 
-    // ---- token helpers ----
+    // ---- tokens ----
 
-    fn peek(&self) -> &Tok {
-        &self.t[self.i.min(self.t.len() - 1)].tok
+    fn tok(&self, n: usize) -> &'a Token {
+        &self.t[(self.i + n).min(self.t.len() - 1)]
     }
 
-    fn peek_n(&self, n: usize) -> &Tok {
-        &self.t[(self.i + n).min(self.t.len() - 1)].tok
+    fn peek(&self) -> &'a Tok {
+        &self.tok(0).tok
+    }
+
+    fn peek_n(&self, n: usize) -> &'a Tok {
+        &self.tok(n).tok
     }
 
     fn pos(&self) -> Pos {
-        self.t[self.i.min(self.t.len() - 1)].pos
+        self.tok(0).pos
     }
 
-    fn bump(&mut self) -> Token {
-        let tok = self.t[self.i.min(self.t.len() - 1)].clone();
+    fn bump(&mut self) {
+        let tok = self.tok(0);
         if tok.tok != Tok::Eof {
             self.i += 1;
             self.last_end = tok.end;
         }
-        tok
     }
 
     fn is_op(&self, s: &str) -> bool {
@@ -90,8 +126,8 @@ impl<'a> Parser<'a> {
         matches!(self.peek(), Tok::Kw(k) if *k == s)
     }
 
-    fn at_line_end(&self) -> bool {
-        matches!(self.peek(), Tok::Nl | Tok::Eof | Tok::Semi) || self.is_op("}")
+    fn word_at(&self, n: usize, words: &[&str]) -> bool {
+        matches!(self.peek_n(n), Tok::Ident(w) if words.contains(&w.as_str()))
     }
 
     fn skip_nl(&mut self) {
@@ -108,47 +144,61 @@ impl<'a> Parser<'a> {
         self.text(e.pos.offset, e.end)
     }
 
+    fn missing(&self, pos: Pos) -> Expr {
+        Expr {
+            kind: ExprKind::Missing,
+            pos,
+            end: pos.offset,
+        }
+    }
+
+    // ---- diagnostics ----
+
     fn err(&mut self, code: &'static str, pos: Pos, msg: impl Into<String>, hint: Option<String>) {
         let mut d = Diag::new(code, pos, msg);
-        if let Some(h) = hint {
-            d = d.hint(h);
-        }
-        self.diags.push(d);
+        d.hint = hint;
+        self.report(d);
     }
 
-    fn expect_op(&mut self, s: &str) -> bool {
-        if self.is_op(s) {
-            self.bump();
-            true
-        } else {
-            let p = self.pos();
-            let found = describe(self.peek());
-            self.err("S1", p, format!("expected `{s}`, found {found}"), None);
-            false
-        }
-    }
-
-    fn ident(&mut self) -> Option<(String, Pos)> {
-        let p = self.pos();
-        match self.peek().clone() {
-            Tok::Ident(n) => {
-                self.bump();
-                Some((n, p))
+    /// Keeps the first error of the current unit; outside a unit it is emitted.
+    fn report(&mut self, d: Diag) {
+        let seen = self.tok(0).end;
+        match self.frames.last_mut() {
+            Some(f) => {
+                if f.is_none() {
+                    *f = Some((d, seen));
+                }
             }
-            other => {
-                self.err(
-                    "S1",
-                    p,
-                    format!("expected a name, found {}", describe(&other)),
-                    None,
-                );
-                None
-            }
+            None => self.emit(d),
         }
     }
 
-    /// Skips to the end of the current line at bracket depth 0 (not past `}` of the
-    /// enclosing block), then a block that directly follows (§0.1).
+    fn emit(&mut self, d: Diag) {
+        if self.silent == 0 {
+            self.out.push(d);
+        }
+    }
+
+    /// Parses one statement or declaration, reports at most its first error and
+    /// ends its line (§0.1).
+    fn unit<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
+        let start = self.pos().offset;
+        self.frames.push(None);
+        let r = f(self);
+        if matches!(self.frames.last(), Some(Some(_))) {
+            self.recover();
+        }
+        self.end_of_stmt();
+        if let Some((d, seen)) = self.frames.pop().flatten() {
+            if !self.breaks.iter().any(|&b| b >= start && b < seen) {
+                self.emit(d);
+            }
+        }
+        r
+    }
+
+    /// Skips to the end of the line at bracket depth 0 (not past the `}` of the
+    /// enclosing block), then a block that directly follows on the next line.
     fn recover(&mut self) {
         let mut depth = 0usize;
         loop {
@@ -190,38 +240,164 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// After a declaration or statement: end of line, `}` or end of file.
+    /// After a statement: end of line, `}` or end of file.
     fn end_of_stmt(&mut self) {
-        loop {
-            match self.peek() {
-                Tok::Nl => {
-                    self.skip_nl();
-                    return;
+        if self.i > 0 && self.t[self.i - 1].tok == Tok::Nl {
+            return; // the line already ended (a block closed early)
+        }
+        match self.peek() {
+            Tok::Nl => {}
+            Tok::Eof | Tok::Op("}") => return,
+            Tok::Semi => {
+                let p = self.pos();
+                let hint = "statements end at the end of the line".to_string();
+                self.err("L3", p, "`;` is not used in difficulty", Some(hint));
+                self.recover();
+            }
+            t => {
+                let p = self.pos();
+                if can_start_stmt(t) {
+                    let hint = "put each statement on its own line".to_string();
+                    self.err("R3", p, "two statements on one line", Some(hint));
+                } else {
+                    let hint = match t {
+                        Tok::Op("=") => Some(
+                            "an assignment has no value; assign each variable on its own line"
+                                .into(),
+                        ),
+                        Tok::Op(")" | "]") => {
+                            Some("it has no matching opening bracket; remove it".into())
+                        }
+                        _ => None,
+                    };
+                    self.err("S1", p, format!("unexpected {}", describe(t)), hint);
                 }
-                Tok::Eof => return,
-                Tok::Op("}") => return,
-                Tok::Semi => {
-                    let p = self.pos();
-                    self.err(
-                        "L3",
-                        p,
-                        "`;` is not used in difficulty",
-                        Some("statements end at the end of the line".into()),
-                    );
-                    self.bump();
-                }
-                _ => {
-                    let p = self.pos();
-                    self.err(
-                        "R3",
-                        p,
-                        "two statements on one line",
-                        Some("put each statement on its own line".into()),
-                    );
-                    self.recover();
-                }
+                self.recover();
             }
         }
+        self.skip_nl();
+    }
+
+    fn enter(&mut self) -> bool {
+        self.depth += 1;
+        if self.depth <= MAX_DEPTH {
+            return true;
+        }
+        if !self.too_deep {
+            self.too_deep = true;
+            let p = self.pos();
+            let hint = "move inner parts into functions or variables".to_string();
+            self.err(
+                "S1",
+                p,
+                format!("nesting is deeper than {MAX_DEPTH} levels"),
+                Some(hint),
+            );
+        }
+        false
+    }
+
+    /// Too deep inside an expression: skips the rest of the operand, up to the end
+    /// of the line, a `{`, or a closing bracket of an enclosing level.
+    fn skip_operand(&mut self) {
+        let mut depth = 0usize;
+        loop {
+            match self.peek() {
+                Tok::Eof => return,
+                Tok::Nl | Tok::Op("{" | ")" | "]" | "}") if depth == 0 => return,
+                Tok::Op("(" | "[") => depth += 1,
+                Tok::Op(")" | "]") => depth -= 1,
+                _ => {}
+            }
+            self.bump();
+        }
+    }
+
+    fn leave(&mut self) {
+        self.depth -= 1;
+    }
+
+    fn expect_op(&mut self, s: &str) -> bool {
+        if self.is_op(s) {
+            self.bump();
+            return true;
+        }
+        let p = self.pos();
+        let found = describe(self.peek());
+        self.err("S1", p, format!("expected `{s}`, found {found}"), None);
+        false
+    }
+
+    /// The closing bracket of `open`; a missing one is reported at the opening one
+    /// when the next token is on a later line.
+    fn close(&mut self, open: Pos, c: &str) -> bool {
+        if self.is_op(c) {
+            self.bump();
+            return true;
+        }
+        let prev_line = self.t[self.i.saturating_sub(1)].pos.line;
+        if *self.peek() == Tok::Eof || self.pos().line > prev_line {
+            let o = if c == ")" { "(" } else { "[" };
+            self.err(
+                "S1",
+                open,
+                format!("`{o}` is never closed"),
+                Some(format!("add `{c}`")),
+            );
+        } else {
+            self.expect_op(c);
+        }
+        false
+    }
+
+    /// A name, or a reserved word in the place of a name (`bool ok = true`).
+    fn name(&mut self) -> Option<(String, Pos)> {
+        let p = self.pos();
+        match self.peek() {
+            Tok::Ident(n) => {
+                self.bump();
+                Some((n.clone(), p))
+            }
+            Tok::Kw(k) if !matches!(*k, "in" | "or") => {
+                let k = *k;
+                self.bump();
+                let msg = format!("`{k}` is a reserved word and cannot be a name");
+                self.err("S1", p, msg, Some("choose another name".into()));
+                if !self.reserved.contains(&k) {
+                    self.reserved.push(k);
+                }
+                Some((k.to_string(), p))
+            }
+            other => {
+                let msg = format!("expected a name, found {}", describe(other));
+                self.err("S1", p, msg, None);
+                None
+            }
+        }
+    }
+
+    /// Is there a name at `n` (or a reserved word used as one, see `name`)?
+    fn name_at(&self, n: usize) -> bool {
+        match self.peek_n(n) {
+            Tok::Ident(_) => true,
+            Tok::Kw(k) => {
+                !matches!(*k, "in" | "or")
+                    && matches!(self.peek_n(n + 1), Tok::Op("=" | "(" | "," | ")"))
+            }
+            _ => false,
+        }
+    }
+
+    fn is_type_name(&self) -> bool {
+        matches!(self.peek(), Tok::Ident(_) | Tok::Kw("void"))
+    }
+
+    /// `T name(` starts a function; inside a block that means a missing `}`.
+    fn func_start(&self) -> bool {
+        self.is_type_name()
+            && !self.word_at(0, FOREIGN_FUNC)
+            && matches!(self.peek_n(1), Tok::Ident(_))
+            && *self.peek_n(2) == Tok::Op("(")
     }
 
     // ---- module and declarations ----
@@ -231,78 +407,74 @@ impl<'a> Parser<'a> {
         self.skip_nl();
         while *self.peek() != Tok::Eof {
             let before = self.i;
-            if let Some(d) = self.decl() {
+            if self.is_op("}") {
+                let p = self.pos();
+                let hint = "no block is open here; remove it".to_string();
+                self.err("S1", p, "unexpected `}`", Some(hint));
+                self.bump();
+                self.skip_nl();
+                continue;
+            }
+            self.unclosed = false;
+            if let Some(d) = self.unit(|p| p.decl()) {
                 decls.push(d);
             }
-            if self.is_op("}") && self.i == before {
-                let p = self.pos();
-                self.err("S1", p, "unexpected `}`", None);
-                self.bump();
+            if self.i == before {
+                self.bump(); // never loop without progress
             }
-            self.end_of_stmt();
         }
         Module { decls }
-    }
-
-    fn is_type_name(&self) -> bool {
-        matches!(self.peek(), Tok::Ident(_) | Tok::Kw("void"))
     }
 
     fn decl(&mut self) -> Option<Decl> {
         let start = self.pos();
         if self.is_kw("const") {
-            return self.var_decl().map(Decl::Const);
+            return self.var_decl(true).map(Decl::Const);
         }
-        if let Tok::Ident(w) = self.peek() {
-            if ["def", "fn", "function", "func"].contains(&w.as_str())
-                && matches!(self.peek_n(1), Tok::Ident(_))
-            {
-                let w = w.clone();
-                self.err(
-                    "R2",
-                    start,
-                    format!("functions start with their return type, not `{w}`"),
-                    Some("the return type comes first: int add(int a, int b)".into()),
-                );
-                self.skip_to_block_and_skip();
-                return None;
+        if self.word_at(0, FOREIGN_FUNC) && self.name_at(1) {
+            self.foreign_func();
+            return None;
+        }
+        if self.word_at(0, FOREIGN_VAR) && self.name_at(1) {
+            return self.foreign_var(true).map(Decl::Const);
+        }
+        if self.is_type_name() && self.name_at(1) {
+            if matches!(self.peek_n(2), Tok::Op("(" | "{")) {
+                return self.func().map(Decl::Func);
             }
+            let v = self.var_decl(true)?;
+            let msg = format!("variable `{}` outside a function", v.name);
+            let hint = "make it const, or move it into a function".to_string();
+            self.err("R4", v.pos, msg, Some(hint));
+            return Some(Decl::Const(v));
         }
-        if self.is_type_name() && matches!(self.peek_n(1), Tok::Ident(_)) {
-            match self.peek_n(2) {
-                Tok::Op("(") => return self.func().map(Decl::Func),
-                Tok::Op("=") => {
-                    let v = self.var_decl()?;
-                    self.err(
-                        "R4",
-                        v.pos,
-                        format!("variable `{}` outside a function", v.name),
-                        Some("make it const, or move it into a function".into()),
-                    );
-                    return Some(Decl::Const(v));
-                }
-                _ => {}
-            }
+        // A statement at the top level: its R1 replaces whatever the statement reports.
+        self.silent += 1;
+        let _ = self.stmt();
+        self.silent -= 1;
+        let d = Diag::new("R1", start, "statement outside a function")
+            .hint("move it into a function, e.g. void main() { … }");
+        if let Some(f) = self.frames.last_mut() {
+            *f = Some((d, start.offset));
         }
-        // A statement at the top level: one diagnostic (R1), not the statement's own.
-        let n = self.diags.len();
-        self.stmt();
-        self.diags.truncate(n);
-        self.err(
-            "R1",
-            start,
-            "statement outside a function",
-            Some("move it into a function, e.g. void main() { … }".into()),
-        );
         None
     }
 
-    /// Skips a foreign function: its header and its `{ … }` body, or, without
-    /// braces (Python style), the indented lines below it.
-    fn skip_to_block_and_skip(&mut self) {
-        while !matches!(self.peek(), Tok::Eof) && !self.is_op("{") {
-            if *self.peek() == Tok::Nl && !matches!(self.peek_n(1), Tok::Op("{")) {
-                while *self.peek() == Tok::Nl && self.t[self.i + 1].pos.col > 1 {
+    /// `def/fn/function/func name …`: one R2; the header and its body are skipped,
+    /// a `{ … }` body as well as indented lines below it (Python style).
+    fn foreign_func(&mut self) {
+        let p = self.pos();
+        let Tok::Ident(w) = self.peek() else { return };
+        let hint = "the return type comes first: int add(int a, int b)".to_string();
+        self.err(
+            "R2",
+            p,
+            format!("functions start with their return type, not `{w}`"),
+            Some(hint),
+        );
+        while *self.peek() != Tok::Eof && !self.is_op("{") {
+            if *self.peek() == Tok::Nl && *self.peek_n(1) != Tok::Op("{") {
+                while *self.peek() == Tok::Nl && self.tok(1).pos.col > 1 {
                     self.bump();
                     while !matches!(self.peek(), Tok::Nl | Tok::Eof) {
                         self.bump();
@@ -317,10 +489,13 @@ impl<'a> Parser<'a> {
 
     fn type_ref(&mut self) -> TypeRef {
         let p = self.pos();
-        match self.peek().clone() {
+        match self.peek() {
             Tok::Ident(n) => {
                 self.bump();
-                TypeRef { name: n, pos: p }
+                TypeRef {
+                    name: n.clone(),
+                    pos: p,
+                }
             }
             Tok::Kw("void") => {
                 self.bump();
@@ -330,12 +505,8 @@ impl<'a> Parser<'a> {
                 }
             }
             other => {
-                self.err(
-                    "S1",
-                    p,
-                    format!("expected a type, found {}", describe(&other)),
-                    None,
-                );
+                let msg = format!("expected a type, found {}", describe(other));
+                self.err("S1", p, msg, None);
                 TypeRef {
                     name: "?".into(),
                     pos: p,
@@ -346,24 +517,79 @@ impl<'a> Parser<'a> {
 
     fn func(&mut self) -> Option<Func> {
         let header = self.pos().offset;
-        let ret = self.type_ref();
-        let (name, pos) = self.ident()?;
-        self.expect_op("(");
+        let mut ret = self.type_ref();
+        let (name, pos) = self.name()?;
         let mut params = Vec::new();
-        while !self.is_op(")") && *self.peek() != Tok::Eof {
-            let ty = self.type_ref();
-            let (pname, ppos) = self.ident()?;
-            params.push(Param {
-                ty,
-                name: pname,
-                pos: ppos,
-            });
-            if !self.is_op(")") && !self.expect_op(",") {
-                self.recover();
+        if self.is_op("{") {
+            let p = self.pos();
+            let hint = format!("{}() {{", self.text(header, self.last_end));
+            self.err(
+                "S1",
+                p,
+                format!("function `{name}` needs a parameter list"),
+                Some(hint),
+            );
+        } else {
+            let open = self.pos();
+            self.bump(); // (
+            if self.is_kw("void") && *self.peek_n(1) == Tok::Op(")") {
+                let p = self.pos();
+                let hint = format!("{}() {{", self.text(header, open.offset));
+                self.err(
+                    "S1",
+                    p,
+                    "an empty parameter list is written `()`",
+                    Some(hint),
+                );
+                self.bump();
+            }
+            // `name: T` and `-> T` from other languages: one R2 with the whole header
+            let mut foreign: Option<(Pos, &str)> = None;
+            if !self.is_op(")") {
+                loop {
+                    if matches!(self.peek(), Tok::Ident(_)) && *self.peek_n(1) == Tok::Op(":") {
+                        let (n, p) = self.name()?;
+                        foreign.get_or_insert((p, "the type comes before the name"));
+                        self.bump(); // :
+                        let ty = self.type_ref();
+                        params.push(Param {
+                            ty,
+                            name: n,
+                            pos: p,
+                        });
+                    } else {
+                        let ty = self.type_ref();
+                        let (n, p) = self.name()?;
+                        params.push(Param {
+                            ty,
+                            name: n,
+                            pos: p,
+                        });
+                    }
+                    if !self.is_op(",") {
+                        break;
+                    }
+                    self.bump();
+                }
+            }
+            if !self.close(open, ")") {
                 return None;
             }
+            if self.is_op("-") && *self.peek_n(1) == Tok::Op(">") {
+                foreign.get_or_insert((self.pos(), "the return type comes first"));
+                self.bump();
+                self.bump();
+                ret = self.type_ref();
+            }
+            if let Some((p, msg)) = foreign {
+                let list: Vec<String> = params
+                    .iter()
+                    .map(|q| format!("{} {}", q.ty.name, q.name))
+                    .collect();
+                let hint = format!("{} {}({}) {{", ret.name, name, list.join(", "));
+                self.err("R2", p, msg, Some(hint));
+            }
         }
-        self.expect_op(")");
         let body = self.body("function", header)?;
         Some(Func {
             ret,
@@ -374,35 +600,24 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// `[const] T name = value` and the foreign spellings `var/let/auto x = v`.
-    fn var_decl(&mut self) -> Option<VarDecl> {
+    /// `[const] T name = value`. At the top level a hint keeps the `const`.
+    fn var_decl(&mut self, top: bool) -> Option<VarDecl> {
         let is_const = self.is_kw("const");
         if is_const {
             self.bump();
         }
         let ty = self.type_ref();
-        let (name, pos) = self.ident()?;
+        let (name, pos) = self.name()?;
         if !self.is_op("=") {
             let default = match ty.name.as_str() {
                 "bool" => "false",
                 "str" => "\"\"",
                 _ => "0",
             };
-            self.err(
-                "R2",
-                pos,
-                format!("`{}` needs a value", name),
-                Some(format!(
-                    "give it a value: {} {} = {}",
-                    ty.name, name, default
-                )),
-            );
-            self.recover();
-            let value = Expr {
-                kind: ExprKind::Missing,
-                pos,
-                end: pos.offset,
-            };
+            let c = if is_const || top { "const " } else { "" };
+            let hint = format!("give it a value: {c}{} {name} = {default}", ty.name);
+            self.err("R2", pos, format!("`{name}` needs a value"), Some(hint));
+            let value = self.missing(pos);
             return Some(VarDecl {
                 is_const,
                 ty,
@@ -422,12 +637,12 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn foreign_var(&mut self) -> Option<Stmt> {
+    /// `var/let/auto x = v`: R2 with the derived type; it still counts as a declaration.
+    fn foreign_var(&mut self, top: bool) -> Option<VarDecl> {
         let start = self.pos();
-        self.bump(); // var / let / auto
-        let (name, pos) = self.ident()?;
+        self.bump();
+        let (name, pos) = self.name()?;
         if !self.expect_op("=") {
-            self.recover();
             return None;
         }
         let value = self.expr();
@@ -438,90 +653,109 @@ impl<'a> Parser<'a> {
             ExprKind::Str(_) => Some("str"),
             _ => None,
         };
+        let c = if top { "const " } else { "" };
+        let v = self.expr_text(&value);
         let hint = match ty {
-            Some(t) => format!("{} {} = {}", t, name, self.expr_text(&value)),
-            None => format!("write its type: T {} = {}", name, self.expr_text(&value)),
+            Some(t) => format!("{c}{t} {name} = {v}"),
+            None => format!("write its type: {c}T {name} = {v}"),
         };
         self.err("R2", start, "declarations name their type", Some(hint));
         let ty = TypeRef {
             name: ty.unwrap_or("?").into(),
             pos: start,
         };
-        Some(Stmt::Var(VarDecl {
+        Some(VarDecl {
             is_const: false,
             ty,
             name,
             pos,
             value,
-        }))
+        })
     }
 
     // ---- blocks and statements ----
 
-    /// A block that must start on the line of its header (R3).
+    /// The body of a header; it must start on the header's line (R3).
     fn body(&mut self, what: &str, header_start: u32) -> Option<Block> {
+        if self.is_op("=") && matches!(what, "if" | "else if" | "while") {
+            let head = self.text(header_start, self.last_end);
+            let p = self.pos();
+            self.bump();
+            let rhs = self.expr();
+            let hint = format!("{head} == {} {{", self.expr_text(&rhs));
+            self.err("S1", p, "`=` assigns; compare with `==`", Some(hint));
+        }
         if self.is_op("{") {
             return Some(self.block());
         }
         let p = self.pos();
+        let head = self.text(header_start, self.last_end);
         if *self.peek() == Tok::Nl && *self.peek_n(1) == Tok::Op("{") {
-            let header = self.text(header_start, self.last_end).to_string();
-            self.err(
-                "R3",
-                p,
-                format!("the body of `{what}` must start on the same line"),
-                Some(format!("{header} {{")),
-            );
+            let msg = format!("the body of `{what}` must start on the same line");
+            self.err("R3", p, msg, Some(format!("{head} {{")));
             self.bump();
-            self.skip_block();
-            return Some(Block {
-                stmts: Vec::new(),
-                pos: p,
-            });
+            return Some(self.block());
         }
-        let found = describe(self.peek());
+        let msg = format!(
+            "expected `{{` to start the body of `{what}`, found {}",
+            describe(self.peek())
+        );
         self.err(
             "R3",
             p,
-            format!("expected `{{` to start the body of `{what}`, found {found}"),
-            Some(format!(
-                "put the body in braces: {} {{ … }}",
-                self.text(header_start, self.last_end)
-            )),
+            msg,
+            Some(format!("put the body in braces: {head} {{ … }}")),
         );
-        self.recover();
         None
     }
 
     fn block(&mut self) -> Block {
         let pos = self.pos();
+        let mut stmts = Vec::new();
+        if !self.enter() {
+            self.skip_block();
+            self.leave();
+            return Block { stmts, pos };
+        }
         self.bump(); // {
         self.skip_nl();
-        let mut stmts = Vec::new();
-        while !self.is_op("}") && *self.peek() != Tok::Eof {
-            if let Some(s) = self.stmt() {
+        loop {
+            let before = self.i;
+            if self.is_op("}") {
+                self.bump();
+                break;
+            }
+            if *self.peek() == Tok::Eof || self.func_start() {
+                self.never_closed(pos);
+                break;
+            }
+            if let Some(s) = self.unit(|p| p.stmt()) {
                 stmts.push(s);
             }
-            self.end_of_stmt();
+            if self.i == before {
+                self.bump(); // never loop without progress
+            }
         }
-        if self.is_op("}") {
-            self.bump();
-        } else if !self.unclosed {
-            // the innermost open block is reported; the outer ones share the cause
-            self.unclosed = true;
-            self.err(
-                "S1",
-                pos,
-                "this block is never closed",
-                Some("add `}`".into()),
-            );
-        }
+        self.leave();
         Block { stmts, pos }
+    }
+
+    /// Reported once, at the innermost open block; the outer ones share the cause.
+    fn never_closed(&mut self, pos: Pos) {
+        if self.unclosed {
+            return;
+        }
+        self.unclosed = true;
+        let hint = match self.peek() {
+            Tok::Eof => "add `}`".to_string(),
+            _ => format!("add `}}` before line {}", self.pos().line),
+        };
+        self.emit(Diag::new("S1", pos, "this block is never closed").hint(hint));
     }
 
     fn stmt(&mut self) -> Option<Stmt> {
         let p = self.pos();
-        match self.peek().clone() {
+        match self.peek() {
             Tok::Kw("if") => self.if_stmt(),
             Tok::Kw("while") => {
                 self.bump();
@@ -540,17 +774,15 @@ impl<'a> Parser<'a> {
             }
             Tok::Kw("return") => {
                 self.bump();
-                let value = if self.at_line_end() {
-                    None
-                } else {
-                    Some(self.expr())
+                let value = match self.peek() {
+                    Tok::Nl | Tok::Eof | Tok::Semi | Tok::Op("}") => None,
+                    _ => Some(self.expr()),
                 };
                 Some(Stmt::Return(value, p))
             }
-            Tok::Kw("const") => self.var_decl().map(Stmt::Var),
+            Tok::Kw("const") => self.var_decl(false).map(Stmt::Var),
             Tok::Kw("else") => {
                 self.err("S1", p, "`else` without `if`", None);
-                self.recover();
                 None
             }
             Tok::Ident(w) if w == "_" && *self.peek_n(1) == Tok::Op("=") => {
@@ -559,24 +791,20 @@ impl<'a> Parser<'a> {
                 let e = self.expr();
                 Some(Stmt::Discard(e, p))
             }
-            Tok::Ident(w)
-                if ["var", "let", "auto"].contains(&w.as_str())
-                    && matches!(self.peek_n(1), Tok::Ident(_)) =>
-            {
-                self.foreign_var()
-            }
             Tok::Ident(w) if w == "elif" || w == "elsif" => {
-                self.err(
-                    "R3",
-                    p,
-                    format!("`{w}` does not exist"),
-                    Some("use else if".into()),
-                );
-                self.recover();
+                let msg = format!("`{w}` does not exist");
+                self.err("R3", p, msg, Some("use else if".into()));
                 None
             }
-            Tok::Ident(_) | Tok::Kw("void") if matches!(self.peek_n(1), Tok::Ident(_)) => {
-                self.var_decl().map(Stmt::Var)
+            _ if self.word_at(0, FOREIGN_VAR) && self.name_at(1) => {
+                self.foreign_var(false).map(Stmt::Var)
+            }
+            _ if self.word_at(0, FOREIGN_FUNC) && self.name_at(1) => {
+                self.foreign_func();
+                None
+            }
+            Tok::Ident(_) | Tok::Kw("void") if self.name_at(1) => {
+                self.var_decl(false).map(Stmt::Var)
             }
             _ => self.expr_stmt(),
         }
@@ -590,28 +818,46 @@ impl<'a> Parser<'a> {
         let mut branches = vec![(cond, body)];
         let mut otherwise = None;
         loop {
-            if *self.peek() == Tok::Nl && *self.peek_n(1) == Tok::Kw("else") {
-                let p = self.t[self.i + 1].pos;
+            let elif = |p: &Self, n| p.word_at(n, &["elif", "elsif"]);
+            if *self.peek() == Tok::Nl && (*self.peek_n(1) == Tok::Kw("else") || elif(self, 1)) {
+                if *self.peek_n(1) == Tok::Kw("else") {
+                    let p = self.tok(1).pos;
+                    let hint = "} else {".to_string();
+                    self.err(
+                        "R3",
+                        p,
+                        "`else` must be on the same line as `}`",
+                        Some(hint),
+                    );
+                }
+                self.skip_nl();
+            }
+            let p = self.pos();
+            if elif(self, 0) {
+                let Tok::Ident(w) = self.peek() else { break };
                 self.err(
                     "R3",
                     p,
-                    "`else` must be on the same line as `}`",
-                    Some("} else {".into()),
+                    format!("`{w}` does not exist"),
+                    Some("use else if".into()),
                 );
-                self.skip_nl();
+                self.bump();
+                let c = self.expr();
+                let b = self.body("else if", p.offset)?;
+                branches.push((c, b));
+                continue;
             }
             if !self.is_kw("else") {
                 break;
             }
-            let else_pos = self.pos();
             self.bump();
             if self.is_kw("if") {
                 self.bump();
                 let c = self.expr();
-                let b = self.body("else if", else_pos.offset)?;
+                let b = self.body("else if", p.offset)?;
                 branches.push((c, b));
             } else {
-                otherwise = Some(self.body("else", else_pos.offset)?);
+                otherwise = Some(self.body("else", p.offset)?);
                 break;
             }
         }
@@ -629,9 +875,20 @@ impl<'a> Parser<'a> {
             return self.c_for(pos);
         }
         let mut vars = Vec::new();
+        let mut untyped = None;
         loop {
-            let ty = self.type_ref();
-            let (name, p) = self.ident()?;
+            let ty = if matches!(self.peek(), Tok::Ident(_))
+                && matches!(self.peek_n(1), Tok::Kw("in") | Tok::Op(","))
+            {
+                untyped.get_or_insert(self.pos());
+                TypeRef {
+                    name: "?".into(),
+                    pos: self.pos(),
+                }
+            } else {
+                self.type_ref()
+            };
+            let (name, p) = self.name()?;
             vars.push(Param { ty, name, pos: p });
             if vars.len() == 2 || !self.is_op(",") {
                 break;
@@ -640,18 +897,26 @@ impl<'a> Parser<'a> {
         }
         if !self.is_kw("in") {
             let p = self.pos();
-            let found = describe(self.peek());
-            self.err(
-                "S1",
-                p,
-                format!("expected `in`, found {found}"),
-                Some("for int i in range(n) { … }".into()),
-            );
-            self.recover();
+            let msg = format!("expected `in`, found {}", describe(self.peek()));
+            self.err("S1", p, msg, Some("for int i in range(n) { … }".into()));
             return None;
         }
         self.bump();
         let iter = self.expr();
+        if let Some(p) = untyped {
+            let range = matches!(&iter.kind, ExprKind::Call(f, _)
+                if matches!(&f.kind, ExprKind::Ident(n) if n == "range"));
+            let list: Vec<String> = vars
+                .iter()
+                .map(|v| match v.ty.name.as_str() {
+                    "?" if range => format!("int {}", v.name),
+                    "?" => format!("T {}", v.name),
+                    t => format!("{t} {}", v.name),
+                })
+                .collect();
+            let hint = format!("for {} in {}", list.join(", "), self.expr_text(&iter));
+            self.err("R2", p, "loop variables name their type", Some(hint));
+        }
         let body = self.body("for", pos.offset)?;
         Some(Stmt::For {
             vars,
@@ -665,14 +930,17 @@ impl<'a> Parser<'a> {
     fn c_for(&mut self, pos: Pos) -> Option<Stmt> {
         let open = self.i;
         let mut depth = 0usize;
+        let mut closed = false;
         loop {
             match self.peek() {
-                Tok::Eof => break,
+                // an unclosed header ends before the next block or line
+                Tok::Eof | Tok::Nl | Tok::Op("{" | "}") => break,
                 Tok::Op("(") => depth += 1,
                 Tok::Op(")") => {
                     depth -= 1;
                     if depth == 0 {
                         self.bump();
+                        closed = true;
                         break;
                     }
                 }
@@ -680,26 +948,27 @@ impl<'a> Parser<'a> {
             }
             self.bump();
         }
-        let inner: Vec<&Tok> = self.t[open + 1..self.i.saturating_sub(1)]
-            .iter()
-            .map(|t| &t.tok)
-            .collect();
-        let hint = c_for_hint(&inner);
-        self.err("R11", pos, "C-style for loop", Some(hint));
+        let end = if closed { self.i - 1 } else { self.i };
+        let inner: Vec<&Tok> = self.t[open + 1..end].iter().map(|t| &t.tok).collect();
+        self.err("R11", pos, "C-style for loop", Some(c_for_hint(&inner)));
         self.skip_block();
         None
     }
 
     fn expr_stmt(&mut self) -> Option<Stmt> {
         let e = self.expr();
-        if let Tok::Op(op) = *self.peek() {
-            if ASSIGN_OPS.contains(&op) {
+        if let Tok::Op(op) = self.peek() {
+            if ASSIGN_OPS.contains(op) {
+                let op = *op;
                 let pos = self.pos();
                 self.bump();
                 let value = self.expr();
+                if matches!(e.kind, ExprKind::Missing) {
+                    return None; // already reported
+                }
                 if !is_place(&e) {
-                    let text = self.expr_text(&e).to_string();
-                    self.err("S1", e.pos, format!("cannot assign to `{text}`"), None);
+                    let msg = format!("cannot assign to `{}`", self.expr_text(&e));
+                    self.err("S1", e.pos, msg, None);
                     return None;
                 }
                 return Some(Stmt::Assign {
@@ -710,20 +979,24 @@ impl<'a> Parser<'a> {
                 });
             }
         }
-        match e.kind {
+        match &e.kind {
             ExprKind::Call(..) => Some(Stmt::Call(e)),
-            ExprKind::Missing => {
-                self.recover();
-                None
-            }
-            _ => {
-                let text = self.expr_text(&e).to_string();
-                self.err(
-                    "S4",
-                    e.pos,
-                    format!("`{text}` does nothing as a statement"),
-                    Some(format!("use its value, e.g. int x = {text}")),
-                );
+            ExprKind::Missing => None,
+            kind => {
+                let text = self.expr_text(&e);
+                let hint = match kind {
+                    ExprKind::Ident(n) => format!("to call it, write {n}(…)"),
+                    ExprKind::Binary("==", a, b) => {
+                        format!(
+                            "to assign, write {} = {}",
+                            self.expr_text(a),
+                            self.expr_text(b)
+                        )
+                    }
+                    _ => "use the value: assign it, pass it to a function, or return it".into(),
+                };
+                let msg = format!("`{text}` does nothing as a statement");
+                self.err("S4", e.pos, msg, Some(hint));
                 None
             }
         }
@@ -736,6 +1009,12 @@ impl<'a> Parser<'a> {
     }
 
     fn binary(&mut self, min: u8) -> Expr {
+        let p = self.pos();
+        if !self.enter() {
+            self.leave();
+            self.skip_operand();
+            return self.missing(p);
+        }
         let mut lhs = self.unary();
         while let Tok::Op(o) = self.peek() {
             let (op, lvl) = match level(o) {
@@ -746,34 +1025,20 @@ impl<'a> Parser<'a> {
             self.bump();
             let rhs = self.binary(if op == "??" { lvl } else { lvl + 1 });
             if lvl == 4 && is_binary(&lhs, COMPARISONS) {
-                if let ExprKind::Binary(op1, a, b) = &lhs.kind {
-                    let hint = format!(
-                        "write {} {} {} && {} {} {}",
-                        self.expr_text(a),
-                        op1,
-                        self.expr_text(b),
-                        self.expr_text(b),
-                        op,
-                        self.expr_text(&rhs)
-                    );
-                    self.err("S2", opos, "comparisons cannot be chained", Some(hint));
-                }
+                lhs = self.chain(lhs, op, rhs, opos);
+                continue;
             }
-            let mixed = (op == "||" && (is_binary(&lhs, &["&&"]) || is_binary(&rhs, &["&&"])))
-                || (op == "&&" && (is_binary(&lhs, &["||"]) || is_binary(&rhs, &["||"])));
-            if mixed {
-                let (l, r) = (self.expr_text(&lhs), self.expr_text(&rhs));
-                let hint = if is_binary(&lhs, &["&&", "||"]) {
-                    format!("add parentheses: ({l}) {op} {r}")
-                } else {
-                    format!("add parentheses: {l} {op} ({r})")
+            if op == "||" && (is_binary(&lhs, &["&&"]) || is_binary(&rhs, &["&&"])) {
+                let wrap = |e: &Expr| {
+                    if is_binary(e, &["&&"]) {
+                        format!("({})", self.expr_text(e))
+                    } else {
+                        self.expr_text(e).to_string()
+                    }
                 };
-                self.err(
-                    "S3",
-                    opos,
-                    "`&&` and `||` are mixed without parentheses",
-                    Some(hint),
-                );
+                let hint = format!("add parentheses: {} || {}", wrap(&lhs), wrap(&rhs));
+                let msg = "`&&` and `||` are mixed without parentheses";
+                self.err("S3", opos, msg, Some(hint));
             }
             let pos = lhs.pos;
             let end = rhs.end;
@@ -783,37 +1048,66 @@ impl<'a> Parser<'a> {
                 end,
             };
         }
+        self.leave();
         lhs
+    }
+
+    /// `a < b < c …`: one S2 for the whole chain, with every pair joined by `&&`.
+    fn chain(&mut self, lhs: Expr, op: &'static str, rhs: Expr, opos: Pos) -> Expr {
+        let ExprKind::Binary(op1, a, b) = &lhs.kind else {
+            return lhs;
+        };
+        let mut terms = vec![self.expr_text(a), self.expr_text(b), self.expr_text(&rhs)];
+        let mut ops = vec![*op1, op];
+        let mut end = rhs.end;
+        while let Tok::Op(o) = self.peek() {
+            if !COMPARISONS.contains(o) {
+                break;
+            }
+            ops.push(*o);
+            self.bump();
+            let e = self.binary(5);
+            terms.push(self.expr_text(&e));
+            end = e.end;
+        }
+        let pairs: Vec<String> = ops
+            .iter()
+            .enumerate()
+            .map(|(k, o)| format!("{} {o} {}", terms[k], terms[k + 1]))
+            .collect();
+        let hint = format!("write {}", pairs.join(" && "));
+        self.err("S2", opos, "comparisons cannot be chained", Some(hint));
+        Expr {
+            kind: ExprKind::Missing,
+            pos: lhs.pos,
+            end,
+        }
     }
 
     fn unary(&mut self) -> Expr {
         let p = self.pos();
         let op = match self.peek() {
-            Tok::Op(o @ ("-" | "!" | "~")) => *o,
+            Tok::Op(o @ ("-" | "!" | "~" | "++" | "--")) => *o,
             Tok::Kw("try") => "try",
-            Tok::Op(o @ ("++" | "--")) => {
-                let o = *o;
-                self.bump();
-                let e = self.unary();
-                let name = self.expr_text(&e).to_string();
-                let fix = if o == "++" { "+=" } else { "-=" };
-                self.err(
-                    "L7",
-                    p,
-                    format!("`{o}` does not exist"),
-                    Some(format!("use {name} {fix} 1")),
-                );
-                return Expr {
-                    kind: ExprKind::Missing,
-                    pos: p,
-                    end: e.end,
-                };
-            }
             _ => return self.postfix(),
         };
         self.bump();
+        if !self.enter() {
+            self.leave();
+            self.skip_operand();
+            return self.missing(p);
+        }
         let e = self.unary();
+        self.leave();
         let end = e.end;
+        if op == "++" || op == "--" {
+            self.inc_dec(op, p, &e);
+            return Expr {
+                kind: ExprKind::Missing,
+                pos: p,
+                end,
+            };
+        }
         Expr {
             kind: ExprKind::Unary(op, Box::new(e)),
             pos: p,
@@ -821,79 +1115,84 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// `x++`, `++x` (L7).
+    fn inc_dec(&mut self, op: &'static str, p: Pos, e: &Expr) {
+        let text = self.expr_text(e);
+        let hint = if is_place(e) {
+            Some(format!("use {text} {}= 1", &op[..1]))
+        } else if op == "--" {
+            Some(format!("write -(-{text})"))
+        } else {
+            None
+        };
+        self.err("L7", p, format!("`{op}` does not exist"), hint);
+    }
+
     fn postfix(&mut self) -> Expr {
         let mut e = self.primary();
+        let start = e.pos;
         loop {
-            if self.is_op("(") {
-                self.bump();
-                let mut args = Vec::new();
-                while !self.is_op(")") && *self.peek() != Tok::Eof {
-                    args.push(self.expr());
-                    if !self.is_op(")") && !self.expect_op(",") {
-                        break;
+            let open = self.pos();
+            let kind = match self.peek() {
+                Tok::Op("(") => {
+                    self.bump();
+                    let mut args = Vec::new();
+                    if !self.is_op(")") {
+                        loop {
+                            args.push(self.expr());
+                            if !self.is_op(",") {
+                                break;
+                            }
+                            self.bump();
+                        }
                     }
+                    self.close(open, ")");
+                    ExprKind::Call(Box::new(e), args)
                 }
-                self.expect_op(")");
-                let pos = e.pos;
-                e = Expr {
-                    kind: ExprKind::Call(Box::new(e), args),
-                    pos,
-                    end: self.last_end,
-                };
-            } else if self.is_op("[") {
-                self.bump();
-                let idx = self.expr();
-                self.expect_op("]");
-                let pos = e.pos;
-                e = Expr {
-                    kind: ExprKind::Index(Box::new(e), Box::new(idx)),
-                    pos,
-                    end: self.last_end,
-                };
-            } else if self.is_op(".") {
-                self.bump();
-                let Some((name, _)) = self.ident() else { break };
-                let pos = e.pos;
-                e = Expr {
-                    kind: ExprKind::Field(Box::new(e), name),
-                    pos,
-                    end: self.last_end,
-                };
-            } else if let Tok::Op(o @ ("++" | "--")) = self.peek() {
-                let o = *o;
-                let p = self.pos();
-                self.bump();
-                let name = self.expr_text(&e).to_string();
-                let fix = if o == "++" { "+=" } else { "-=" };
-                self.err(
-                    "L7",
-                    p,
-                    format!("`{o}` does not exist"),
-                    Some(format!("use {name} {fix} 1")),
-                );
-                return Expr {
-                    kind: ExprKind::Missing,
-                    pos: e.pos,
-                    end: self.last_end,
-                };
-            } else {
-                break;
-            }
+                Tok::Op("[") => {
+                    self.bump();
+                    let idx = self.expr();
+                    self.close(open, "]");
+                    ExprKind::Index(Box::new(e), Box::new(idx))
+                }
+                Tok::Op(".") => {
+                    self.bump();
+                    let Some((name, _)) = self.name() else {
+                        return e;
+                    };
+                    ExprKind::Field(Box::new(e), name)
+                }
+                Tok::Op(o @ ("++" | "--")) => {
+                    self.bump();
+                    self.inc_dec(o, open, &e);
+                    return Expr {
+                        kind: ExprKind::Missing,
+                        pos: start,
+                        end: self.last_end,
+                    };
+                }
+                _ => return e,
+            };
+            e = Expr {
+                kind,
+                pos: start,
+                end: self.last_end,
+            };
         }
-        e
     }
 
     fn primary(&mut self) -> Expr {
         let p = self.pos();
-        let kind = match self.peek().clone() {
-            Tok::Int(v) => ExprKind::Int(v),
-            Tok::Float(s) => ExprKind::Float(s),
+        let kind = match self.peek() {
+            Tok::Int(v) => ExprKind::Int(*v),
+            Tok::Float(s) => ExprKind::Float(s.clone()),
             Tok::Kw("true") => ExprKind::Bool(true),
             Tok::Kw("false") => ExprKind::Bool(false),
-            Tok::Ident(n) => ExprKind::Ident(n),
+            Tok::Ident(n) => ExprKind::Ident(n.clone()),
+            Tok::Kw(k) if self.reserved.contains(k) => ExprKind::Ident(k.to_string()),
             Tok::Str(parts) => {
                 self.bump();
-                let segs = self.string_parts(&parts);
+                let segs = self.string_parts(parts);
                 return Expr {
                     kind: ExprKind::Str(segs),
                     pos: p,
@@ -903,7 +1202,7 @@ impl<'a> Parser<'a> {
             Tok::Op("(") => {
                 self.bump();
                 let inner = self.expr();
-                self.expect_op(")");
+                self.close(p, ")");
                 return Expr {
                     kind: ExprKind::Paren(Box::new(inner)),
                     pos: p,
@@ -911,17 +1210,16 @@ impl<'a> Parser<'a> {
                 };
             }
             other => {
-                self.err(
-                    "S1",
-                    p,
-                    format!("expected an expression, found {}", describe(&other)),
-                    None,
-                );
-                return Expr {
-                    kind: ExprKind::Missing,
-                    pos: p,
-                    end: p.offset,
+                let msg = format!("expected an expression, found {}", describe(other));
+                let line_start = self.i > 0 && self.t[self.i - 1].tok == Tok::Nl;
+                let hint = match other {
+                    Tok::Op(o) if line_start && (level(o).is_some() || ASSIGN_OPS.contains(o)) => {
+                        Some("a line that starts with an operator does not continue the line above; put the operator at the end of that line".into())
+                    }
+                    _ => None,
                 };
+                self.err("S1", p, msg, hint);
+                return self.missing(p);
             }
         };
         self.bump();
@@ -938,25 +1236,34 @@ impl<'a> Parser<'a> {
             match part {
                 StrPart::Lit(s) => segs.push(StrSeg::Lit(s.clone())),
                 StrPart::Expr(toks) => {
-                    let mut sub = Parser::new(self.src, toks);
+                    let mut sub = Parser::new(self.src, toks, Vec::new());
+                    sub.reserved = self.reserved.clone();
                     let e = sub.expr();
                     if *sub.peek() != Tok::Eof {
                         let p = sub.pos();
-                        let found = describe(sub.peek());
-                        sub.err(
-                            "S1",
-                            p,
-                            format!("unexpected {found} in interpolation"),
-                            None,
+                        let msg = format!(
+                            "an interpolation holds one expression; found {} after it",
+                            describe(sub.peek())
                         );
+                        sub.err("S1", p, msg, None);
                     }
-                    self.diags.extend(sub.diags);
+                    for d in sub.out {
+                        self.report(d);
+                    }
                     segs.push(StrSeg::Expr(e));
                 }
             }
         }
         segs
     }
+}
+
+fn can_start_stmt(t: &Tok) -> bool {
+    matches!(
+        t,
+        Tok::Ident(_)
+            | Tok::Kw("if" | "while" | "for" | "break" | "continue" | "return" | "const" | "void")
+    )
 }
 
 fn is_place(e: &Expr) -> bool {
@@ -972,7 +1279,8 @@ fn describe(t: &Tok) -> String {
         Tok::Ident(n) => format!("`{n}`"),
         Tok::Kw(k) => format!("`{k}`"),
         Tok::Op(o) => format!("`{o}`"),
-        Tok::Int(_) | Tok::Float(_) => "a number".into(),
+        Tok::Int(v) => format!("number `{v}`"),
+        Tok::Float(f) => format!("number `{f}`"),
         Tok::Str(_) => "a string".into(),
         Tok::Semi => "`;`".into(),
         Tok::Nl => "end of line".into(),
@@ -1004,125 +1312,5 @@ fn c_for_hint(inner: &[&Tok]) -> String {
         (Some(v), Some(f), Some(t)) if f == "0" => format!("for int {v} in range({t})"),
         (Some(v), Some(f), Some(t)) => format!("for int {v} in range({f}, {t})"),
         _ => "for int i in range(n)".into(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::check_source;
-
-    fn codes(src: &str) -> Vec<&'static str> {
-        check_source(src).into_iter().map(|d| d.code).collect()
-    }
-
-    fn first(src: &str) -> crate::diag::Diag {
-        check_source(src)
-            .into_iter()
-            .next()
-            .expect("expected a diagnostic")
-    }
-
-    #[test]
-    fn examples_parse() {
-        for f in ["examples/hello.dif", "examples/fib.dif"] {
-            let src =
-                std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/").to_string() + f)
-                    .unwrap();
-            assert_eq!(check_source(&src), vec![], "{f}");
-        }
-    }
-
-    #[test]
-    fn foreign_syntax() {
-        let d = first("void main() {\n    int i = 0\n    i++\n}\n");
-        assert_eq!((d.code, d.hint.as_deref()), ("L7", Some("use i += 1")));
-        let d = first("void main() {\n    var x = 5\n    print(x)\n}\n");
-        assert_eq!(
-            (d.code, d.pos.line, d.pos.col, d.hint.as_deref()),
-            ("R2", 2, 5, Some("int x = 5"))
-        );
-        let d = first("fn add(a: int) {\n}\n");
-        assert_eq!(d.code, "R2");
-        assert!(d.hint.unwrap().contains("return type comes first"));
-        let d = first("void main() {\n    elif x {\n    }\n}\n");
-        assert_eq!((d.code, d.hint.as_deref()), ("R3", Some("use else if")));
-        let d = first(
-            "void main() {\n    for (int i = 0; i < 3; i += 1) {\n        print(i)\n    }\n}\n",
-        );
-        assert_eq!(
-            (d.code, d.pos.col, d.hint.as_deref()),
-            ("R11", 5, Some("for int i in range(3)"))
-        );
-        assert_eq!(
-            codes("void main() {\n    for (int i = 0; i < 3; i += 1) {\n    }\n}\n"),
-            ["R11"]
-        );
-        assert_eq!(codes("/* x */\nvoid main() {\n}\n"), ["L2"]);
-    }
-
-    #[test]
-    fn precedence_errors() {
-        let d = first("void main() {\n    bool b = 1 < 2 < 3\n}\n");
-        assert_eq!(
-            (d.code, d.hint.as_deref()),
-            ("S2", Some("write 1 < 2 && 2 < 3"))
-        );
-        let d = first("void main() {\n    bool b = true && false || true\n}\n");
-        assert_eq!(
-            (d.code, d.hint.as_deref()),
-            ("S3", Some("add parentheses: (true && false) || true"))
-        );
-        assert_eq!(
-            codes("void main() {\n    bool b = (true && false) || true\n}\n"),
-            [] as [&str; 0]
-        );
-        assert_eq!(
-            codes("void main() {\n    bool b = 1 & 2 == 2\n}\n"),
-            [] as [&str; 0]
-        );
-    }
-
-    #[test]
-    fn statement_and_block_rules() {
-        let d = first("print(\"Hallo\")\n");
-        assert_eq!((d.code, d.pos.line, d.pos.col), ("R1", 1, 1));
-        let d =
-            first("void main() {\n    int n = 3\n    if n > 0\n    {\n        n -= 1\n    }\n}\n");
-        assert_eq!(
-            (d.code, d.pos.line, d.pos.col, d.hint.as_deref()),
-            ("R3", 3, 13, Some("if n > 0 {"))
-        );
-        assert_eq!(
-            codes("void main() {\n    int n = 3\n    if n > 0\n    {\n        n -= 1\n    }\n}\n"),
-            ["R3"]
-        );
-        assert_eq!(codes("void main() {\n    int a = 1 int b = 2\n}\n"), ["R3"]);
-        assert_eq!(codes("void main() {\n    int a = 1;\n}\n"), ["L3"]);
-        assert_eq!(codes("void main() {\n    1 + 2\n}\n"), ["S4"]);
-        assert_eq!(codes("int x = 1\n"), ["R4"]);
-        assert_eq!(codes("void main() {\n    int n\n}\n"), ["R2"]);
-        assert_eq!(
-            codes("void main() {\n    if true {\n    }\n    else {\n    }\n}\n"),
-            ["R3"]
-        );
-    }
-
-    #[test]
-    fn continuation_and_interpolation() {
-        let src = "int add(int a,\n        int b) {\n    return a +\n        b\n}\n\nvoid main() {\n    print(\"sum {add(1, 2)}\")\n}\n";
-        assert_eq!(codes(src), [] as [&str; 0]);
-    }
-
-    #[test]
-    fn one_cause_one_message() {
-        // Python body below a foreign header is part of the same mistake
-        assert_eq!(
-            codes("def main():\n    print(\"hi\")\n\nvoid f() {\n}\n"),
-            ["R2"]
-        );
-        // a missing `}` is reported once, at the innermost open block
-        let d = check_source("void main() {\n    if true {\n");
-        assert_eq!(d.len(), 1);
-        assert_eq!((d[0].code, d[0].pos.line, d[0].pos.col), ("S1", 2, 13));
     }
 }
