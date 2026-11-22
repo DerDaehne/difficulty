@@ -101,7 +101,8 @@ pub enum ExprKind {
     Str(Vec<StrSeg>),
     Ident(String),
     Unary(&'static str, Box<Expr>),
-    Binary(&'static str, Box<Expr>, Box<Expr>),
+    /// The last field is the position of the operator.
+    Binary(&'static str, Box<Expr>, Box<Expr>, Pos),
     Call(Box<Expr>, Vec<Expr>),
     Index(Box<Expr>, Box<Expr>),
     Field(Box<Expr>, String),

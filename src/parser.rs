@@ -52,7 +52,7 @@ fn level(op: &str) -> Option<u8> {
 }
 
 fn is_binary(e: &Expr, ops: &[&str]) -> bool {
-    matches!(&e.kind, ExprKind::Binary(op, _, _) if ops.contains(op))
+    matches!(&e.kind, ExprKind::Binary(op, _, _, _) if ops.contains(op))
 }
 
 struct Parser<'a> {
@@ -986,7 +986,7 @@ impl<'a> Parser<'a> {
                 let text = self.expr_text(&e);
                 let hint = match kind {
                     ExprKind::Ident(n) => format!("to call it, write {n}(…)"),
-                    ExprKind::Binary("==", a, b) => {
+                    ExprKind::Binary("==", a, b, _) => {
                         format!(
                             "to assign, write {} = {}",
                             self.expr_text(a),
@@ -1043,7 +1043,7 @@ impl<'a> Parser<'a> {
             let pos = lhs.pos;
             let end = rhs.end;
             lhs = Expr {
-                kind: ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)),
+                kind: ExprKind::Binary(op, Box::new(lhs), Box::new(rhs), opos),
                 pos,
                 end,
             };
@@ -1054,7 +1054,7 @@ impl<'a> Parser<'a> {
 
     /// `a < b < c …`: one S2 for the whole chain, with every pair joined by `&&`.
     fn chain(&mut self, lhs: Expr, op: &'static str, rhs: Expr, opos: Pos) -> Expr {
-        let ExprKind::Binary(op1, a, b) = &lhs.kind else {
+        let ExprKind::Binary(op1, a, b, _) = &lhs.kind else {
             return lhs;
         };
         let mut terms = vec![self.expr_text(a), self.expr_text(b), self.expr_text(&rhs)];

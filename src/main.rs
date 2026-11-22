@@ -41,7 +41,7 @@ fn check(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let diags = dif::check_bytes(&bytes);
+    let diags = dif::check_bytes(file, &bytes);
     for d in &diags {
         if json {
             println!("{}", d.json(file));
