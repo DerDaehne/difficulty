@@ -1,0 +1,4 @@
+// expect: error[R14] 3:13
+void main() {
+    print(1 / 0)
+}

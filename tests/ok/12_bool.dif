@@ -1,0 +1,6 @@
+void main() {
+    bool a = true
+    print((a && !a) || true)
+    print(!a)
+    print(a == false)
+}

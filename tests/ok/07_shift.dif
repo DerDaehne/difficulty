@@ -1,0 +1,7 @@
+void main() {
+    print(1 << 62)
+    print(-16 >> 2)
+    print(1 << 63)
+    int s = 3
+    print(5 << s)
+}

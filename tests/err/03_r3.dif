@@ -1,0 +1,7 @@
+// expect: error[R3] 5:7
+void main() {
+    int x = 1
+    if x > 0 {
+    } elif x < 0 {
+    }
+}

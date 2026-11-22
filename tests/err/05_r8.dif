@@ -1,0 +1,4 @@
+// expect: error[R8] 3:16
+void main() {
+    print("41" + 1)
+}

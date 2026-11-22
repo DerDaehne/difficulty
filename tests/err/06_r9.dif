@@ -1,0 +1,7 @@
+// expect: error[R9] 4:11
+void main() {
+    int n = 3
+    while n {
+        n -= 1
+    }
+}

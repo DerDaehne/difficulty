@@ -1,0 +1,8 @@
+void main() {
+    str name = "dif"
+    int n = 3
+    print("{name} hat {n} Buchstaben, kurz: {n < 5}")
+    print("a" + "b" == "ab")
+    print("\{x\}")
+    print("ab" < "b")
+}

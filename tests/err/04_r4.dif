@@ -1,0 +1,8 @@
+// expect: error[R4] 5:13
+void main() {
+    int n = 1
+    if n > 0 {
+        int n = 2
+        print(n)
+    }
+}

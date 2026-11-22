@@ -1,0 +1,9 @@
+const int B = A * 2
+const int A = 21
+const str NAME = "konstant"
+
+void main() {
+    print(B)
+    print(18446744073709551615 - 9223372036854775808)
+    print(NAME)
+}

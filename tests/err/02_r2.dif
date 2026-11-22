@@ -1,0 +1,5 @@
+// expect: error[R2] 3:5
+void main() {
+    var x = 5
+    print(x)
+}
