@@ -1,0 +1,12 @@
+[package]
+name = "dif"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "Compiler for the difficulty programming language"
+
+[dependencies]
+
+[profile.release]
+strip = true
+lto = true
