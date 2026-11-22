@@ -19,7 +19,7 @@ Ein Verstoß gegen eine Regel trägt deren Nummer: `error[R13]`. Schreibfehler, 
 | `L3` | `;` |
 | `L4` | Ganzzahl-Literal größer als 2⁶⁴ − 1 |
 | `L5` | String reicht über das Zeilenende |
-| `L6` | unbekannte Escape-Sequenz |
+| `L6` | unbekannte Escape-Sequenz oder einzelnes `}` im String |
 | `L7` | `++` oder `--` |
 | `L8` | Ganzzahl-Literal mit führender Null (`010`) |
 | `S1` | unerwartetes Token |
@@ -27,9 +27,11 @@ Ein Verstoß gegen eine Regel trägt deren Nummer: `error[R13]`. Schreibfehler, 
 | `S3` | `&&` und `\|\|` gemischt ohne Klammern |
 | `S4` | Ausdruck als Anweisung, der weder Aufruf noch Zuweisung ist |
 
-Jede Meldung nennt Datei, Zeile und Spalte (beide ab 1), eine Ursache und, wo möglich, einen Hinweis, der den Fehler behebt. Bei Operatoren zeigt die Position auf den Operator. Meldungen sind englisch (`--lang de` für Deutsch).
+Jede Meldung nennt Datei, Zeile und Spalte (beide ab 1; Spalten zählen Zeichen, also Unicode-Codepoints), eine Ursache und, wo möglich, einen Hinweis, der den Fehler behebt. `--json` liefert zusätzlich den Byte-Offset. Bei Operatoren zeigt die Position auf den Operator. Meldungen sind englisch (`--lang de` für Deutsch).
 
-**Eine Ursache, eine Meldung.** Erkennt der Compiler eine Schreibweise aus einer anderen Sprache als Ganzes (C-Schleife `for (…;…;…)`, `var x = …`, `elif`, `function f(…)`), meldet er nur die Regel, deren Schreibweise sie ersetzt, mit dem passenden Hinweis; die Zeichen darin (etwa `;`) erzeugen keine weitere Meldung. Sonst wird der erste Fehler einer Anweisung gemeldet und der Rest der Anweisung übersprungen.
+**Eine Ursache, eine Meldung.** Erkennt der Compiler eine Schreibweise aus einer anderen Sprache als Ganzes (C-Schleife `for (…;…;…)`, `var x = …`, `elif`, `function f(…)`), meldet er nur die Regel, deren Schreibweise sie ersetzt, mit dem passenden Hinweis; die Zeichen darin (etwa `;`) erzeugen keine weitere Meldung. Sonst wird der erste Fehler einer Anweisung gemeldet.
+
+**Weiterlesen nach einem Fehler.** Der Parser überspringt den Rest der Anweisung bis zum Zeilenende auf derselben Klammerebene und einen dort direkt folgenden Block. Eine Deklaration in fremder Schreibweise (`var x = 5`) gilt danach als Deklaration mit dem abgeleiteten Typ, damit keine Folgefehler entstehen.
 
 ```
 fib.dif:6:5: error[R13]: result of `fib(3)` is never used
@@ -42,7 +44,7 @@ Beispiele gibt es in vier Arten, die `dif test` als Doc-Tests ausführt:
 
 - ` ```dif ` — ein vollständiges, gültiges Modul.
 - ` ```dif snippet ` — Anweisungen, die in `void main() { … }` eingebettet werden: Zeile 1 des Ausschnitts ist Zeile 2 der Datei, um 4 Leerzeichen eingerückt. Positionen in Meldungen beziehen sich auf die Datei `main.dif`.
-- ` ```dif error R4 ` — ein Modul, das genau diese Diagnose liefern muss (und keine andere).
+- ` ```dif error R4 ` — ein Modul, das genau diese Diagnose liefern muss (und keine andere). Geprüft wird wie mit `dif check`; ein fehlendes `main` zählt dort nicht.
 - ` ```dif panic "message" ` — ein Ausschnitt wie bei `snippet`, der mit genau dieser Meldung abbrechen muss.
 
 ### 0.3 Abbruch
@@ -102,7 +104,7 @@ interp   = "{" expr [ ":" format ] "}" ;
 - `_` in Zahlen dient nur der Lesbarkeit: `1_000_000`. Ein Ganzzahl-Literal größer als 2⁶⁴ − 1 ist `L4`; ob ein kleineres an seiner Stelle passt, prüft R8.
 - Eine Ganzzahl mit führender Null (`010`) ist `L8`, Hinweis `write 10; octal literals do not exist`. `0` allein und `0.5` sind erlaubt.
 - Ein String reicht nicht über das Zeilenende hinaus (`L5`). Eine unbekannte Escape-Sequenz ist `L6`. `\{` und `\}` schreiben eine wörtliche Klammer; ein einzelnes `}` ohne `\` ist `L6`.
-- `{expr}` setzt den Wert von `expr` als Text ein; `expr` muss `text` sein (R28). Formatangaben `{x:.2f}` werden in Teil 2 festgelegt.
+- `{expr}` setzt den Wert von `expr` als Text ein; `expr` muss `text` sein (R28). Im Ausdruck einer Interpolation stehen keine Strings und keine geschweiften Klammern (`S1`). Formatangaben `{x:.2f}` werden in Teil 2 festgelegt.
 
 ### 1.5 Wörter
 
@@ -308,6 +310,7 @@ var_decl   = [ "const" ] type IDENT "=" expr ;      (* nur in Blöcken, siehe R2
 - Eine Zuweisung an eine `const`-Variable ist `R4`.
 - Ein Name gilt von seiner Deklaration bis zum Ende des Blocks, in dem er steht, einschließlich innerer Blöcke. Ihn darin noch einmal zu deklarieren — auch in einem inneren Block, auch als Parameter- oder Schleifenvariable — ist `R4` (kein Verdecken).
 - Funktionen, Konstanten und vordefinierte Namen (§1.5) leben im Modul; eine lokale Variable oder ein Parameter mit demselben Namen ist `R4`.
+- Die Benutzung eines Namens, der an dieser Stelle nicht gilt oder nirgends deklariert ist, ist `R4`, mit dem ähnlichsten gültigen Namen als Hinweis (`did you mean total?`). Eine Zuweisung an einen unbekannten Namen ist dagegen `R2` (fehlende Deklaration).
 - Eine globale `const` braucht einen Wert, der beim Kompilieren feststeht: Literale, andere `const` und Operatoren darauf.
 
 ```dif
@@ -375,7 +378,7 @@ Teil 1 legt fest:
 - Jede andere Kombination ist `R8`, z. B. `"41" + 1` mit Hinweis `build text with interpolation: "{a}{b}"`. Die Operanden von `&&`, `||` und `!` prüft R9.
 - `+` verbindet zwei `str`. Werte anderer Typen kommen nur über `"{x}"` in einen Text; das meint die Regel mit „Text baut man mit `"{x}"`“.
 - **Stelle** eines Ausdrucks ist der Typ, den sein Ziel verlangt: die deklarierte Variable, der Parameter, der Rückgabetyp, der andere Operand eines Vergleichs. Ohne Stelle (`print(7 / 2)`) ist ein Literal `int`.
-- **Ausdrücke nur aus Literalen und `const`** rechnet der Compiler exakt aus, ohne Überlauf zwischendurch, mit der Division des Typs ihrer Stelle (`int k = 7 / 2` ist `3`). Erst das Ergebnis muss in den Typ passen, sonst `R8` (`int x = 9223372036854775808`, Hinweis `the value does not fit in int`). Darum ist `-9223372036854775808` ein gültiges `int`.
+- **Ausdrücke nur aus Literalen und `const`** (deren Wert selbst so feststeht) rechnet der Compiler exakt aus, ohne Überlauf zwischendurch, mit der Division des Typs ihrer Stelle (`int k = 7 / 2` ist `3`). Erst das Ergebnis muss in den Typ passen, sonst `R8` (`int x = 9223372036854775808`, Hinweis `the value does not fit in int`). Darum ist `-9223372036854775808` ein gültiges `int`. Bit-Operatoren und Shifts rechnen dabei wie zur Laufzeit auf 64 Bit (R29), `1 << 63` ist also `-9223372036854775808`.
 - Ein Literal, dessen Art nicht zur Stelle passt (`bool b = 1`), ist `R8`.
 
 ```dif snippet
@@ -403,7 +406,7 @@ main.dif:2:16: error[R8]: cannot apply `+` to str and int
 cond = expr ;      (* in if_stmt, while_stmt und als Operand von &&, ||, ! *)
 ```
 
-Bedingungen stehen in `if`, `else if`, `while` und als Operanden von `&&`, `||`, `!`. Ein anderer Typ ist `R9`; es gibt kein „wahr-ish“ für Zahlen oder Texte.
+Bedingungen stehen in `if`, `else if`, `while` und als Operanden von `&&`, `||`, `!`. Ein anderer Typ ist `R9`; es gibt kein „wahr-ish“ für Zahlen oder Texte. `&&`, `||` und `!` liefern `bool`; `&&` und `||` werten ihren rechten Operanden nur aus, wenn er das Ergebnis noch ändern kann.
 
 ```dif snippet
 int n = 3
@@ -644,7 +647,7 @@ Teil 1 legt den Ganzzahl-Teil fest:
 
 - `int` ist immer 64 Bit mit Zweierkomplement, Bereich `-9223372036854775808 … 9223372036854775807`.
 - `a / b` rundet Richtung 0, `a % b` hat das Vorzeichen von `a`, es gilt `(a / b) * b + a % b == a`. `INT_MIN % -1` ist `0`.
-- `<<` und `>>` verschieben um `0 … 63` Stellen; `>>` ist arithmetisch (füllt mit dem Vorzeichen). Andere Weiten brechen ab (R14).
+- `<<` und `>>` verschieben um `0 … 63` Stellen; `>>` ist arithmetisch (füllt mit dem Vorzeichen). `<<` rechnet auf den 64 Bits: was über Bit 63 hinausgeschoben wird, geht verloren, ohne Abbruch, beim Kompilieren wie zur Laufzeit. Andere Weiten brechen ab (R14).
 - `+% -% *%` rechnen modulo 2⁶⁴.
 - Auswertungsreihenfolge: Operanden von links nach rechts, Argumente von links nach rechts, bei einer Zuweisung erst der Ort, dann der Wert.
 
