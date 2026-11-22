@@ -1,0 +1,172 @@
+# difficulty
+
+> A compiled language for AI agents and humans: C-like syntax, Python-like simplicity,
+> one way to write each thing, no silent fallbacks, diagnostics that say how to fix them.
+> This file covers the first language part ("Hallo, nativ"). The binding description
+> is docs/spec.md; error codes are rule numbers (R1–R31) or lexical/syntax codes (L, S).
+
+## Tools
+
+```
+dif check [--json] main.dif    # syntax, names, types; one JSON object per line with --json
+dif run main.dif               # compile via C11 and run
+dif build main.dif -o prog     # native program (needs cc, gcc or clang; or set CC)
+```
+
+Exit codes: 0 ok, 1 diagnostics, 2 usage error or a panic of the program.
+A diagnostic: `main.dif:3:11: error[R9]: condition is int, not bool` plus `hint: …`.
+Columns count characters. Each mistake gives exactly one diagnostic; fix the first, rerun.
+
+## A program
+
+```dif
+const int LIMIT = 10
+
+int square(int n) {
+    return n * n
+}
+
+void main() {
+    int total = 0
+    for int i in range(1, LIMIT) {
+        if i % 2 == 0 {
+            continue
+        }
+        total += square(i)
+    }
+    print("sum of odd squares below {LIMIT}: {total}")
+}
+```
+
+- A program is functions and `const` declarations, in any order; it starts in `void main()`.
+- Statements only inside functions. No global variables, only global `const`.
+
+## Rules of part 1
+
+**Lines.** A statement ends at the end of its line. No `;`. A line continues when it ends
+with a binary operator, `=`, an assignment operator or `,`, inside `( )` and `[ ]`,
+or when the next line starts with `.`. Two statements on one line: R3.
+
+**Blocks.** Always `{ }`, the `{` on the line of its header, `} else {` on one line.
+No parentheses needed around conditions. `else if`, never `elif`.
+
+**Declarations name their type first** and always have a value (R2):
+`int n = 0`, `bool done = false`, `str name = "dif"`, `const int K = 3`.
+Function: `int add(int a, int b) { … }`; no return value: `void`.
+Loop variables too: `for int i in range(n)`.
+
+**Names (R4).** A name lives until the end of its block, including inner blocks, and is
+never declared again there (no shadowing, also not as parameter or loop variable).
+Sibling blocks may reuse a name. `const` is never assigned. Predefined names
+(`print range int bool str` …) and keywords cannot be names; `ok`, `err`, `none`,
+`some`, `test` are reserved. Names use ASCII letters, digits and `_`.
+
+**Types (R8).** `int` (64 bit), `bool`, `str`, `void`. Types never mix:
+`"a" + 1` is an error; build text with interpolation `"{a}{b}"`.
+
+| operator | operands | result |
+|---|---|---|
+| `+ - * / %` `+% -% *%` `& \| ^ << >>` | int, int | int |
+| `-x` `~x` | int | int |
+| `+` | str, str | str |
+| `== !=` | same type | bool |
+| `< <= > >=` | int or str (both the same) | bool |
+| `&& \|\| !` | bool | bool (R9) |
+
+**Conditions are bool (R9).** `while n {` is an error; write `while n != 0 {`.
+
+**Precedence**, weakest first: `??` · `||` · `&&` · comparisons · `|` · `^` · `&` ·
+shifts · `+ -` · `* / %` · unary `- ! ~` · call/index/field. Bit operators bind tighter
+than comparisons: `x & 1 == 0` means `(x & 1) == 0`.
+Not allowed: chains `a < b < c` (S2, write `a < b && b < c`) and `&&` mixed with `||`
+without parentheses (S3).
+
+**Loops (R11).** `for int i in range(n)` (0 … n-1), `for int i in range(a, b)` (a … b-1),
+bounds evaluated once; `while cond`; `break`, `continue` only inside loops.
+`range` only appears as the source of a `for`.
+
+**Results are used (R13).** A call of a function that returns a value, used as a
+statement, is an error; use the value or discard it explicitly: `_ = f(x)`.
+`print(x)` returns nothing and is a statement.
+
+**Numbers (R29, R14).** Overflow of `+ - *` and unary `-` aborts; `+% -% *%` wrap
+modulo 2^64. `/` rounds toward 0, `%` has the sign of the dividend (`-7 / 2 == -3`,
+`-7 % 3 == -1`). Division by 0 and `INT_MIN / -1` abort; `INT_MIN % -1` is 0.
+Shifts take 0 … 63 places, `>>` keeps the sign. Operands and arguments are evaluated
+left to right. Literals: `1_000`, `0xff`, `0b1010`; no leading zeros, no `0X`.
+Expressions of literals and `const` are computed exactly at compile time; only the
+result must fit (`-9223372036854775808` is fine); a certain abort there (`1 / 0`) is R14.
+
+**Text.** `"…"` on one line. Escapes `\n \t \r \\ \" \{ \} \0 \u{1F600}`.
+`{expr}` inserts any int, bool or str; no strings or braces inside `{ }`;
+a literal brace is `\{` or `\}`. `print(x)` writes `x` and a newline.
+
+**Abort.** A programming error stops the program with
+`panic: integer overflow in + (main.dif:3:15)` on stderr and exit code 2.
+
+```dif snippet
+int big = 9223372036854775807
+print(big +% 1)
+print(-7 / 2)
+print(1 << 62)
+str s = "a" + "b"
+bool same = s == "ab"
+print("{s} {same}")
+```
+
+```dif panic "division by zero"
+int z = 0
+print(10 / z)
+```
+
+## Habits from other languages and their fixes
+
+| written | code | write instead |
+|---|---|---|
+| `var x = 5`, `let x = 5`, `auto x = 5` | R2 | `int x = 5` |
+| `def f():`, `fn f(a: int) -> int`, `function f()` | R2 | `int f(int a) { … }` |
+| `x: int` in parameters, `-> int` | R2 | `int f(int x) {` |
+| `for i in range(10)` | R2 | `for int i in range(10)` |
+| `for (int i = 0; i < n; i++)` | R11 | `for int i in range(n)` |
+| `elif`, `elsif` | R3 | `} else if … {` |
+| `{` on the next line | R3 | `if x > 0 {` |
+| `if x > 0 print(x)` | R3 | `if x > 0 { print(x) }` on separate lines |
+| `x = 1;` | L3 | `x = 1` |
+| `i++`, `--i` | L7 | `i += 1`, `i -= 1` |
+| `/* … */` | L2 | `// …` |
+| `010` | L8 | `10` |
+| `if x = 1 {` | S1 | `if x == 1 {` |
+| `while n {` | R9 | `while n != 0 {` |
+| `"n = " + n` | R8 | `"n = {n}"` |
+| `f(x)` result unused | R13 | `int y = f(x)` or `_ = f(x)` |
+| `int n` without value | R2 | `int n = 0` |
+| assignment to an undeclared name | R2 | declare it: `int x = …` |
+| `void main(void)` | S1 | `void main()` |
+
+```dif error R2
+void main() {
+    var x = 5
+    print(x)
+}
+```
+
+```dif error R13
+int square(int n) {
+    return n * n
+}
+
+void main() {
+    square(3)
+}
+```
+
+## Limits
+
+Nesting deeper than 256 levels, more than 1024 operators in one expression, or a chain
+of more than 256 `const` using each other is an error: split the code.
+
+## Not yet in part 1
+
+Floating point and other number types, structs, enums, `switch`, lists, maps,
+`T!E`, `?T`, `try`, `??`, `mut`, methods, modules, tests, C import. They follow in
+later parts (see PLAN.md); using them gives an error that says so.

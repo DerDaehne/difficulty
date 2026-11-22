@@ -77,11 +77,29 @@ fn err_programs_give_their_diagnostic() {
     }
 }
 
-/// Every ```dif block of the spec, by kind: valid module, snippet (inside
-/// `void main()`), `error Rn` (exactly that diagnostic), `panic "message"`.
 #[test]
 fn spec_examples() {
-    let spec = std::fs::read_to_string(Path::new(ROOT).join("docs/spec.md")).unwrap();
+    let n = doc_examples("docs/spec.md", "spec");
+    assert!(n >= 20, "only {n} examples found");
+}
+
+#[test]
+fn llms_txt() {
+    let size = std::fs::metadata(Path::new(ROOT).join("llms.txt"))
+        .unwrap()
+        .len();
+    assert!(
+        size <= 16 * 1024,
+        "llms.txt has {size} bytes, more than 16 KB"
+    );
+    assert!(doc_examples("llms.txt", "llms") >= 2);
+}
+
+/// Every ```dif block of a document, by kind: valid module, snippet (inside
+/// `void main()`), `error Rn` (exactly that diagnostic), `panic "message"`.
+/// Returns the number of examples.
+fn doc_examples(doc: &str, tag: &str) -> usize {
+    let spec = std::fs::read_to_string(Path::new(ROOT).join(doc)).unwrap();
     let mut lines = spec.lines();
     let mut n = 0;
     while let Some(l) = lines.next() {
@@ -104,7 +122,7 @@ fn spec_examples() {
             assert_eq!(codes, [] as [&str; 0], "spec example {n}:\n{src}");
         }
         if let Some(msg) = kind.strip_prefix("panic ") {
-            let (_, err, code) = run(&format!("spec{n}"), &src);
+            let (_, err, code) = run(&format!("{tag}{n}"), &src);
             assert_eq!(code, 2, "spec example {n}");
             assert!(
                 err.starts_with(&format!("panic: {}", msg.trim_matches('"'))),
@@ -113,10 +131,10 @@ fn spec_examples() {
         } else if kind.is_empty() || kind.starts_with("snippet") {
             // valid examples also build and run (modules without main only check)
             if src.contains("void main()") {
-                let (_, err, code) = run(&format!("spec{n}"), &src);
-                assert_eq!((err.as_str(), code), ("", 0), "spec example {n}");
+                let (_, err, code) = run(&format!("{tag}{n}"), &src);
+                assert_eq!((err.as_str(), code), ("", 0), "{doc} example {n}");
             }
         }
     }
-    assert!(n >= 20, "only {n} examples found");
+    n
 }
