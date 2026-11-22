@@ -1,6 +1,6 @@
 # difficulty — Spezifikation
 
-Stand: 2026-11-22 · Version: v0, Teil 1 („Hallo, nativ“) · Grundlage: PLAN.md §3, ADRs `adr-difficulty-001` … `010`
+Stand: 2026-11-22 · Version: v0, Teil 1 („Hallo, nativ“) · Begründungen und Fahrplan: [PLAN.md](../PLAN.md)
 
 Diese Spezifikation ist nach den Regeln R1–R31 gegliedert. Ausgearbeitet sind die Regeln, die der erste Schritt „Hallo, nativ“ braucht; die übrigen stehen mit ihrem Wortlaut da und werden mit den nächsten Schritten ausgearbeitet.
 

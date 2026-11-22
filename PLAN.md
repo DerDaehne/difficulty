@@ -2,12 +2,11 @@
 
 > Die Einfachheit von Python und die Klarheit von C: keine Syntax, für die man einen Doktor braucht,
 > kein Boilerplate, moderne Features ohne Schnickschnack.
-> Eine kompilierte Sprache für KI-Agenten (und Menschen), die mit ihnen schreiben.
-> Grundsätze von [Ease](https://github.com/Akitsutori/ease-lang), aber mit C-Optik, statischen Typen,
-> nativen Binaries und direktem Zugriff auf C-Bibliotheken.
-> Der Name ist das ehrliche Gegenstück zu „Ease“: Die Schwierigkeit steckt im Compiler, nicht im Programm.
+> Eine kompilierte Sprache für KI-Agenten (und Menschen), die mit ihnen schreiben:
+> C-Optik, statische Typen, native Binaries und direkter Zugriff auf C-Bibliotheken.
+> Der Name ist Programm: Die Schwierigkeit steckt im Compiler, nicht im Programm.
 
-Stand: 2026-11-21 · Status: Entwurf, alle Grundsatzentscheidungen getroffen (§11) · Kabai-Projekt `difficulty` (#22), Epics #1807–#1821 · Wissens-Einstieg: Note `difficulty-hub`
+Stand: 2026-11-22 · Status: Entwurf, alle Grundsatzentscheidungen getroffen (§11). Verbindliche Sprachbeschreibung: [docs/spec.md](docs/spec.md).
 
 ---
 
@@ -38,26 +37,21 @@ $ dif test hello.dif           # Tests
 
 ---
 
-## 2. Warum: was an Ease wehtat (mit Belegen)
+## 2. Ziele
 
-Ease hat gute Grundsätze. Die Umsetzung kostet aber genau das, was Agenten brauchen: Vorhersagbarkeit, schnelle Rückmeldung und Leistung. Belege stammen aus der Kino-Aufgabe in `ease-test/` (`kino.ease`, `transkript.json`) und dem Review in `ease-review/` (Stand b338a33; einige Punkte sind in der aktuellen Ease-Version schon behoben, z. B. ist `do` entfallen und Bedingungen lassen sich nicht mehr speichern).
+Ein Agent, der difficulty nur aus einer kurzen Referenz kennt, soll ein korrektes Programm im ersten oder zweiten Anlauf schreiben, und das Ergebnis soll schnell und klein sein. Daraus folgen diese Ziele:
 
-| Beobachtung bei Ease | Beleg | Antwort von difficulty |
-|---|---|---|
-| `ease build` hängt den Quelltext an den Interpreter: `kino` = 14 873 542 Bytes, davon 4 166 Bytes Programm | `ease-test/kino` vs. `ease` | natives Binary über C, Ziel Hello World ≤ 16 KB |
-| Tree-Walking-Interpreter: fib(30) 0,90 s (Python 0,07 s, Lua 0,03 s) | `ease-review/notes/perf.md` | nativer Code, Ziel ≤ 1,5× C `-O2` |
-| `push` kopiert die ganze Liste: 100 000 Pushes = 18,3 s | `perf.md` | Copy-on-Write, in place wenn nicht geteilt |
-| Kein Element-Update: `setze` in `kino.ease` baut für einen Platz die ganze 40er-Liste neu | `kino.ease` | `xs[i] = v` |
-| Kein `bool`: Plätze werden als `0`/`1`-Zahlen kodiert, gezählt per `sum plan` | `kino.ease` | `bool` (streng) **und** `enum Seat { Free, Taken }` |
-| Nur `number` (float64): Ganzzahl-Prüfung per `floor r is not r` | `kino.ease` | echte Ganzzahltypen |
-| `ask` liefert bei EOF still `""` → Endlosschleife bei Pipe-Eingabe | Kino-Session, Turn 1 | `for str line in io.lines()` endet bei EOF; `read_line()` liefert `?str` |
-| Aufruf ohne Zuweisung ist folgenlos, ohne Hinweis → falsche Testerwartungen beim Python-Port (22 statt 18) | Kino-Session, Turn 2 | unbenutztes Ergebnis ist ein Compilerfehler |
-| Funktionen können nichts ändern → jede Aktion gibt einen `Ergebnis`-Record mit Plan **und** Meldung zurück | `kino.ease` | `mut`-Parameter, an der Aufrufstelle sichtbar |
-| Präfixaufrufe ohne Kommas: Argumentgrenzen sind die häufigste Fehlerklasse (`slice plan i (i + n)`, früher war `x-2` ein Aufruf) | `ease-review/issues/03`, `proposals.md` §3 | `f(a, b)` |
-| `check c -> wert` kehrt zurück, `check c -> anweisung` läuft weiter | Ease-`llms.txt` §1, `issues/08` | `if`, `return`, `break`, `continue` |
-| Dynamisch typisiert: unbekannte Namen, Typen, Arität erst zur Laufzeit | `ERR-001` | statisch, `dif check` ohne Ausführung |
-| Tests konnten vakuum bestehen (`raises` matchte das Quelltext-Echo) | `issues/01` | `expect` vergleicht Werte und zeigt Teilwerte |
-| Kein FFI | Ease-`llms.txt` | C-Header importieren, `.so`/`.dll` linken oder laden |
+| Ziel | Wie difficulty es erreicht |
+|---|---|
+| Vertraute Syntax | C-Optik, Python-Einfachheit; Abweichungen nur, wo sie einen Fehler verhindern |
+| Fehler vor dem Lauf | statische Typen, `dif check` ohne Ausführung, Fehlercode = Regelnummer, Hinweise mit Fix |
+| Nichts passiert heimlich | keine impliziten Umwandlungen, kein `null`, EOF und fehlende Schlüssel stehen im Typ, unbenutzte Ergebnisse sind Fehler |
+| Sichtbare Änderungen | `mut` in Signatur und Aufruf, Methoden arbeiten auf der Variable vor dem Punkt, keine veränderlichen Globalen |
+| Echte Datentypen | `bool`, Ganzzahlen fester Breite, `enum` mit Payload, `xs[i] = v` |
+| Ehrliche Tests | `test`-Blöcke in der Sprache, `expect` vergleicht Werte und zeigt Teilwerte |
+| Geschwindigkeit | nativer Code über C, Ziel ≤ 1,5× C `-O2`; Copy-on-Write statt Kopien |
+| Kleine Programme | Hello World ≤ 16 KB, keine Runtime außer einem kleinen C-Header |
+| C als Nachbar | C-Header importieren, `.so`/`.dll` linken oder laden |
 
 ---
 
@@ -126,7 +120,7 @@ Vollständig und ohne „außer“. Diese Liste ist auch der Kern von `llms.txt`
 | `mut self` in der Signatur | entfällt: `self` ist immer die Variable vor dem Punkt (R7) |
 | `mut` am Aufruf, aber nicht vor Methoden | `mut` gehört nur zur Übergabe von Argumenten; die Variable vor dem Punkt gehört der Methode (R6, R7) |
 | `mut T x` in der Signatur **und** `mut x` am Aufruf | nur noch am Aufruf; der Compiler sieht am Rumpf, welche Parameter sich ändern (R6) |
-| vergessenes `mut` → Änderung landet still in einer Kopie (die Ease-Falle), auch wenn die Funktion ein Ergebnis liefert | eine Funktion, die einen Parameter ändert, bekommt ihn mit `mut`; fehlt es, Fehler mit Fix (R6) |
+| vergessenes `mut` → Änderung landet still in einer Kopie, auch wenn die Funktion ein Ergebnis liefert | eine Funktion, die einen Parameter ändert, bekommt ihn mit `mut`; fehlt es, Fehler mit Fix (R6) |
 | Aufruf ohne Ergebnis und ohne Änderung | ein Aufruf ohne Wirkung ist ein Fehler (R13) |
 | `f64(n)` bricht ab, `int(2.5)` ist ein Compilerfehler | eine Regel: `T(x)` ist exakt oder bricht ab; steht der Wert schon beim Kompilieren fest, meldet es der Compiler (R8, R14) |
 | `break` im `switch` (in C verlässt es den `switch`, in Go auch) | `break` gehört nur zu Schleifen und steht nie direkt im `switch` (R11) |
@@ -136,16 +130,16 @@ Vollständig und ohne „außer“. Diese Liste ist auch der Kern von `llms.txt`
 | C-structs mit 50 Feldern, ohne Defaults in der Deklaration | C-Regel: nicht genannte Felder sind 0 (R17) |
 | C-Callbacks brauchen App-Zustand, es gibt aber keine veränderlichen Globalen | Kontext-Variable aus `main` (R24) |
 | `try` passt nur bei gleichem Fehlertyp | `try x or E.V(…)` übersetzt (R12) |
-| *Review 2026-11-22:* `int gcd(int a, int b) { … a = t }` wäre durch die Ableitung ein `mut`-Parameter geworden | `mut` steht in der Signatur, Parameter ohne `mut` sind Kopien wie in C (R5, R6) |
-| *Review:* Änderung an einer Kopie ging still verloren (`for Task t in …`, `nudge(Point p)`) | eine nie gelesene Änderung ist ein Fehler (R6) |
-| *Review:* `hall.book(3, 5)` war nach R13 gültig, im Beispiel ein Fehler | `T!E`- und `?T`-Ergebnisse werden immer verwendet (R13) |
-| *Review:* `if f() {` und `ui.tiles {` waren mehrdeutig | Block nur direkt hinter `)`, Kopfzeile endet am ersten `{` (R3, R26) |
-| *Review:* Literale konnten über Generics oder `spawn` entkommen | Literale stehen nur direkt als Argument (R26) |
-| *Review:* `a.merge(a)` las eine Variable, die derselbe Aufruf ändert | der lesende Teil bekommt einen Schnappschuss (R6) |
-| *Review:* Builder brauchten versteckten globalen Zustand | Builder als Parameter und Griff (R5, §4.10) |
-| *Review:* R24 hielt Zeiger auf `main`-Variablen ohne Grenze | Kontext gilt nur während des Aufrufs mit `mut` (R24) |
-| *Review:* „c.str und Griffe sind sicher“ stimmte nicht | sichere Standards für C (R17) |
-| *Review:* Ereignisschleifen konnten nicht enden | Tasks werden beim Verlassen abgebrochen, `case Msg.Quit: return` (R11, R19) |
+| `int gcd(int a, int b) { … a = t }` wäre durch die Ableitung ein `mut`-Parameter geworden | `mut` steht in der Signatur, Parameter ohne `mut` sind Kopien wie in C (R5, R6) |
+| Änderung an einer Kopie ging still verloren (`for Task t in …`, `nudge(Point p)`) | eine nie gelesene Änderung ist ein Fehler (R6) |
+| `hall.book(3, 5)` war nach R13 gültig, im Beispiel ein Fehler | `T!E`- und `?T`-Ergebnisse werden immer verwendet (R13) |
+| `if f() {` und `ui.tiles {` waren mehrdeutig | Block nur direkt hinter `)`, Kopfzeile endet am ersten `{` (R3, R26) |
+| Literale konnten über Generics oder `spawn` entkommen | Literale stehen nur direkt als Argument (R26) |
+| `a.merge(a)` las eine Variable, die derselbe Aufruf ändert | der lesende Teil bekommt einen Schnappschuss (R6) |
+| Builder brauchten versteckten globalen Zustand | Builder als Parameter und Griff (R5, §4.10) |
+| R24 hielt Zeiger auf `main`-Variablen ohne Grenze | Kontext gilt nur während des Aufrufs mit `mut` (R24) |
+| „c.str und Griffe sind sicher“ stimmte nicht | sichere Standards für C (R17) |
+| Ereignisschleifen konnten nicht enden | Tasks werden beim Verlassen abgebrochen, `case Msg.Quit: return` (R11, R19) |
 
 Zwei einfache Bilder genügen: Ein Funktionsaufruf `f(x)` liest `x`, `f(mut x)` ändert `x`. Ein Methodenaufruf `x.m()` arbeitet immer auf `x`, wie `this` in C++/Java. Wer in einer Funktion mit einer Arbeitskopie rechnen will, legt sie dort an: `Hall work = hall`.
 
@@ -165,7 +159,7 @@ Literale/Konstruktoren: `true false none some ok err` · eingebaute Funktionen: 
 
 ## 4. Die Sprache in Beispielen
 
-Alles hier ist Entwurf, verbindlich wird es mit der Spezifikation (#1807).
+Alles hier ist Entwurf, verbindlich ist die Spezifikation [docs/spec.md](docs/spec.md).
 
 ### 4.1 Grundsyntax
 
@@ -430,7 +424,7 @@ ok   math.dif:3  doc-test add
 |---|---|
 | `test "name" { }` | Testblock neben dem Code; `try` im Test lässt ihn bei Fehler mit Position scheitern |
 | `expect(cond)` | zeigt bei Fehlschlag die Werte der Teilausdrücke |
-| `test "…" panics "text" { }` | besteht nur, wenn die Panic-**Meldung** den Text enthält (nie das Quelltext-Echo; Lehre aus Ease-`raises`) |
+| `test "…" panics "text" { }` | besteht nur, wenn die Panic-**Meldung** den Text enthält (nie gegen den Quelltext) |
 | `dif test [pfad] [filter] [--json]` | jeder Test in eigenem Kindprozess: Panics, Segfaults in C-Code und Timeouts treffen nur diesen Test; parallel per Default (keine veränderlichen Globalen → nichts geteilt) |
 | `dif test --coverage` | nicht getestete Zeilen und Zweige, auf `.dif`-Zeilen abgebildet (gcov über `#line`) |
 | `dif test --sanitize` | AddressSanitizer + UBSan, wichtig für C- und `unsafe`-Code, Fundstellen als `.dif`-Position |
@@ -555,7 +549,7 @@ void build(mut App app) {
 }
 ```
 
-Regeln (R17): Funktionen mit `*T` in der Signatur sind nur in `unsafe` aufrufbar. Für alle anderen gelten sichere Standards: Parameter sind nicht optional, Strings gelten nur für die Dauer des Aufrufs, Griffe mit Freigeber (`use c "sqlite3.h" link "sqlite3" release sqlite3 with sqlite3_close`) werden gezählt und genau einmal freigegeben. Was danach bleibt, ist die ehrlich benannte Vertrauensgrenze: Fehler in der C-Bibliothek selbst und Bibliotheken, die übergebene Pointer gegen ihre Dokumentation behalten. Nach v0 (#1821): dif-Funktionen exportieren (`export int add(int a, int b)`, `dif build --lib` → `.so`/`.dll` + Header).
+Regeln (R17): Funktionen mit `*T` in der Signatur sind nur in `unsafe` aufrufbar. Für alle anderen gelten sichere Standards: Parameter sind nicht optional, Strings gelten nur für die Dauer des Aufrufs, Griffe mit Freigeber (`use c "sqlite3.h" link "sqlite3" release sqlite3 with sqlite3_close`) werden gezählt und genau einmal freigegeben. Was danach bleibt, ist die ehrlich benannte Vertrauensgrenze: Fehler in der C-Bibliothek selbst und Bibliotheken, die übergebene Pointer gegen ihre Dokumentation behalten. Nach v0: dif-Funktionen exportieren (`export int add(int a, int b)`, `dif build --lib` → `.so`/`.dll` + Header).
 
 ### 4.8 Module
 
@@ -583,9 +577,9 @@ void main() {
 }
 ```
 
-Eine Datei ist ein Modul, `pub` exportiert, sonst privat. `std.*` ist in den Compiler eingebettet und lässt sich nicht still durch lokale Dateien ersetzen (Ease-Review SEC-001).
+Eine Datei ist ein Modul, `pub` exportiert, sonst privat. `std.*` ist in den Compiler eingebettet und lässt sich nicht still durch lokale Dateien ersetzen.
 
-### 4.9 Nebenläufigkeit (nach v0, #1818)
+### 4.9 Nebenläufigkeit (nach v0)
 
 Weil es keine Referenzen und keine veränderlichen Globalen gibt, können zwei Tasks nie dieselbe Variable ändern: **Data Races sind schon durch das Design unmöglich**, ohne Borrow-Checker und ohne Locks. Tasks treffen sich nur an Kanälen und beim Warten; das macht Deadlocks erkennbar und Tests reproduzierbar. Kein `async`/`await`: Funktionen werden nicht „gefärbt“, blockierender Code bleibt einfacher Code.
 
@@ -711,7 +705,7 @@ void main() {
 
 Runtime: zuerst ein OS-Thread pro Task (pthreads, wenige hundert Zeilen C in `dif_rt.h`), später leichte Tasks (M:N-Scheduler) für sehr viele gleichzeitige Verbindungen, ohne dass sich Code ändert. Referenzzählung bleibt nicht atomar: Werte, die in einen Task oder Kanal gehen, werden übertragen (bei letzter Nutzung verschoben, sonst kopiert), `parallel for` liest äußere Variablen ohne Zähleroperationen, und nur `shared[T]` zählt atomar. Mehrere Prozesse (Site-Isolation wie in Chrome) gehen über `std.process` und Pipes, nicht über neue Sprachmittel.
 
-### 4.10 Benannte Parameter, Funktionswerte, Blöcke, Generics (v0, #1817)
+### 4.10 Benannte Parameter, Funktionswerte, Blöcke, Generics (v0)
 
 Drei Sprachmittel machen Bibliotheken so angenehm wie SwiftUI, ohne Schnickschnack:
 
@@ -775,14 +769,14 @@ struct Pair[A, B] {
 []str names = convert(people, str(Person p) { return p.name })
 ```
 
-**Generics (R27):** Typparameter in eckigen Klammern nach dem Namen, beim Aufruf meist abgeleitet. Monomorphisierung: ein C-Exemplar pro Instanz. Die Schreibweise für Einschränkungen (vergleichbar, sortierbar, …) entscheidet #1817.
+**Generics (R27):** Typparameter in eckigen Klammern nach dem Namen, beim Aufruf meist abgeleitet. Monomorphisierung: ein C-Exemplar pro Instanz. Einschränkungen stehen vor dem Typparameter: `T max[ordered T](T a, T b)`; automatische Fähigkeiten regelt R28.
 
 | | |
 |---|---|
 | **+** | Transaktionen, Builder, Zeitmessung, Retry und Test-Fixtures erzwingen Vorher/Nachher in der Bibliothek; Struktur = Einrückung; Blöcke kosten nichts, weil der Compiler sie inline einsetzen kann |
 | **−** | Man sieht nicht, wie oft ein Block läuft (der Funktionsname muss es sagen); `return` im Block beendet nur den Block; Builder brauchen einen Griff |
 
-### 4.11 UI im SwiftUI-Stil (rekta-Modul, #1822)
+### 4.11 UI im SwiftUI-Stil (rekta-Modul)
 
 Mit 4.10 wird aus rekta-core eine Bibliothek, die sich überfliegen lässt. Elemente senden Nachrichten, eine Funktion `update` ändert den Zustand, `view` beschreibt, was zu sehen ist (Elm-Architektur):
 
@@ -993,13 +987,13 @@ test "leere Eingabe" {
 
 ### 4.12 Später
 
-JSON typisiert (#1827): `json.decode[User](text)` und `json.encode(u)`, die Umwandlung leitet der Compiler für structs, enums, Listen, Maps und `?T` ab; fehlende Pflichtfelder und falsche Typen werden Fehlerwerte (`json.Err.Missing("User.name")`). Dazu Benchmarks in der Sprache (`bench "x" { }`) und Export als `.so`/`.dll` (#1821).
+JSON typisiert: `json.decode[User](text)` und `json.encode(u)`, die Umwandlung leitet der Compiler für structs, enums, Listen, Maps und `?T` ab; fehlende Pflichtfelder und falsche Typen werden Fehlerwerte (`json.Err.Missing("User.name")`). Dazu Benchmarks in der Sprache (`bench "x" { }`) und Export als `.so`/`.dll`.
 
 ---
 
 ## 5. Komplettes Beispiel: `kino.dif`
 
-Dieselbe Aufgabe wie `ease-test/kino.ease` (5 Reihen × 8 Plätze, Einzel- und Gruppenbuchung, Storno, Saalplan, Tagesabschluss).
+Ein Programmkino mit einem Saal: 5 Reihen × 8 Plätze, Einzel- und Gruppenbuchung, Storno, Saalplan, Tagesabschluss.
 
 ```dif
 // kino.dif — Programmkino mit einem Saal
@@ -1180,7 +1174,7 @@ test "abschluss und befehle" {
 }
 ```
 
-**Vergleich mit `kino.ease`.** Nicht kürzer, aber: Plätze sind ein `enum` statt `0`/`1`; Fehler sind Typen, die `switch` vollständig behandeln muss, statt Text in einem `Ergebnis`-Record; eine Buchung ändert einen Platz statt die Liste neu zu bauen; EOF beendet die Schleife statt `""` zu liefern; ein ignorierter Buchungsaufruf ist ein Compilerfehler; das Binary soll ≤ 64 KB groß werden statt 14,9 MB.
+**Was das Beispiel zeigt.** Plätze sind ein `enum`, Fehler sind Typen, die `switch` vollständig behandeln muss, eine Buchung ändert genau einen Platz, EOF beendet die Eingabeschleife, ein ignorierter Buchungsaufruf ist ein Compilerfehler, und das Binary soll ≤ 64 KB groß werden.
 
 ---
 
@@ -1197,7 +1191,7 @@ test "abschluss und befehle" {
 
 Ausgabe in v0: **ein C-File pro Programm** (Unity-Build). cc optimiert über alles, jede Generic-Instanz entsteht genau einmal, es gibt keine erzeugten Header. Erst wenn `dif run` das Kriterium aus §6.2 reißt (> 500 ms bei typischen Programmen), kommt ein C-File pro Modul mit Cache.
 
-### 6.2 Backend: C11 an den System-C-Compiler (ADR `adr-difficulty-001-c-backend`, akzeptiert)
+### 6.2 Backend: C11 an den System-C-Compiler
 
 | | LLVM | Cranelift | QBE | **C11 → gcc/clang** |
 |---|---|---|---|---|
@@ -1220,25 +1214,25 @@ Risiken und Gegenmittel:
 
 Wann wir neu entscheiden: Wenn `dif run` bei typischen Programmen über 500 ms liegt, kommt tcc als schneller Entwicklungs-Compiler oder QBE als zweites Backend dazu. Die IR (die wir für das Lowering der Referenzzählung ohnehin brauchen) hält diese Tür offen.
 
-### 6.3 Compiler in Rust (ADR `adr-difficulty-002-compiler-in-rust`, akzeptiert)
+### 6.3 Compiler in Rust
 
 - Summentypen und `match` sind ideal für AST und IR; Speichersicherheit im Compiler selbst; Agenten schreiben Rust zuverlässig; `cargo test` für die Golden-Tests. (Rust ist nur die Implementierungssprache; die Syntax von difficulty ist bewusst nicht Rust.)
 - Ergebnis ist ein einzelnes statisches Binary `dif` (Ziel ≤ 5 MB), installiert ist rustc 1.99.
 - Zu Beginn keine Crate-Abhängigkeiten: handgeschriebener Lexer und rekursiver Abstiegsparser (bessere Fehlermeldungen als Generatoren). Typ-vorn-Deklarationen sind eindeutig, weil eine Anweisung, die mit `Typ Name` beginnt, immer eine Deklaration ist.
-- Verworfen: C (schnell, aber unsicher für einen von Agenten geschriebenen Compiler), Go (GC, große Binaries, siehe Ease), Zig (nicht installiert, Sprache noch instabil). Selbsthosting ist kein Ziel für v0.
+- Verworfen: C (schnell, aber unsicher für einen von Agenten geschriebenen Compiler), Go (GC, größere Binaries), Zig (nicht installiert, Sprache noch instabil). Selbsthosting ist kein Ziel für v0.
 
-### 6.4 Speichermodell und Runtime (ADR `adr-difficulty-003-speicher-wertsemantik-rc-cow`, akzeptiert)
+### 6.4 Speichermodell und Runtime
 
 - `str`, `[]T`, `map` sind referenzgezählt mit Copy-on-Write; `[N]T` und structs liegen inline; rekursive `enum`s werden automatisch geboxt.
 - Das Lowering entfernt unnötige Zähleroperationen (Move bei letzter Nutzung, nicht entweichende Locals), angelehnt an Perceus (Koka).
-- Zählung nicht atomar; Threads entscheidet #1818.
+- Zählung nicht atomar; Threads regelt die Nebenläufigkeit (nach v0).
 - Runtime ist ein einzelner Header `rt/dif_rt.h` (≤ 1500 Zeilen C, nur libc): Allokation, RC, Panic, UTF-8-Prüfung, Float-Formatierung, geordnete Map, `dl`-Laden. Stapelüberlauf wird per Guard-Page und `sigaltstack` als Panic gemeldet, nicht als Segfault.
 
-### 6.5 Fehlermodell (ADR `adr-difficulty-004-fehlermodell`, akzeptiert)
+### 6.5 Fehlermodell
 
 `T!E` und `?T` für erwartbare Fehler, Panics für Programmierfehler, keine Exceptions. Die Laufzeitprüfungen sind immer aktiv: Bounds, Überlauf, Division durch 0, UTF-8 an den Grenzen (Eingabe, Dateien, C).
 
-### 6.6 C-Import (ADR `adr-difficulty-006-c-import`, akzeptiert)
+### 6.6 C-Import
 
 - `use c` vorverarbeitet mit dem System-`cc -E -dD` und parst nur Deklarationen (C11 + GCC-Erweiterungen, die übersprungen werden). Keine libclang-Abhängigkeit, der Compiler bleibt klein.
 - Weil das Backend C ist, braucht der Import kein Layout- und kein ABI-Wissen: Felder und Aufrufe gehen im erzeugten C einfach über den Namen.
@@ -1262,7 +1256,7 @@ Wann wir neu entscheiden: Wenn `dif run` bei typischen Programmen über 500 ms l
 | `dif llms` | gibt die zur Compiler-Version passende `llms.txt` aus |
 | `dif explain R13` | lange Erklärung zu einem Fehlercode |
 
-**Editoren (#1824):** Syntax-Highlighting, Dateityp-Erkennung, Einrückung und `dif fmt`-Anbindung für **Vim/Neovim** (`editors/vim/`: ftdetect, syntax, ftplugin) und **Emacs** (`editors/emacs/dif-mode.el`). Die Wortlisten kommen aus der Spec; CI prüft, dass keine Datei ein Schlüsselwort vergisst. Später: tree-sitter-Grammatik (Neovim, Emacs 29+, Helix, Zed) und LSP.
+**Editoren:** Syntax-Highlighting, Dateityp-Erkennung, Einrückung und `dif fmt`-Anbindung für **Vim/Neovim** (`editors/vim/`: ftdetect, syntax, ftplugin) und **Emacs** (`editors/emacs/dif-mode.el`). Die Wortlisten kommen aus der Spec; CI prüft, dass keine Datei ein Schlüsselwort vergisst. Später: tree-sitter-Grammatik (Neovim, Emacs 29+, Helix, Zed) und LSP.
 
 Compiler-Meldungen sind englisch (Vorwissen der Modelle, eindeutige Suchbegriffe), mit `--lang de` deutsch.
 
@@ -1310,28 +1304,21 @@ Diagnosen für typisches Vorwissen greifen vor dem generischen Parserfehler, vie
 
 ---
 
-## 8. Probleme, die ich als Agent mit Ease hatte oder mit einer neuen Sprache hätte
+## 8. Typische Fallen für Agenten und wie difficulty sie vermeidet
 
-**Konkret bei Ease erlebt**
-
-| Problem | Lösung in difficulty |
+| Falle | Lösung |
 |---|---|
 | Sprache ist nicht im Training | C/Python-vertraute Syntax; `llms.txt` ≤ 16 KB; `dif llms` liefert genau die passende Version |
-| Argumentgrenzen in Präfixaufrufen (`slice plan i (i + n)`) | `f(a, b)` |
-| `check`-Pfeil: mal Rückgabe, mal Weiterlaufen | `if`, `return`, `break`, `continue` |
-| EOF als `""` → Endlosschleife | `for str line in io.lines()`, `read_line() -> ?str` |
-| Kein `bool` → Platzstatus als `0`/`1` | `bool` und `enum` |
-| Ganzzahl-Prüfung per `floor r is not r` | `int`; `parse_int() -> int!ParseErr` |
-| Zustand nur über Rückgabe-Records | `mut`-Parameter, an der Aufrufstelle sichtbar |
+| Mehrdeutige Argumentgrenzen | Aufrufe immer `f(a, b)` |
+| Unklarer Kontrollfluss | `if`, `return`, `break`, `continue` wie in C |
+| EOF als leerer String → Endlosschleife | `for str line in io.lines()`, `read_line() -> ?str` |
+| Zahlen als Wahrheitswerte | `bool` und `enum`, Bedingungen nur `bool` |
+| Ganzzahlen als Floats | echte Ganzzahltypen; `parse_int() -> int!ParseErr` |
+| Änderung landet still in einer Kopie | `mut`-Parameter; nie gelesene Änderung ist ein Fehler |
 | Liste neu bauen, um ein Element zu ändern | `xs[i] = v`, Copy-on-Write |
 | Ergebnis still verworfen | unbenutztes Ergebnis = Compilerfehler |
 | Fehler erst beim Ausführen | `dif check`, statische Typen |
-| 14,9-MB-Binary für 4 KB Programm | natives Binary |
-
-**Allgemein bei einer neuen Sprache**
-
-| Problem | Lösung |
-|---|---|
+| Tests, die nie scheitern | `expect` vergleicht Werte; `panics` prüft nur die Meldung |
 | API-Namen raten | `dif doc` (auch für C-Header), einheitliches Benennungsschema, Did-you-mean mit Alias-Tabelle |
 | Typ einer Variable erraten | jede Deklaration nennt ihren Typ |
 | Unklare Präzedenz | Bit-Ops über Vergleichen, keine Vergleichsketten, `&&`/`||`-Mischung nur mit Klammern |
@@ -1358,7 +1345,7 @@ Makros · Klassen, Vererbung, Objekte · Exceptions · Operator-Überladung (v0)
 
 ## 10. Fahrplan
 
-**Zielwerte** (gemessen in #1816)
+**Zielwerte** (gemessen ab M2)
 
 | Größe | Ziel |
 |---|---|
@@ -1371,42 +1358,30 @@ Makros · Klassen, Vererbung, Objekte · Exceptions · Operator-Überladung (v0)
 | Compiler-Binary `dif` | ≤ 5 MB |
 | `llms.txt` | ≤ 16 KB |
 | Alltags-Benchmark (Listen, Strings, Maps: Wortzählung über 10 MB Text) | ≤ 2× C, ≤ ½ Python |
-| Agenten-pass@1 im Aufgabenkatalog | ≥ Ease, Ziel ≥ Python |
+| Agenten-pass@1 im Aufgabenkatalog | Ziel ≥ Python |
 
-**Versionen und Meilensteine** (Entscheidung nach Review: Kern zuerst)
+**Versionen und Meilensteine** (Kern zuerst)
 
-| Version | Meilenstein | Inhalt | Epics |
-|---|---|---|---|
-| v0 | M0 Spec | Spezifikation entlang R1–R31, ADRs akzeptiert | #1807 |
-| v0 | M1 „Hallo, nativ“ | `int`, `bool`, Funktionen, `if`/`while`/`for`, `struct`, `print` → hello und fib als native Binaries, Größe und Laufzeit gemessen | #1808, #1809 (Teil), #1810 |
-| v0 | M2 „Kino“ | `enum`, `switch`, Listen, Maps, `str`, `T!E`, `test`, `io.lines`; die std-Methoden (`count`, `split`, `filter` …) liefert der Compiler eingebaut, bevor es eigene Generics gibt → `kino.dif` aus §5 läuft, Tests grün; **erste Agenten-Messung** | #1811, #1812, #1814 (Kern), #1816 |
-| v0 | M3 „Ausdruck“ | benannte Parameter, Funktionswerte und Blöcke, eigene Generics → Aufgabenliste aus §4.11 ohne UI läuft | #1817 |
-| v0 | M4 „Werkzeug-Kern“ | `extern` und Linken, `defer`, `dif check --json`, `fmt`, `fix` | #1813 (Teil), #1815 (Teil) |
-| v0.1 | M5 „C-Nachbar“ | `use c`, `bindgen`, Laufzeit-Laden, C-Quellen, Callbacks mit Kontext | #1813 (Rest), #1819 |
-| v0.2 | M6 „Werkzeugkasten“ | Coverage, Sanitizer, Doc-Tests, Prozess-Isolation, `doc`, `llms`, `explain` | #1820, #1815 (Rest) |
-| v0.3 | M7 „UI“ | rekta-Modul, Editoren, `--lang de` | #1822, #1824, #1815 (Rest) |
-| v0.4 | – | Export als `.so`/`.dll`, JSON | #1821, #1827 |
-| v1.x | – | Nebenläufigkeit, Benchmarks in der Sprache | #1818 |
+| Version | Meilenstein | Inhalt |
+|---|---|---|
+| v0 | M0 Spec | Spezifikation entlang R1–R31, ADRs akzeptiert |
+| v0 | M1 „Hallo, nativ“ | `int`, `bool`, Funktionen, `if`/`while`/`for`, `struct`, `print` → hello und fib als native Binaries, Größe und Laufzeit gemessen |
+| v0 | M2 „Kino“ | `enum`, `switch`, Listen, Maps, `str`, `T!E`, `test`, `io.lines`; die std-Methoden (`count`, `split`, `filter` …) liefert der Compiler eingebaut, bevor es eigene Generics gibt → `kino.dif` aus §5 läuft, Tests grün; **erste Agenten-Messung** |
+| v0 | M3 „Ausdruck“ | benannte Parameter, Funktionswerte und Blöcke, eigene Generics → Aufgabenliste aus §4.11 ohne UI läuft |
+| v0 | M4 „Werkzeug-Kern“ | `extern` und Linken, `defer`, `dif check --json`, `fmt`, `fix` |
+| v0.1 | M5 „C-Nachbar“ | `use c`, `bindgen`, Laufzeit-Laden, C-Quellen, Callbacks mit Kontext |
+| v0.2 | M6 „Werkzeugkasten“ | Coverage, Sanitizer, Doc-Tests, Prozess-Isolation, `doc`, `llms`, `explain` |
+| v0.3 | M7 „UI“ | rekta-Modul, Editoren, `--lang de` |
+| v0.4 | – | Export als `.so`/`.dll`, JSON |
+| v1.x | – | Nebenläufigkeit, Benchmarks in der Sprache |
 
-**Agenten-Messung** (ab M2, bei jedem Meilenstein, #1816): Katalog aus Kino, Wortzählung, Zustandsautomat, Textparser, Datei mit Fehlern, ab v0.1 eine C-Bibliothek. Gemessen werden pass@1 (erster Versuch kompiliert und Tests grün, ohne Hilfe), pass@5 (mit `dif check`/`dif test`-Schleife, höchstens 5 Runden), Runden bis grün, Tokens und Regelverstöße je Regel. Verglichen wird mit denselben Aufgaben in Ease und Python. Modelle: Claude Opus, Sonnet, Haiku und ein lokales Modell (Ollama); Kontext nur `llms.txt` und die Aufgabe. Häufige Regelverstöße führen zu besseren Diagnosen oder zu einer Regeländerung.
-
-**Epics und Reihenfolge**
-
-```
-#1807 Spec ─┬─▶ #1808 Frontend ─┬─▶ #1809 Typsystem ─▶ #1810 C-Backend ─┬─▶ #1812 Fehler & Tests ─▶ #1820 Test-Tooling ─┐
-            │                   └─▶ #1815 Tooling                      ├─▶ #1813 FFI ─┬─▶ #1819 C-Header-Import     ├─▶ #1816 Evaluation
-            │                                                          │              └─▶ #1821 Export (nach v0)     │
-            │                                                          └─▶ #1814 std ────────────────────────────────┘
-            └─▶ #1811 Speicher/Runtime ──▶ #1814 std, #1817 Generics & Funktionswerte (auch nach #1810), #1818 Nebenläufigkeit
-
-#1817 + #1819 ─▶ #1822 rekta-Modul (UI)
-```
+**Agenten-Messung** (ab M2, bei jedem Meilenstein): Katalog aus Kino, Wortzählung, Zustandsautomat, Textparser, Datei mit Fehlern, ab v0.1 eine C-Bibliothek. Gemessen werden pass@1 (erster Versuch kompiliert und Tests grün, ohne Hilfe), pass@5 (mit `dif check`/`dif test`-Schleife, höchstens 5 Runden), Runden bis grün, Tokens und Regelverstöße je Regel. Verglichen wird mit denselben Aufgaben in Python. Modelle: Claude Opus, Sonnet, Haiku und ein lokales Modell (Ollama); Kontext nur `llms.txt` und die Aufgabe. Häufige Regelverstöße führen zu besseren Diagnosen oder zu einer Regeländerung.
 
 Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate), `rt/dif_rt.h`, `std/*.dif`, `tests/ok`, `tests/err`, `docs/spec.md`, `docs/llms.txt`.
 
 ---
 
-## 11. Entscheidungen (Mensch, 2026-11-21)
+## 11. Entscheidungen
 
 | Frage | Entscheidung |
 |---|---|
@@ -1414,7 +1389,7 @@ Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate)
 | Signaturen | C-Stil, Typ vorn: `int add(int a, int b)`, struct-Felder `int x` |
 | Variablen | immer expliziter Typ (`int n = 0`), `const` für Unveränderliches, keine Inferenz |
 | Methoden | `Rückgabetyp Typ.name(…)`; `self` wird nicht deklariert und ist in jeder Methode die Variable, an der sie aufgerufen wird; sie darf geändert werden |
-| Übergabe | `mut` in Signatur und Aufruf (`void shift(mut Point p, int dx)`, `shift(mut p, 5)`); Parameter ohne `mut` sind lokale Kopien wie in C; eine nie gelesene Änderung ist ein Fehler (R6; nach Review geändert, früher aus dem Rumpf abgeleitet) |
+| Übergabe | `mut` in Signatur und Aufruf (`void shift(mut Point p, int dx)`, `shift(mut p, 5)`); Parameter ohne `mut` sind lokale Kopien wie in C; eine nie gelesene Änderung ist ein Fehler (R6) |
 | Methodenaufruf | `hall.book(3, 5)` ohne `mut`: `self` ist immer die Variable vor dem Punkt; ein Aufruf ohne Wirkung ist ein Fehler (R13) |
 | Regeln | Design-Grundsätze und Regeln R1–R31 ohne Sonderfälle (§3); Fehlercodes = Regelnummern |
 | Fehler | `int!AgeErr parse_age(str s)`, `void!BookErr`, `?str`; `try`, `err(...)` |
@@ -1427,11 +1402,11 @@ Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate)
 | Compiler-Meldungen | Englisch, `--lang de` umschaltbar |
 | Plattformen | v0 Linux x86_64 + arm64, dann macOS, später Windows/WASM |
 | `int` | immer 64 Bit, Überlauf = Panic, `+%` für Wrapping |
-| Float-Ausgabe | kürzeste Form, die beim Zurücklesen denselben Wert ergibt; `{x:g}` für %g (nach Review geändert, früher %g) |
+| Float-Ausgabe | kürzeste Form, die beim Zurücklesen denselben Wert ergibt; `{x:g}` für %g |
 | C-Anbindung v0 | Header-Import `use c`, Laufzeit-Laden, C-Quellen mitbauen, `dif bindgen` (plus `extern`, Linken per Name/Pfad/pkg-config) |
-| Export als `.so`/`.dll` | nach v0 (#1821) |
+| Export als `.so`/`.dll` | nach v0 |
 | Test-Werkzeuge v0 | Coverage, Sanitizer, Doc-Tests (plus Prozess-Isolation, `panics`-Tests); Benchmarks nach v0 |
-| Nebenläufigkeit | nach v0 (#1818): `spawn`/`task[T]`/`wait`, Funktion wartet auf ihre Tasks; `chan[T]`; `parallel for … yield`; Timeouts und kooperativer Abbruch; Deadlock-Erkennung; reproduzierbare Tests; kein `async`/`await` |
+| Nebenläufigkeit | nach v0: `spawn`/`task[T]`/`wait`, Funktion wartet auf ihre Tasks; `chan[T]`; `parallel for … yield`; Timeouts und kooperativer Abbruch; Deadlock-Erkennung; reproduzierbare Tests; kein `async`/`await` |
 | Nebenläufigkeits-Runtime | erst OS-Threads, später leichte Tasks (M:N) mit gleichem Code |
 | Mehrere Quellen | Inbox-Muster (`enum` + ein Kanal), kein `select`; dazu `time.every`, `time.after`, `try_recv` |
 | Große Daten teilen | `shared[T]` über `share(x)`, unveränderlich, atomare Zählung nur dort (R22) |
@@ -1440,28 +1415,28 @@ Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate)
 | Name | `difficulty`, Kommando `dif`, Dateien `.dif` |
 | Remote | öffentliches GitHub-Repo, angelegt über `gh` (per nix-shell) |
 | Lizenz | MIT |
-| Callbacks mit Zustand | Kontext-Variable, gebunden an den laufenden Aufruf, in den sie mit `mut` ging; Callbacks außerhalb oder aus fremden Threads brechen ab (R24; nach Review geändert, früher main-Lebensdauer) |
+| Callbacks mit Zustand | Kontext-Variable, gebunden an den laufenden Aufruf, in den sie mit `mut` ging; Callbacks außerhalb oder aus fremden Threads brechen ab (R24) |
 | Fehler mischen | `try x or E.V(…)` übersetzt, kein Sammeltyp `error` (R12) |
 | Zahl-Literale | passen sich ihrer Stelle an, auch Ausdrücke nur aus Literalen (`f64 h = 7 / 2` ist 3.5) (R8) |
-| Aufräumen | `defer X`: Code wandert ans Blockende, Argumente werden dann ausgewertet; `T!E` braucht `_ =`; kein `defer` bei Abbruch (R23, nach Review präzisiert) |
+| Aufräumen | `defer X`: Code wandert ans Blockende, Argumente werden dann ausgewertet; `T!E` braucht `_ =`; kein `defer` bei Abbruch (R23) |
 | Optionen an Funktionen | benannte Parameter mit Default, beim Aufruf per Name (R25) |
 | Funktionswerte | Literal `bool(Person p) { … }`, nur während des Aufrufs gültig, darf ringsum lesen und ändern (R26); keine impliziten Parameter wie `it` |
-| Blöcke | Literal ohne Parameter als `{ … }` direkt hinter `)`: `ui.tiles() { … }`; Kopfzeile von `if`/`while`/`for`/`switch` endet am ersten `{` (R3, R26; nach Review präzisiert) |
-| Generics | vollständig in v0 (#1817): Typparameter `[A, B]`, Funktionstypen `R(T)`, Einschränkung vor dem Parameter `[ordered T]` (R27); Fähigkeiten automatisch nach fester Regel (R28) |
-| v0-Umfang | Kern zuerst: v0 = M0–M4, danach v0.1 C-Import, v0.2 Test-Werkzeuge, v0.3 UI/Editoren, v0.4 Export/JSON, v1.x Nebenläufigkeit (§10, nach Review) |
-| Agenten-Messung | ab M2 bei jedem Meilenstein, festes Protokoll (§10, nach Review) |
-| Literale | Ausdrücke nur aus Literalen rechnen im Typ ihrer Stelle, ohne Stelle `int`/`f64` (R8, nach Review präzisiert) |
+| Blöcke | Literal ohne Parameter als `{ … }` direkt hinter `)`: `ui.tiles() { … }`; Kopfzeile von `if`/`while`/`for`/`switch` endet am ersten `{` (R3, R26) |
+| Generics | vollständig in v0: Typparameter `[A, B]`, Funktionstypen `R(T)`, Einschränkung vor dem Parameter `[ordered T]` (R27); Fähigkeiten automatisch nach fester Regel (R28) |
+| v0-Umfang | Kern zuerst: v0 = M0–M4, danach v0.1 C-Import, v0.2 Test-Werkzeuge, v0.3 UI/Editoren, v0.4 Export/JSON, v1.x Nebenläufigkeit (§10) |
+| Agenten-Messung | ab M2 bei jedem Meilenstein, festes Protokoll (§10) |
+| Literale | Ausdrücke nur aus Literalen rechnen im Typ ihrer Stelle, ohne Stelle `int`/`f64` (R8) |
 | Zahlen | C-Semantik streng: `/` Richtung 0, `%` mit Vorzeichen des Dividenden, IEEE-Floats, Abbruch bei int/0 und zu weiten Shifts, links nach rechts (R29) |
 | Maps | `m[k]` liefert `?V`, Literal `{k: v}`, Schleifen `for K k, V v in m` und `for int i, T x in xs` (R11, R30) |
-| JSON | typisiert, nach v0 (#1827) |
+| JSON | typisiert, nach v0 |
 | C-Ausgabe | ein C-File pro Programm in v0 (§6.1) |
 | Griffe in Tasks | atomar gezählt; C-Griffe nur mit `send T` beim Import (R20) |
 | `mut` | nimmt Orte (Variable, Feld, Element), Überlappung = Fehler bzw. Abbruch (R6) |
-| UI-Muster | Elm-Architektur: Nachrichten + `update(mut App, Msg)` + `view(App, ui.Builder)`; Builder als Parameter und Griff, kein globaler Zustand (nach Review) |
-| C-Sicherheit | sichere Standards: Parameter nicht optional, Strings nur für den Aufruf, Griffe mit Freigeber gezählt, NUL im String bricht ab (R17, nach Review) |
-| Tasks beim Verlassen | erst abbrechen, dann abwarten; `continue` im `switch` erlaubt, `break` nicht (R11, R19, nach Review) |
-| Schleifen-Kopien | Regel „nie gelesene Änderung ist ein Fehler“ statt `const`-Schleifenvariablen (R6, nach Review) |
-| Editoren | Syntax-Highlighting für Vim/Neovim und Emacs (#1824), später tree-sitter und LSP |
+| UI-Muster | Elm-Architektur: Nachrichten + `update(mut App, Msg)` + `view(App, ui.Builder)`; Builder als Parameter und Griff, kein globaler Zustand |
+| C-Sicherheit | sichere Standards: Parameter nicht optional, Strings nur für den Aufruf, Griffe mit Freigeber gezählt, NUL im String bricht ab (R17) |
+| Tasks beim Verlassen | erst abbrechen, dann abwarten; `continue` im `switch` erlaubt, `break` nicht (R11, R19) |
+| Schleifen-Kopien | Regel „nie gelesene Änderung ist ein Fehler“ statt `const`-Schleifenvariablen (R6) |
+| Editoren | Syntax-Highlighting für Vim/Neovim und Emacs, später tree-sitter und LSP |
 | C-Import-Details | C-Pointer sind `?T`, opake Pointer sind Griffe, C-struct-Felder ohne Angabe sind 0, `c.sizeof` (R17) |
 | Backend | C11 an gcc/clang (§6.2) |
 | Compiler-Sprache | Rust, anfangs ohne Crates (§6.3) |
