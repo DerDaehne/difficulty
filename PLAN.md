@@ -1365,9 +1365,9 @@ Makros · Klassen, Vererbung, Objekte · Exceptions · Operator-Überladung (v0)
 | Version | Meilenstein | Inhalt |
 |---|---|---|
 | v0 | M0 Spec | Spezifikation entlang R1–R31, ADRs akzeptiert |
-| v0 | M1 „Hallo, nativ“ | `int`, `bool`, Funktionen, `if`/`while`/`for`, `struct`, `print` → hello und fib als native Binaries, Größe und Laufzeit gemessen |
-| v0 | M2 „Kino“ | `enum`, `switch`, Listen, Maps, `str`, `T!E`, `test`, `io.lines`; die std-Methoden (`count`, `split`, `filter` …) liefert der Compiler eingebaut, bevor es eigene Generics gibt → `kino.dif` aus §5 läuft, Tests grün; **erste Agenten-Messung** |
-| v0 | M3 „Ausdruck“ | benannte Parameter, Funktionswerte und Blöcke, eigene Generics → Aufgabenliste aus §4.11 ohne UI läuft |
+| v0 | M1 „Hallo, nativ“ ✓ | `int`, `bool`, `str`-Literale, Funktionen, `const`, `if`/`while`/`for`, `print` → hello und fib als native Binaries, Größe und Laufzeit gemessen (`docs/measurements.md`) |
+| v0 | M2 „Kino“ | in fünf Scheiben, jede lauffähig: **a** `struct`, Methoden, `mut`, `enum`, `switch`, `if` als Ausdruck · **b** `?T`, `T!E`, `try`, `??`, `test`/`expect`/`dif test` · **c** Runtime mit RC und Copy-on-Write, `str`, `rune`, feste Ganzzahlbreiten, `f64`, `[]T`, `[N]T`, `map`, `io`, `os`, Formatangaben · **d** Funktionsliterale an Aufrufen und Block-Argument (R26) und die allgemeine std v0 (Text, Zahlen, Listen mit `filter`/`map`/`sort_by`/`any`/`all`, Maps, Dateien, Argumente), eingebaut vom Compiler, bevor es eigene Generics gibt · **e** `kino.dif` aus §5 läuft, Tests grün; **erste Agenten-Messung** (Haiku und Sonnet, danach Opus) |
+| v0 | M3 „Ausdruck“ | benannte Parameter, Funktionswerte als eigene Werte, eigene Generics, std in difficulty selbst geschrieben → Aufgabenliste aus §4.11 ohne UI läuft |
 | v0 | M4 „Werkzeug-Kern“ | `extern` und Linken, `defer`, `dif check --json`, `fmt`, `fix` |
 | v0.1 | M5 „C-Nachbar“ | `use c`, `bindgen`, Laufzeit-Laden, C-Quellen, Callbacks mit Kontext |
 | v0.2 | M6 „Werkzeugkasten“ | Coverage, Sanitizer, Doc-Tests, Prozess-Isolation, `doc`, `llms`, `explain` |
