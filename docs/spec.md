@@ -1,12 +1,14 @@
 # difficulty — Spezifikation
 
-Stand: 2026-11-22 · Version: v0, Teil 1 („Hallo, nativ“) · Begründungen und Fahrplan: [PLAN.md](../PLAN.md)
+Stand: 2026-11-23 · Version: v0, Teil 1 („Hallo, nativ“) und Teil 2a (Daten) · Begründungen und Fahrplan: [PLAN.md](../PLAN.md)
 
-Diese Spezifikation ist nach den Regeln R1–R31 gegliedert. Ausgearbeitet sind die Regeln, die der erste Schritt „Hallo, nativ“ braucht: R1, R2, R3, R4, R8, R9, R11, R13, R14 und R29. Alle übrigen stehen mit ihrem vollständigen Wortlaut da und werden mit den nächsten Schritten ausgearbeitet.
+Diese Spezifikation ist nach den Regeln R1–R31 gegliedert. Ausgearbeitet sind R1–R11, R13–R15, R28 (teilweise) und R29. Alle übrigen stehen mit ihrem vollständigen Wortlaut da und werden mit den nächsten Teilen ausgearbeitet.
 
 ## 0. Wie diese Spezifikation zu lesen ist
 
-**Grammatik** steht in EBNF: `a b` Folge, `a | b` Auswahl, `[ a ]` optional, `{ a }` beliebig oft, `"x"` wörtlich, `NL` Zeilenende (siehe §1.3).
+**Grammatik** steht in EBNF: `a b` Folge, `a | b` Auswahl, `[ a ]` optional, `{ a }` beliebig oft, `"x"` wörtlich, `NL` Zeilenende (siehe §1.3). Jede Produktion steht genau einmal; andere Abschnitte verweisen darauf.
+
+**Kanonische Form.** Wo der Compiler mehrere Schreibweisen annimmt (Feldreihenfolge im Struct-Literal, abschließendes Komma in mehrzeiligen Listen, Trenner der `enum`-Varianten), legt `dif fmt` die eine kanonische Form fest; der Compiler meldet dafür keinen Fehler.
 
 ### 0.1 Diagnosen
 
@@ -175,7 +177,8 @@ expr     = binary ;
 binary   = unary { binop unary } ;          (* geordnet nach der Tabelle *)
 unary    = { "-" | "!" | "~" | "try" } postfix ;
 postfix  = primary { "(" [ args ] ")" | "[" expr "]" | "." IDENT } ;
-args     = arg { "," arg } [ "," ] ;                 (* arg: R6 *)
+args     = arg { "," arg } [ "," ] ;
+arg      = [ "mut" ] expr ;                          (* nach mut steht ein Ort (place, R3); R6 *)
 primary  = INT | FLOAT | STRING | "true" | "false" | IDENT | "self" | "(" expr ")"
          | struct_lit | variant_val | if_expr ;      (* R5, R7, R15 *)
 ```
@@ -222,7 +225,7 @@ main.dif:1:1: error[R1]: statement outside a function
 type       = "int" | "bool" | "str" | "void" | IDENT ;   (* IDENT: struct oder enum des Moduls; weitere Typen folgen *)
 func_decl  = type IDENT "(" [ params ] ")" block ;
 params     = param { "," param } [ "," ] ;
-param      = type IDENT ;
+param      = [ "mut" ] type IDENT ;                   (* mut: R6 *)
 var_decl   = [ "const" ] type IDENT "=" expr ;
 ```
 
@@ -267,7 +270,7 @@ stmt        = var_decl | assign | if_stmt | while_stmt | for_stmt | switch_stmt
 if_stmt     = "if" expr block { "else" "if" expr block } [ "else" block ] ;
 assign      = place assign_op expr ;
 assign_op   = "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
-place       = IDENT { "." IDENT | "[" expr "]" } ;
+place       = ( IDENT | "self" ) { "." IDENT | "[" expr "]" } ;   (* self: R7 *)
 return_stmt = "return" [ expr ] ;
 call_stmt   = postfix ;                      (* muss mit einem Aufruf enden *)
 discard     = "_" "=" expr ;
@@ -276,7 +279,7 @@ discard     = "_" "=" expr ;
 - Jeder Block steht in `{ }`, auch bei einer einzigen Anweisung: `if x > 0 print(x)` ist `R3`, Hinweis `put the body in braces: if x > 0 { … }`.
 - Das `{` eines Blocks steht in derselben Zeile wie seine Kopfzeile; `}` und `else` stehen in einer Zeile (`} else {`).
 - Zwei Anweisungen in einer Zeile sind `R3`, Hinweis `put each statement on its own line`. Folgt einer Anweisung ein Token, das keine Anweisung beginnen kann (`)`, `=`), ist das `S1`.
-- Die Kopfzeile endet am ersten `{` auf Klammerebene 0. Darum ist `if hall.is_full() { … }` immer eine Bedingung mit Rumpf, nie ein Aufruf mit Block-Argument (R26). Ein Struct-Literal in einer Kopfzeile steht deshalb in Klammern: `if p == (Point{x: 0, y: 0}) {`; ohne Klammern ist es `S1` mit diesem Hinweis.
+- Die Kopfzeile endet am ersten `{` auf Klammerebene 0. Darum ist `if hall.is_full() { … }` immer eine Bedingung mit Rumpf, nie ein Aufruf mit Block-Argument (R26). Ein Struct-Literal oder ein `if`-Ausdruck in einer Kopfzeile steht deshalb in Klammern: `if p == (Point{x: 0, y: 0}) {`. Ein Struct-Literal ohne Klammern dort ist `S1` am Typnamen, Meldung `a struct literal in a header needs parentheses`, Hinweis mit der geklammerten Kopfzeile.
 - Klammern um die Bedingung sind erlaubt (`if (x > 0) {` ist ein Klammerausdruck); `dif fmt` entfernt sie.
 - `elif` (Python) und `elsif` (Ruby, Perl) sind `R3`, Hinweis `use else if`, auch direkt nach `}`; der Zweig wird danach wie `else if` gelesen.
 - `=` in einer Bedingung (`if x = 1 {`) ist `S1`, Hinweis `if x == 1 {`.
@@ -356,24 +359,27 @@ main.dif:4:13: error[R4]: `n` is already declared at main.dif:2:9
 **Regel.** Zuweisung und Rückgabe kopieren den Wert; die Kopie ist unabhängig, intern aber billig. Ein Griff (Kanal, Task, `shared`, Datei, Bibliothek, C-Objekt) ist ein Wert, der auf etwas außerhalb zeigt: kopiert wird der Griff, nicht das Ding. Parameter ohne `mut` sind lokale Kopien, wie in C.
 
 ```ebnf
-struct_decl = "struct" IDENT "{" { NL } { field NL { NL } } "}" ;
+struct_decl = "struct" IDENT "{" NL { NL } { field NL { NL } } "}" ;
 field       = type IDENT [ "=" expr ] ;
-enum_decl   = "enum" IDENT "{" { NL } variant { ( "," | NL ) { NL } variant } { NL } "}" ;
+enum_decl   = "enum" IDENT "{" { NL } variant { ( "," | NL ) { NL } variant } [ "," ] { NL } "}" ;
 variant     = IDENT [ "(" type IDENT { "," type IDENT } ")" ] ;
-struct_lit  = IDENT "{" { NL } [ init { "," { NL } init } { NL } ] "}" ;
+struct_lit  = IDENT "{" { NL } [ init { "," { NL } init } [ "," ] { NL } ] "}" ;
 init        = IDENT ":" expr ;
-variant_val = IDENT "." IDENT [ "(" [ args ] ")" ] ;
+variant_val = postfix ;      (* E.V oder E.V(args): Typname eines enum vor dem Punkt *)
 ```
+
+`A.b` ist eine Variante, wenn `A` ein `enum`-Typ ist; sonst ist `.b` ein Feld oder eine Methode des Werts vor dem Punkt.
 
 Teil 2a legt fest (Griffe, Listen, Maps und das Speichermodell folgen in Teil 2c):
 
 - `int`, `bool`, `str`, `struct` und `enum` sind Werte. `Point b = a` kopiert; danach ändert `b.x = 9` nur `b`. Ein Parameter ohne `mut` ist eine lokale Kopie und darf im Rumpf geändert werden, wenn die Änderung dort auch gelesen wird (R6).
-- Ein `struct` hat benannte Felder, eines pro Zeile. Ein Feld darf einen Vorgabewert haben; er wird bei jedem Literal neu ausgewertet, das das Feld weglässt, und darf nur Literale, `const` und Funktionen benutzen.
-- Ein Literal `Point{x: 1, y: 2}` nennt jedes Feld mit Namen, in beliebiger Reihenfolge, ausgewertet von links nach rechts; danach die Vorgabewerte in Deklarationsreihenfolge. Ein Feld ohne Vorgabe, das fehlt, ist `R2`, Hinweis mit dem ergänzten Literal (`Point{x: 1, y: 0}`). Ein unbekanntes oder doppelt genanntes Feld ist `R4`.
-- Ein Literal darf über mehrere Zeilen gehen: Zeilenumbrüche sind nach `{`, nach `,` und vor `}` erlaubt.
+- Ein `struct` hat benannte Felder, eines pro Zeile; `struct P { int x }` in einer Zeile ist `R3`, Hinweis `put each field on its own line`.
+- Ein Feld darf einen Vorgabewert haben. Er wird bei jedem Literal neu ausgewertet, das das Feld weglässt. Erlaubt ist ein Ausdruck ohne Variablen und ohne `self`: Literale, `const`, Struct-Literale, Varianten, Operatoren und Aufrufe von Funktionen ohne Wirkung (R13); sonst `R5`, Meldung `a field default uses only constants and functions without effect`.
+- Ein Literal `Point{x: 1, y: 2}` nennt jedes Feld mit Namen, in beliebiger Reihenfolge (kanonisch ist die Deklarationsreihenfolge, §0), ausgewertet von links nach rechts; danach die Vorgabewerte in Deklarationsreihenfolge. Ein Feld ohne Vorgabe, das fehlt, ist `R5`, Meldung `` `Point` needs a value for `y` ``, Hinweis mit dem ergänzten Literal; eingesetzt wird `0`, `false` oder `""`, bei anderen Typen `…`. Fehlen mehrere, nennt die Meldung sie in Deklarationsreihenfolge (`` `y`, `z` ``). Ein unbekanntes oder doppelt genanntes Feld ist `R4`.
+- Ein Literal darf über mehrere Zeilen gehen: Zeilenumbrüche sind nach `{`, nach `,` und vor `}` erlaubt, ein abschließendes Komma ebenso.
 - Felder liest und ändert man mit `p.x` und `p.x = 1`.
 - Ein `enum` zählt seine Varianten auf, getrennt durch `,` oder Zeilenumbruch. Eine Variante kann benannte Werte tragen (`NoSuchSeat(int row, int seat)`). Man schreibt Varianten immer mit ihrem Typ: `Seat.Free`, `BookErr.NoSuchSeat(3, 5)` mit den Werten in Reihenfolge. An die Werte kommt man nur über `switch` (R10).
-- Ein `struct`, das sich selbst enthält (direkt oder über andere `struct`s), ist `R5`: ein Wert hat eine feste Größe. Verkettete Daten nimmt man mit Listen (Teil 2c).
+- Ein Typ, der sich über Felder oder Varianten-Werte selbst enthält (`struct Node { Node next }`, `enum Tree { Leaf, Node(Tree l, Tree r) }`, auch über mehrere Typen hinweg), ist `R5` an seinem Namen, Meldung `` `Tree` contains itself ``, Hinweis `a value has a fixed size; keep linked values in a list`. Listen kommen in Teil 2c.
 - Namen von `struct` und `enum` leben im Modul wie Funktionen (R4). Feld- und Methodennamen eines Typs sind verschieden voneinander (R4).
 
 ```dif
@@ -395,7 +401,7 @@ void main() {
 
 Ausgabe: `Point{x: 1, y: 0} Point{x: 10, y: 0} false Seat.Taken`.
 
-```dif error R2
+```dif error R5
 struct Point {
     int x
     int y
@@ -408,7 +414,7 @@ void main() {
 ```
 
 ```
-main.dif:7:15: error[R2]: `Point` needs a value for `y`
+main.dif:7:15: error[R5]: `Point` needs a value for `y`
   hint: Point{x: 1, y: 0}
 ```
 
@@ -416,18 +422,23 @@ main.dif:7:15: error[R2]: `Point` needs a value for `y`
 
 **Regel.** Soll eine Funktion ein Argument ändern, steht `mut` in der Signatur und am Aufruf; die Änderung landet beim Aufrufer. Eine Änderung, die danach nie gelesen wird, ist ein Fehler (sie träfe nur eine Kopie). `mut` nimmt Orte: Variablen, Felder und Elemente. Ein Ort geht höchstens einmal veränderbar in einen Aufruf: als `self`, als `mut`-Argument oder über ein Funktionsliteral, das ihn ändert; überlappen zwei Orte, ist das ein Fehler, bei Elementen mit Laufzeit-Index ein Abbruch. Liest derselbe Aufruf einen Ort zusätzlich, bekommt der lesende Teil einen Schnappschuss.
 
-```ebnf
-param = [ "mut" ] type IDENT ;
-arg   = [ "mut" ] expr ;          (* nach mut steht ein Ort *)
-place = ( IDENT | "self" ) { "." IDENT | "[" expr "]" } ;
-```
+**Grammatik:** `param` (R2), `arg` (§2), `place` (R3).
 
 Teil 2a legt fest:
 
-- **Signatur und Aufruf.** Ein Parameter `mut T p` ändert den Ort, den der Aufrufer mit `mut` übergibt: `shift(mut b, 5)`, `shift(mut scene.player, 5)`. Fehlt `mut` am Aufruf, ist das `R6`, Hinweis mit dem Aufruf samt `mut`. `mut` vor einem Argument, dessen Parameter kein `mut` hat, ist `R6`, Hinweis ohne `mut`. Nach `mut` steht ein Ort; `mut f()` oder `mut 1` ist `R6`. Ein `const`-Ort geht nie mit `mut` hinein (`R4`).
-- **Überflüssiges `mut`.** Ändert eine Funktion einen `mut`-Parameter nie (weder zuweisen noch mit `mut` weitergeben noch eine Methode aufrufen, die `self` ändert), ist das `R6` am Parameter, Hinweis: die Signatur ohne `mut`.
-- **Verlorene Änderung.** Eine Änderung an einer Variable, einem Parameter oder ihren Feldern, die auf keinem Weg danach gelesen wird, ist `R6`. Ändern heißt: zuweisen, mit `+=` usw. rechnen, mit `mut` übergeben, eine Methode aufrufen, die `self` ändert; die letzten drei lesen den Ort zugleich. Lesen heißt jede andere Benutzung. Am Ende einer Funktion gelten `mut`-Parameter und `self` als gelesen (die Änderung landet beim Aufrufer). Ist der Ort ein Parameter ohne `mut`, lautet die Meldung `the change to p is lost: p is a copy`, Hinweis mit der Signatur samt `mut`; sonst `x is changed but never read afterwards`, Hinweis `use the value, or remove the change`. Gemeldet wird die erste solche Änderung einer Variable.
-- **Keine Aliase.** In einem Aufruf geht ein Ort höchstens einmal veränderbar hinein: als `self` einer Methode oder als `mut`-Argument. Zwei solche Orte dürfen sich nicht überlappen (`a` und `a.x`, oder zweimal `a.x`), sonst `R6`. Liest der Aufruf denselben Ort zusätzlich als Argument ohne `mut`, bekommt dieses Argument den Wert von vor dem Aufruf.
+- **Orte und Wurzeln.** Ein Ort ist eine Variable, ein Parameter oder `self` (seine *Wurzel*), gefolgt von Feldern: `p`, `p.x`, `scene.player.pos`. Was einen Ort ändert, ändert seine Wurzel.
+- **Ändern und Lesen.** Ändern heißt: einem Ort zuweisen; mit `+=` usw. rechnen; ihn mit `mut` an einen Parameter übergeben, den die aufgerufene Funktion ändert; auf ihm eine Methode aufrufen, die `self` ändert. Die letzten drei lesen den Ort zugleich. Lesen heißt jede andere Benutzung der Wurzel oder eines Teils davon.
+- **Signatur und Aufruf.** Ein Parameter `mut T p` ändert den Ort, den der Aufrufer mit `mut` übergibt: `shift(mut b, 5)`, `shift(mut scene.player, 5)`. Ein Ort mit `const`-Wurzel geht nie mit `mut` hinein (`R4`, `` cannot pass const `k` as mut ``). Meldungen, jeweils `R6` am Argument:
+  - `mut` fehlt: `` `shift` takes `p` as mut ``, Hinweis: der Aufruf samt `mut`;
+  - `mut` zu viel: `` `show` takes `p` without mut ``, Hinweis: der Aufruf ohne `mut`;
+  - kein Ort nach `mut` (`mut f()`, `mut 1`): `only a variable, field or element can be passed as mut`.
+- **Überflüssiges `mut`.** Ändert eine Funktion einen `mut`-Parameter nie (kein Ort mit dieser Wurzel wird geändert), ist das `R6` am `mut` des Parameters, Meldung `` `p` is never changed; remove mut ``, Hinweis: die Signatur ohne `mut`. Aufrufe, die dort `mut` übergeben, werden nicht zusätzlich gemeldet und zählen nicht als Änderung.
+- **Verlorene Änderung.** Eine Änderung ist verloren, wenn auf keinem Weg danach ihre Wurzel gelesen wird, bevor die Wurzel ganz neu zugewiesen wird (`v = …`; eine Teilzuweisung `v.x = …` beendet nichts) oder die Funktion endet. Am Ende einer Funktion gelten `mut`-Parameter und `self` als gelesen, weil die Änderung beim Aufrufer landet. In einer Schleife zählt der nächste Durchlauf als „danach“; ein `n += 1` im Rumpf liest dort den Wert des vorigen Durchlaufs und gilt darum als gelesen. Eine verlorene Änderung ist `R6` an ihrem Ort:
+  - an einem Parameter ohne `mut`: `` the change to `p` is lost: `p` is a copy ``, Hinweis `take it as mut: ` und die Signatur samt `mut`;
+  - sonst: `` `x` is changed but never read afterwards ``, Hinweis `use the value, or remove the change`.
+  
+  Gemeldet wird pro Wurzel die erste verlorene Änderung. Der Anfangswert einer Deklaration ist keine Änderung: `int x = 0` gefolgt von `x = 1; x = 2; print(x)` meldet `x = 1`.
+- **Keine Aliase.** In einem Aufruf geht ein Ort höchstens einmal veränderbar hinein: als `self` einer Methode, die `self` ändert, oder als `mut`-Argument. Zwei solche Orte dürfen sich nicht überlappen (`a` und `a.x`, oder zweimal `a.x`), sonst `R6` am zweiten, Meldung `` `p` goes into this call changeable twice ``, Hinweis `pass it changeable only once`. Liest der Aufruf denselben Ort zusätzlich als Argument ohne `mut`, bekommt dieses Argument den Wert von vor dem Aufruf. Ein Aufruf im Argument eines anderen ist ein eigener Aufruf: `f(mut a, g(mut a))` ist erlaubt, `g` ist fertig, bevor `f` beginnt.
 
 ```dif
 struct Point {
@@ -496,21 +507,67 @@ main.dif:7:5: error[R6]: the change to `p` is lost: `p` is a copy
   hint: take it as mut: void nudge(mut Point p)
 ```
 
+```dif error R6
+struct Point {
+    int x
+    int y
+}
+
+void swap_x(mut Point a, mut Point b) {
+    int t = a.x
+    a.x = b.x
+    b.x = t
+}
+
+void main() {
+    Point p = Point{x: 1, y: 2}
+    swap_x(mut p, mut p)
+    print(p)
+}
+```
+
+```
+main.dif:14:19: error[R6]: `p` goes into this call changeable twice
+  hint: pass it changeable only once
+```
+
+```dif error R6
+struct Point {
+    int x
+    int y
+}
+
+int sum(mut Point p) {
+    return p.x + p.y
+}
+
+void main() {
+    Point p = Point{x: 1, y: 2}
+    print(sum(mut p))
+}
+```
+
+```
+main.dif:6:9: error[R6]: `p` is never changed; remove mut
+  hint: int sum(Point p)
+```
+
 ### R7 — Methoden
 
 **Regel.** Eine Methode ist eine Funktion an einem Typ: `R T.name(params)`. In ihr ist `self` immer der Ort, an dem sie aufgerufen wird, und darf geändert werden. Methoden, die `self` nicht ändern, gehen auch auf Ausdrücken.
 
 ```ebnf
 method_decl = type IDENT "." IDENT "(" [ params ] ")" block ;   (* R Typ.name(…) *)
-call        = postfix "(" [ args ] ")" ;                       (* x.name(…) ruft die Methode *)
 ```
+
+Ein Methodenaufruf `x.name(…)` ist ein `postfix` aus §2.
 
 Teil 2a legt fest:
 
 - Methoden gibt es für die `struct`- und `enum`-Typen des Moduls; für andere Typen ist `R7`. Der Name steht in der Form `Typ.name`, darum findet `grep "Point.scale"` die Definition. `self` steht nie in der Parameterliste.
 - In der Methode ist `self` der Ort, auf dem sie aufgerufen wird, vom Typ `Typ`. Sie darf ihn lesen und ändern (`self.x *= k`, `self = Point{x: 0, y: 0}`). `self` außerhalb einer Methode ist `R7`.
-- Der Compiler leitet ab, ob eine Methode `self` ändert: sie weist `self` oder seinen Feldern zu, übergibt `self` mit `mut` oder ruft auf `self` eine Methode, die `self` ändert (auch über Rekursion hinweg).
-- Eine Methode, die `self` ändert, braucht einen veränderbaren Ort vor dem Punkt (keine `const`-Variable, keinen Ausdruck); sonst `R7`, Hinweis `store the value in a variable first`. Am Aufruf steht kein `mut`: der Methodenaufruf zeigt schon, dass der Ort vor dem Punkt gemeint ist. Für R6 zählt der Aufruf als Lesen und Ändern dieses Ortes.
+- Der Compiler leitet ab, ob eine Methode `self` ändert: sie ändert (R6) einen Ort mit der Wurzel `self`, also etwa `self.x = 1`, `shift(mut self.pos, 1)` oder `self.inner.bump()` mit einer Methode `bump`, die `self` ändert. Die Ableitung geht über alle Aufrufe, auch rekursive.
+- Eine Methode, die `self` ändert, braucht vor dem Punkt einen Ort (R6), dessen Wurzel keine `const`-Variable ist; auch Teilorte wie `scene.player.move(1)`. Vor einem anderen Ausdruck ist sie `R7` am Aufruf, Meldung `` `Counter.inc` changes self and needs a variable ``, Hinweis `store the value in a variable first`. Am Aufruf steht kein `mut`: der Methodenaufruf zeigt schon, dass der Ort vor dem Punkt gemeint ist. Für R6 zählt der Aufruf als Lesen und Ändern dieses Ortes.
 - Eine Methode, die `self` nicht ändert, geht auf jedem Ausdruck: `fresh().total()`, `a.moved(1).moved(2)`.
 - Ein unbekannter Methodenname ist `R4`, mit dem ähnlichsten Namen als Hinweis.
 
@@ -593,6 +650,7 @@ Teil 1 legt fest:
 - **Stelle** eines Ausdrucks ist der Typ, den sein Ziel verlangt: die deklarierte Variable, der Parameter, der Rückgabetyp, der andere Operand eines Vergleichs. Ohne Stelle (`print(7 / 2)`) ist ein Literal `int`.
 - **Ausdrücke nur aus Literalen und `const`** (deren Wert selbst so feststeht) rechnet der Compiler exakt aus, ohne Überlauf zwischendurch, mit der Division des Typs ihrer Stelle (`int k = 7 / 2` ist `3`). Erst das Ergebnis muss in den Typ passen, sonst `R8` (`int x = 9223372036854775808`, Hinweis `the value does not fit in int`). Darum ist `-9223372036854775808` ein gültiges `int`. Bit-Operatoren und Shifts rechnen dabei wie zur Laufzeit auf 64 Bit (R29), `1 << 63` ist also `-9223372036854775808`.
 - Ein Literal, dessen Art nicht zur Stelle passt (`bool b = 1`), ist `R8`.
+- **Rückgabe auf jedem Weg.** Eine Funktion mit Rückgabetyp (nicht `void`) endet auf jedem Weg mit `return` und einem Wert; sonst `R8` an ihrem Namen, Meldung `` `f` does not return a value on every path ``, Hinweis `end it with return, e.g. return 0` (mit `0`, `false`, `""` oder `…` je nach Typ). Ein Block *endet so*, wenn seine letzte Anweisung `return` ist, ein `if` mit `else`, dessen Zweige alle so enden, ein vollständiger `switch` (R10), dessen Zweige alle so enden, oder `while true` ohne `break` für diese Schleife. `return` ohne Wert in einer solchen Funktion und `return` mit Wert in einer `void`-Funktion sind `R8`.
 
 ```dif snippet
 int a = 7 / 2
@@ -656,10 +714,13 @@ binding     = type IDENT | "_" ;
 
 Teil 2a legt fest:
 
-- `switch` geht über `int`, `str` und `enum`. Über einem anderen Typ ist es `R10` (für `bool`: Hinweis `use if`).
-- Ein `case` nennt einen oder mehrere Werte: Literale, `const`-Namen oder Varianten. Seine Anweisungen stehen in den folgenden Zeilen bis zum nächsten `case`, `default` oder `}`; sie bilden einen eigenen Block. Es gibt kein Durchfallen; ein `case` ohne Anweisungen tut nichts.
-- Eine Variante mit Werten bindet sie mit Typ und Name, `_` überspringt einen Wert: `case Shape.Rect(int w, _):`. Typ und Anzahl müssen zur Variante passen (`R8`). Bindungen gibt es nur, wenn der `case` genau einen Wert nennt (`R10`).
-- Über einem `enum` ist jede Variante behandelt oder es steht ein `default`; sonst `R10` mit der Liste der fehlenden Varianten. Über `int` und `str` ist `default` Pflicht (`R10`). Ein `default`, der nie erreicht wird, weil alle Varianten behandelt sind, ist `R10`.
+- `switch` geht über `int`, `str` und `enum`. Über einem anderen Typ ist es `R10`, Meldung `` cannot switch over bool `` (bzw. den Typ), für `bool` mit Hinweis `use if`.
+- Nach `{` und nach jedem `case …:` und `default:` folgt ein Zeilenumbruch. Eine Anweisung in derselben Zeile (`case 0: return 1`, `switch s { … }` in einer Zeile) ist `R3`, Meldung `the statements of a case start on the next line`.
+- Ein `case` nennt einen oder mehrere Werte. Seine Anweisungen stehen in den folgenden Zeilen bis zum nächsten `case`, `default` oder `}`; sie bilden einen eigenen Block. Es gibt kein Durchfallen; ein `case` ohne Anweisungen tut nichts.
+- **Werte über `int` und `str`:** Literale oder `const`-Namen dieses Typs. Ein Wert anderen Typs ist `R8`, ein unbekannter Name `R4`.
+- **Werte über einem `enum E`:** nur Varianten, immer qualifiziert (`E.V`). Eine unqualifizierte Variante (`case Free:`) ist `R10`, Meldung `variants are written with their type`, Hinweis `case Seat.Free:`. Ein Literal, ein `const` oder eine Variante eines anderen `enum` ist `R8`.
+- **Bindungen.** `case Shape.Rect:` passt auf jede `Rect`, gleich welche Werte sie trägt. Wer Werte braucht, bindet sie in Klammern, für jeden Wert der Variante einen Eintrag in Reihenfolge: Typ und Name, oder `_` zum Überspringen: `case Shape.Rect(int w, _):`. Falsche Anzahl oder falscher Typ ist `R8`, Meldung `` `Shape.Rect` has the values int w, int h ``. Klammern nur aus `_` sind `R10`, Hinweis `case Shape.Rect:`. Bindungen gibt es nur, wenn der `case` genau einen Wert nennt (`R10`). Gebundene Namen gelten im Block des `case` und folgen R4.
+- Über einem `enum` ist jede Variante behandelt oder es steht ein `default`; sonst `R10` am `switch`, Meldung `switch does not handle ` mit den fehlenden Varianten in Deklarationsreihenfolge, getrennt durch `, ` (`switch does not handle Seat.Taken, Seat.Reserved`), Hinweis `add case Seat.Taken: …, or default:` mit der ersten fehlenden. Über `int` und `str` ist `default` Pflicht (`R10`). Ein `default`, der nie erreicht wird, weil alle Varianten behandelt sind, ist `R10`.
 - `default` steht als letzter Zweig. Ein Wert, der schon in einem früheren `case` steht, ist `R10` mit der Position des ersten.
 - `break` steht nie direkt in einem `switch` (R11); `continue` und `return` dürfen dort stehen.
 - Endet jeder Zweig eines vollständigen `switch` mit `return`, endet auch der `switch` dort (für „`return` auf jedem Weg“).
@@ -771,7 +832,7 @@ main.dif:2:5: error[R11]: C-style for loop
 
 **Grammatik:** `call_stmt` und `discard` aus R3.
 
-Teil 1 legt fest (**vorläufig strenger als die Regel**, bis die Wirkungsanalyse in Teil 2 kommt):
+Teil 1 und Teil 2a legen fest:
 
 - Ein Aufruf als Anweisung, dessen Ergebnis nicht `void` ist, ist `R13`, Hinweis `use it, or discard it explicitly with _ = …` — außer die Funktion hat eine Wirkung (ab Teil 2a).
 - **Wirkung (Teil 2a).** Eine Funktion oder Methode hat eine Wirkung, wenn sie einen `mut`-Parameter oder `self` ändert, `print` aufruft oder eine Funktion mit Wirkung aufruft; der Compiler leitet das über alle Aufrufe hinweg ab (auch rekursiv). Ein Aufruf mit Wirkung darf als Anweisung stehen, auch wenn er einen Wert liefert. Ergebnisse vom Typ `T!E` und `?T` werden trotzdem immer verwendet (Teil 2b).
@@ -851,9 +912,10 @@ value_block = "{" { NL } { stmt NL { NL } } expr { NL } "}" ;
 
 Teil 2a legt fest:
 
-- `if` als Ausdruck steht überall, wo ein Ausdruck stehen kann, außer am Anfang einer Anweisung (dort ist es die `if`-Anweisung aus R3).
-- Jeder Zweig ist ein Block, dessen letzte Zeile ein Ausdruck ist; davor dürfen Anweisungen stehen. Der Wert des Zweigs ist dieser Ausdruck.
-- `else` ist Pflicht (`R15`, Hinweis mit `else { … }`). Ein Zweig ohne Ausdruck am Ende ist `R15`. Alle Zweige haben denselben Typ (`R8`).
+- `if` als Ausdruck steht überall, wo ein Ausdruck stehen kann, außer am Anfang einer Anweisung (dort ist es die `if`-Anweisung aus R3) und ungeklammert in einer Kopfzeile (R3).
+- Jeder Zweig ist ein Block, dessen letzte Zeile ein Ausdruck ist; davor dürfen Anweisungen stehen. Der Wert des Zweigs ist dieser Ausdruck; ein `if`-Ausdruck in der letzten Zeile ist erlaubt.
+- `else` ist Pflicht: `R15` am `if`, Meldung `if as a value needs else`, Hinweis mit `else { … }`. Endet ein Zweig nicht mit einem Ausdruck mit Wert (sondern mit einer Anweisung oder einem `void`-Aufruf), ist das `R15`, Meldung `this branch of if gives no value`. Alle Zweige haben denselben Typ, sonst `R8`, Meldung `` the branches of if give int and str ``; Literale bekommen den Typ ihrer Stelle (R8).
+- Der Ausdruck endet mit dem `}` seines letzten Zweigs: `if c { 1 } else { 2 } + 3` addiert 3 zum gewählten Wert.
 - Ausgewertet wird nur der gewählte Zweig.
 
 ```dif snippet
