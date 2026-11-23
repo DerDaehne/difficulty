@@ -760,7 +760,7 @@ impl<'a> Checker<'a> {
             escape.push("self".into());
         }
         for (root, pos) in live::lost(&f.body, &self.call_changes, &escape) {
-            if !self.fn_locals.contains(&root) {
+            if root != "self" && !self.fn_locals.contains(&root) {
                 continue; // a const, a function or an unknown name: reported elsewhere
             }
             match f.params.iter().position(|p| p.name == root) {

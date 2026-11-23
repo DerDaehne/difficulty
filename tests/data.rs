@@ -180,6 +180,12 @@ fn declarations() {
             "R6",
             "the change to `n` is lost",
         ),
+        // a change to a part of self that is overwritten before anyone reads it
+        (
+            "struct P {\n    int x\n}\n\nvoid P.r() {\n    self.x = 0\n    self = P{x: 1}\n}\n",
+            "R6",
+            "`self` is changed but never read afterwards",
+        ),
     ];
     for (src, code, msg) in cases {
         let (c, m) = one(src);
