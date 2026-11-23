@@ -294,6 +294,7 @@ if n > 0 {
 } else {
     print("negativ")
 }
+print(n)
 ```
 
 ```dif error R3

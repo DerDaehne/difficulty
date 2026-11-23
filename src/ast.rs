@@ -12,6 +12,8 @@ pub struct Module {
 pub enum Decl {
     Const(VarDecl),
     Func(Func),
+    Struct(StructDecl),
+    Enum(EnumDecl),
 }
 
 #[derive(Debug, Clone)]
@@ -20,20 +22,92 @@ pub struct TypeRef {
     pub pos: Pos,
 }
 
+/// A parameter, a loop variable, a field of an enum variant or a case binding.
 #[derive(Debug, Clone)]
 pub struct Param {
     pub ty: TypeRef,
     pub name: String,
     pub pos: Pos,
+    /// Position of `mut` before the type (parameters only).
+    pub mut_pos: Option<Pos>,
 }
 
+/// A function, or a method `R T.name(…)` when `recv` names the type.
 #[derive(Debug, Clone)]
 pub struct Func {
     pub ret: TypeRef,
+    pub recv: Option<TypeRef>,
     pub name: String,
     pub pos: Pos,
     pub params: Vec<Param>,
     pub body: Block,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructDecl {
+    pub name: String,
+    pub pos: Pos,
+    pub fields: Vec<Field>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Field {
+    pub ty: TypeRef,
+    pub name: String,
+    pub pos: Pos,
+    pub default: Option<Expr>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumDecl {
+    pub name: String,
+    pub pos: Pos,
+    pub variants: Vec<Variant>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Variant {
+    pub name: String,
+    pub pos: Pos,
+    pub fields: Vec<Param>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Case {
+    pub pats: Vec<Pattern>,
+    pub body: Block,
+    pub pos: Pos,
+}
+
+#[derive(Debug, Clone)]
+pub enum Pattern {
+    /// An integer literal, already negated for `-5`.
+    Int(i128, Pos),
+    Str(String, Pos),
+    /// A `const` name, or an unqualified variant (an error the checker reports).
+    Name(String, Pos),
+    /// `E.V`, or `E.V(T a, _)` with bindings (`None` is `_`).
+    Variant {
+        ty: String,
+        name: String,
+        binds: Option<Vec<Option<Param>>>,
+        pos: Pos,
+    },
+}
+
+/// A branch of `if` as a value: statements, then the value.
+#[derive(Debug, Clone)]
+pub struct ValueBlock {
+    pub stmts: Vec<Stmt>,
+    pub value: Expr,
+    pub pos: Pos,
+}
+
+#[derive(Debug, Clone)]
+pub struct FieldInit {
+    pub name: String,
+    pub pos: Pos,
+    pub value: Expr,
 }
 
 /// `[const] T name = value`. A declaration written in foreign style (`var x = 5`)
@@ -79,6 +153,12 @@ pub enum Stmt {
         body: Block,
         pos: Pos,
     },
+    Switch {
+        subject: Expr,
+        cases: Vec<Case>,
+        default: Option<(Block, Pos)>,
+        pos: Pos,
+    },
     Break(Pos),
     Continue(Pos),
     Return(Option<Expr>, Pos),
@@ -107,6 +187,13 @@ pub enum ExprKind {
     Index(Box<Expr>, Box<Expr>),
     Field(Box<Expr>, String),
     Paren(Box<Expr>),
+    SelfRef,
+    /// `T{f: v, …}`; the position of each name is kept for diagnostics.
+    StructLit(String, Vec<FieldInit>),
+    /// `if c { … } else if … else { … }` as a value.
+    IfExpr(Vec<(Expr, ValueBlock)>, Box<ValueBlock>),
+    /// `mut place` as an argument (R6).
+    Mut(Box<Expr>),
     /// Placeholder after an error that was already reported.
     Missing,
 }

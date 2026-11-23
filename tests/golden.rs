@@ -95,29 +95,49 @@ fn llms_txt() {
     assert!(doc_examples("llms.txt", "llms") >= 2);
 }
 
-/// Sections of the spec whose examples the compiler does not implement yet; an
-/// implementing change removes its sections here.
-const PENDING: &[&str] = &["### R5 ", "### R6 ", "### R7 ", "### R10 ", "### R15 "];
+/// Sections of the spec whose examples are checked but not yet built and run,
+/// because the C backend for them follows; the backend change removes them here.
+const CHECK_ONLY: &[&str] = &["### R5 ", "### R6 ", "### R7 ", "### R10 ", "### R15 "];
 
 /// Every ```dif block of a document, by kind: valid module, snippet (inside
 /// `void main()`), `error Rn` (exactly that diagnostic), `panic "message"`.
 /// Returns the number of examples checked.
 fn doc_examples(doc: &str, tag: &str) -> usize {
     let spec = std::fs::read_to_string(Path::new(ROOT).join(doc)).unwrap();
-    let mut lines = spec.lines();
+    let lines: Vec<&str> = spec.lines().collect();
+    let mut i = 0;
     let mut n = 0;
     let mut section = "";
-    while let Some(l) = lines.next() {
+    while i < lines.len() {
+        let l = lines[i];
+        i += 1;
         if l.starts_with("### ") {
             section = l;
         }
         let Some(kind) = l.strip_prefix("```dif") else {
             continue;
         };
-        let body: Vec<&str> = lines.by_ref().take_while(|l| *l != "```").collect();
-        if PENDING.iter().any(|p| section.starts_with(p)) {
-            continue;
+        let start = i;
+        while i < lines.len() && lines[i] != "```" {
+            i += 1;
         }
+        let body = &lines[start..i];
+        i += 1;
+        // an error example may be followed by its exact output in a plain block
+        let mut k = i;
+        while k < lines.len() && lines[k].is_empty() {
+            k += 1;
+        }
+        let expected: Option<String> =
+            (kind.trim().starts_with("error") && lines.get(k) == Some(&"```")).then(|| {
+                let from = k + 1;
+                let mut to = from;
+                while lines[to] != "```" {
+                    to += 1;
+                }
+                lines[from..to].join("\n")
+            });
+        let check_only = CHECK_ONLY.iter().any(|p| section.starts_with(p));
         n += 1;
         let kind = kind.trim();
         let src = if kind.starts_with("snippet") || kind.starts_with("panic") {
@@ -126,11 +146,18 @@ fn doc_examples(doc: &str, tag: &str) -> usize {
         } else {
             body.join("\n") + "\n"
         };
-        let codes: Vec<&str> = dif::check_source(&src).iter().map(|d| d.code).collect();
+        let diags = dif::check_source(&src);
+        let codes: Vec<&str> = diags.iter().map(|d| d.code).collect();
         if let Some(code) = kind.strip_prefix("error ") {
             assert_eq!(codes, [code], "spec example {n}:\n{src}");
+            if let Some(want) = expected {
+                assert_eq!(diags[0].render("main.dif"), want, "{doc} example {n}");
+            }
         } else {
             assert_eq!(codes, [] as [&str; 0], "spec example {n}:\n{src}");
+        }
+        if check_only {
+            continue;
         }
         if let Some(msg) = kind.strip_prefix("panic ") {
             let (_, err, code) = run(&format!("{tag}{n}"), &src);

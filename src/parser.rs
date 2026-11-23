@@ -63,6 +63,8 @@ struct Parser<'a> {
     t: &'a [Token],
     i: usize,
     last_end: u32,
+    /// Inside the header of `if`/`while`/`for`/`switch`: `T {` starts the body (R3).
+    header: bool,
     /// Offsets of lexical errors that break the token stream.
     breaks: Vec<u32>,
     /// First error of each open unit, with the offset up to which it was seen.
@@ -87,6 +89,7 @@ impl<'a> Parser<'a> {
             t,
             i: 0,
             last_end: 0,
+            header: false,
             breaks,
             frames: Vec::new(),
             silent: 0,
@@ -446,6 +449,20 @@ impl<'a> Parser<'a> {
         if self.word_at(0, FOREIGN_VAR) && self.name_at(1) {
             return self.foreign_var(true).map(Decl::Const);
         }
+        if self.is_kw("struct") {
+            return self.struct_decl().map(Decl::Struct);
+        }
+        if self.is_kw("enum") {
+            return self.enum_decl().map(Decl::Enum);
+        }
+        // `R T.name(` is a method
+        if self.is_type_name()
+            && matches!(self.peek_n(1), Tok::Ident(_))
+            && *self.peek_n(2) == Tok::Op(".")
+            && self.name_at(3)
+        {
+            return self.func().map(Decl::Func);
+        }
         if self.is_type_name() && self.name_at(1) {
             if matches!(self.peek_n(2), Tok::Op("(" | "{")) {
                 return self.func().map(Decl::Func);
@@ -526,6 +543,13 @@ impl<'a> Parser<'a> {
     fn func(&mut self) -> Option<Func> {
         let header = self.pos().offset;
         let mut ret = self.type_ref();
+        let recv = if *self.peek_n(1) == Tok::Op(".") {
+            let t = self.type_ref();
+            self.bump(); // .
+            Some(t)
+        } else {
+            None
+        };
         let (name, pos) = self.name()?;
         let mut params = Vec::new();
         if self.is_op("{") {
@@ -553,32 +577,36 @@ impl<'a> Parser<'a> {
             }
             // `name: T` and `-> T` from other languages: one R2 with the whole header
             let mut foreign: Option<(Pos, &str)> = None;
-            if !self.is_op(")") {
-                loop {
-                    if matches!(self.peek(), Tok::Ident(_)) && *self.peek_n(1) == Tok::Op(":") {
-                        let (n, p) = self.name()?;
-                        foreign.get_or_insert((p, "the type comes before the name"));
-                        self.bump(); // :
-                        let ty = self.type_ref();
-                        params.push(Param {
-                            ty,
-                            name: n,
-                            pos: p,
-                        });
-                    } else {
-                        let ty = self.type_ref();
-                        let (n, p) = self.name()?;
-                        params.push(Param {
-                            ty,
-                            name: n,
-                            pos: p,
-                        });
-                    }
-                    if !self.is_op(",") {
-                        break;
-                    }
+            while !self.is_op(")") {
+                let mut_pos = self.is_kw("mut").then(|| self.pos());
+                if mut_pos.is_some() {
                     self.bump();
                 }
+                if matches!(self.peek(), Tok::Ident(_)) && *self.peek_n(1) == Tok::Op(":") {
+                    let (n, p) = self.name()?;
+                    foreign.get_or_insert((p, "the type comes before the name"));
+                    self.bump(); // :
+                    let ty = self.type_ref();
+                    params.push(Param {
+                        ty,
+                        name: n,
+                        pos: p,
+                        mut_pos,
+                    });
+                } else {
+                    let ty = self.type_ref();
+                    let (n, p) = self.name()?;
+                    params.push(Param {
+                        ty,
+                        name: n,
+                        pos: p,
+                        mut_pos,
+                    });
+                }
+                if !self.is_op(",") {
+                    break;
+                }
+                self.bump(); // a trailing comma is allowed
             }
             if !self.close(open, ")") {
                 return None;
@@ -601,6 +629,7 @@ impl<'a> Parser<'a> {
         let body = self.body("function", header)?;
         Some(Func {
             ret,
+            recv,
             name,
             pos,
             params,
@@ -765,9 +794,10 @@ impl<'a> Parser<'a> {
         let p = self.pos();
         match self.peek() {
             Tok::Kw("if") => self.if_stmt(),
+            Tok::Kw("switch") => self.switch_stmt(),
             Tok::Kw("while") => {
                 self.bump();
-                let cond = self.expr();
+                let cond = self.head_expr();
                 let body = self.body("while", p.offset)?;
                 Some(Stmt::While { cond, body, pos: p })
             }
@@ -821,7 +851,7 @@ impl<'a> Parser<'a> {
     fn if_stmt(&mut self) -> Option<Stmt> {
         let pos = self.pos();
         self.bump();
-        let cond = self.expr();
+        let cond = self.head_expr();
         let body = self.body("if", pos.offset)?;
         let mut branches = vec![(cond, body)];
         let mut otherwise = None;
@@ -850,7 +880,7 @@ impl<'a> Parser<'a> {
                     Some("use else if".into()),
                 );
                 self.bump();
-                let c = self.expr();
+                let c = self.head_expr();
                 let b = self.body("else if", p.offset)?;
                 branches.push((c, b));
                 continue;
@@ -861,7 +891,7 @@ impl<'a> Parser<'a> {
             self.bump();
             if self.is_kw("if") {
                 self.bump();
-                let c = self.expr();
+                let c = self.head_expr();
                 let b = self.body("else if", p.offset)?;
                 branches.push((c, b));
             } else {
@@ -897,7 +927,12 @@ impl<'a> Parser<'a> {
                 self.type_ref()
             };
             let (name, p) = self.name()?;
-            vars.push(Param { ty, name, pos: p });
+            vars.push(Param {
+                ty,
+                name,
+                pos: p,
+                mut_pos: None,
+            });
             if vars.len() == 2 || !self.is_op(",") {
                 break;
             }
@@ -910,7 +945,7 @@ impl<'a> Parser<'a> {
             return None;
         }
         self.bump();
-        let iter = self.expr();
+        let iter = self.head_expr();
         if let Some(p) = untyped {
             let range = matches!(&iter.kind, ExprKind::Call(f, _)
                 if matches!(&f.kind, ExprKind::Ident(n) if n == "range"));
@@ -1162,14 +1197,12 @@ impl<'a> Parser<'a> {
                 Tok::Op("(") => {
                     self.bump();
                     let mut args = Vec::new();
-                    if !self.is_op(")") {
-                        loop {
-                            args.push(self.expr());
-                            if !self.is_op(",") {
-                                break;
-                            }
-                            self.bump();
+                    while !self.is_op(")") {
+                        args.push(self.arg());
+                        if !self.is_op(",") {
+                            break;
                         }
+                        self.bump(); // a trailing comma is allowed
                     }
                     self.close(open, ")");
                     ExprKind::Call(Box::new(e), args)
@@ -1213,6 +1246,11 @@ impl<'a> Parser<'a> {
             Tok::Float(s) => ExprKind::Float(s.clone()),
             Tok::Kw("true") => ExprKind::Bool(true),
             Tok::Kw("false") => ExprKind::Bool(false),
+            Tok::Ident(_) if *self.peek_n(1) == Tok::Op("{") && self.literal_here() => {
+                return self.struct_lit();
+            }
+            Tok::Kw("self") => ExprKind::SelfRef,
+            Tok::Kw("if") => return self.if_expr(),
             Tok::Ident(n) => ExprKind::Ident(n.clone()),
             Tok::Kw(k) if self.reserved.contains(k) => ExprKind::Ident(k.to_string()),
             Tok::Str(parts) => {
@@ -1226,7 +1264,9 @@ impl<'a> Parser<'a> {
             }
             Tok::Op("(") => {
                 self.bump();
+                let header = std::mem::replace(&mut self.header, false);
                 let inner = self.expr();
+                self.header = header;
                 self.close(p, ")");
                 return Expr {
                     kind: ExprKind::Paren(Box::new(inner)),
@@ -1283,17 +1323,634 @@ impl<'a> Parser<'a> {
     }
 }
 
+/// Part 2a: struct, enum, struct literals, `mut` arguments, `if` as a value, switch.
+impl<'a> Parser<'a> {
+    /// The expression in the header of `if`/`while`/`for`/`switch`.
+    fn head_expr(&mut self) -> Expr {
+        let saved = std::mem::replace(&mut self.header, true);
+        let e = self.expr();
+        self.header = saved;
+        e
+    }
+
+    /// An argument: `mut place` or an expression; never inside a header.
+    fn arg(&mut self) -> Expr {
+        let saved = std::mem::replace(&mut self.header, false);
+        let e = if self.is_kw("mut") {
+            let p = self.pos();
+            self.bump();
+            let inner = self.expr();
+            let end = inner.end;
+            Expr {
+                kind: ExprKind::Mut(Box::new(inner)),
+                pos: p,
+                end,
+            }
+        } else {
+            self.expr()
+        };
+        self.header = saved;
+        e
+    }
+
+    /// Skips to the `}` that closes the block we are in, and past it.
+    fn skip_rest_of_block(&mut self) {
+        let mut depth = 0usize;
+        loop {
+            match self.peek() {
+                Tok::Eof => return,
+                Tok::Op("{") => depth += 1,
+                Tok::Op("}") if depth == 0 => {
+                    self.bump();
+                    return;
+                }
+                Tok::Op("}") => depth -= 1,
+                _ => {}
+            }
+            self.bump();
+        }
+    }
+
+    fn bail<T>(&mut self) -> Option<T> {
+        self.skip_rest_of_block();
+        None
+    }
+
+    fn struct_decl(&mut self) -> Option<StructDecl> {
+        self.bump(); // struct
+        let (name, pos) = self.name()?;
+        if !self.expect_op("{") {
+            return None;
+        }
+        let mut fields = Vec::new();
+        let one_per_line = |p: &mut Self| {
+            let at = p.pos();
+            let hint = "put each field on its own line".to_string();
+            p.err(
+                "R3",
+                at,
+                "fields of a struct stand one per line",
+                Some(hint),
+            );
+            p.bail::<StructDecl>()
+        };
+        if !matches!(self.peek(), Tok::Nl) && !self.is_op("}") {
+            return one_per_line(self);
+        }
+        self.skip_nl();
+        while !self.is_op("}") && *self.peek() != Tok::Eof {
+            let ty = self.type_ref();
+            let Some((fname, fpos)) = self.name() else {
+                return self.bail();
+            };
+            let default = if self.is_op("=") {
+                self.bump();
+                Some(self.expr())
+            } else {
+                None
+            };
+            fields.push(Field {
+                ty,
+                name: fname,
+                pos: fpos,
+                default,
+            });
+            if !matches!(self.peek(), Tok::Nl) && !self.is_op("}") {
+                return one_per_line(self);
+            }
+            self.skip_nl();
+        }
+        self.expect_op("}");
+        Some(StructDecl { name, pos, fields })
+    }
+
+    fn enum_decl(&mut self) -> Option<EnumDecl> {
+        self.bump(); // enum
+        let (name, pos) = self.name()?;
+        if !self.expect_op("{") {
+            return None;
+        }
+        self.skip_nl();
+        let mut variants = Vec::new();
+        while !self.is_op("}") && *self.peek() != Tok::Eof {
+            let Some((vname, vpos)) = self.name() else {
+                return self.bail();
+            };
+            let mut fields = Vec::new();
+            if self.is_op("(") {
+                let open = self.pos();
+                self.bump();
+                while !self.is_op(")") {
+                    let ty = self.type_ref();
+                    let Some((n, p)) = self.name() else {
+                        return self.bail();
+                    };
+                    fields.push(Param {
+                        ty,
+                        name: n,
+                        pos: p,
+                        mut_pos: None,
+                    });
+                    if !self.is_op(",") {
+                        break;
+                    }
+                    self.bump();
+                }
+                if !self.close(open, ")") {
+                    return self.bail();
+                }
+            }
+            variants.push(Variant {
+                name: vname,
+                pos: vpos,
+                fields,
+            });
+            if self.is_op(",") {
+                self.bump();
+            } else if !matches!(self.peek(), Tok::Nl) && !self.is_op("}") {
+                self.expect_op(",");
+                return self.bail();
+            }
+            self.skip_nl();
+        }
+        self.expect_op("}");
+        Some(EnumDecl {
+            name,
+            pos,
+            variants,
+        })
+    }
+
+    /// `T {` is a struct literal outside headers; inside a header only when it
+    /// clearly is one (`T{name: …` or `T{}`), and then it is reported (R3).
+    fn literal_here(&self) -> bool {
+        !self.header
+            || *self.peek_n(2) == Tok::Op("}")
+            || (matches!(self.peek_n(2), Tok::Ident(_)) && *self.peek_n(3) == Tok::Op(":"))
+    }
+
+    fn struct_lit(&mut self) -> Expr {
+        let p = self.pos();
+        let name = match self.peek() {
+            Tok::Ident(n) => n.clone(),
+            _ => String::new(),
+        };
+        self.bump(); // name
+        let open = self.pos();
+        self.bump(); // {
+        let in_header = std::mem::replace(&mut self.header, false);
+        self.skip_nl();
+        let mut inits = Vec::new();
+        while !self.is_op("}") && *self.peek() != Tok::Eof {
+            let Some((f, fp)) = self.name() else { break };
+            if !self.expect_op(":") {
+                break;
+            }
+            let value = self.expr();
+            inits.push(FieldInit {
+                name: f,
+                pos: fp,
+                value,
+            });
+            self.skip_nl();
+            if !self.is_op(",") {
+                break;
+            }
+            self.bump();
+            self.skip_nl();
+        }
+        self.skip_nl();
+        if !self.is_op("}") {
+            let found = describe(self.peek());
+            self.err(
+                "S1",
+                open,
+                format!("expected `}}` to close `{name}{{`, found {found}"),
+                None,
+            );
+        } else {
+            self.bump();
+        }
+        self.header = in_header;
+        let e = Expr {
+            kind: ExprKind::StructLit(name, inits),
+            pos: p,
+            end: self.last_end,
+        };
+        if in_header {
+            let (a, b) = (e.pos.offset as usize, e.end as usize);
+            let start = self.src[..a].rfind('\n').map_or(0, |i| i + 1);
+            let end = self.src[b..].find('\n').map_or(self.src.len(), |i| b + i);
+            let hint = format!(
+                "{}({}){}",
+                self.src[start..a].trim_start(),
+                &self.src[a..b],
+                &self.src[b..end]
+            );
+            let msg = "a struct literal in a header needs parentheses";
+            self.err("S1", p, msg, Some(hint));
+        }
+        e
+    }
+
+    /// `if c { … } else if … else { … }` in an expression (R15).
+    fn if_expr(&mut self) -> Expr {
+        let p = self.pos();
+        self.bump(); // if
+        let mut branches = Vec::new();
+        loop {
+            let c = self.head_expr();
+            let Some(b) = self.value_block() else {
+                return self.missing(p);
+            };
+            branches.push((c, b));
+            if *self.peek() == Tok::Nl && *self.peek_n(1) == Tok::Kw("else") {
+                let at = self.tok(1).pos;
+                let hint = "} else {".to_string();
+                self.err(
+                    "R3",
+                    at,
+                    "`else` must be on the same line as `}`",
+                    Some(hint),
+                );
+                self.skip_nl();
+            }
+            if !self.is_kw("else") {
+                let text = self.text(p.offset, self.last_end);
+                let hint = format!("{text} else {{ … }}");
+                self.err("R15", p, "if as a value needs else", Some(hint));
+                return self.missing(p);
+            }
+            self.bump();
+            if self.is_kw("if") {
+                self.bump();
+                continue;
+            }
+            let Some(last) = self.value_block() else {
+                return self.missing(p);
+            };
+            return Expr {
+                kind: ExprKind::IfExpr(branches, Box::new(last)),
+                pos: p,
+                end: self.last_end,
+            };
+        }
+    }
+
+    /// A branch of `if` as a value: statements, and an expression as the last line.
+    fn value_block(&mut self) -> Option<ValueBlock> {
+        let pos = self.pos();
+        if !self.is_op("{") {
+            let msg = format!(
+                "expected `{{` to start a branch, found {}",
+                describe(self.peek())
+            );
+            self.err("R3", pos, msg, None);
+            return None;
+        }
+        if !self.enter() {
+            self.skip_block();
+            self.leave();
+            return None;
+        }
+        self.bump(); // {
+        let header = std::mem::replace(&mut self.header, false);
+        self.skip_nl();
+        let mut stmts = Vec::new();
+        let value = loop {
+            if self.is_op("}") || *self.peek() == Tok::Eof {
+                let msg = "this branch of if gives no value";
+                self.err("R15", pos, msg, None);
+                break None;
+            }
+            if self.last_line() && !self.statement_line() {
+                let v = self.expr();
+                self.skip_nl();
+                break Some(v);
+            }
+            let before = self.i;
+            if let Some(s) = self.unit(|p| p.stmt()) {
+                stmts.push(s);
+            }
+            if self.i == before {
+                self.bump();
+            }
+        };
+        self.header = header;
+        if self.is_op("}") {
+            self.bump();
+        } else {
+            self.expect_op("}");
+            self.skip_rest_of_block();
+        }
+        self.leave();
+        Some(ValueBlock {
+            stmts,
+            value: value?,
+            pos,
+        })
+    }
+
+    /// Is the line at the cursor the last one before the `}` of its block?
+    fn last_line(&self) -> bool {
+        let mut depth = 0usize;
+        let mut k = 0;
+        loop {
+            match self.peek_n(k) {
+                Tok::Eof => return true,
+                Tok::Op("(" | "[" | "{") => depth += 1,
+                Tok::Op(")" | "]") => depth = depth.saturating_sub(1),
+                Tok::Op("}") if depth == 0 => return true,
+                Tok::Op("}") => depth -= 1,
+                Tok::Nl if depth == 0 => {
+                    while *self.peek_n(k) == Tok::Nl {
+                        k += 1;
+                    }
+                    return *self.peek_n(k) == Tok::Op("}");
+                }
+                _ => {}
+            }
+            k += 1;
+        }
+    }
+
+    /// Does the line at the cursor hold a statement rather than a value?
+    fn statement_line(&self) -> bool {
+        match self.peek() {
+            Tok::Kw(
+                "return" | "break" | "continue" | "while" | "for" | "switch" | "const" | "else",
+            ) => return true,
+            Tok::Kw("if") => return false,
+            Tok::Ident(w) if w == "_" && *self.peek_n(1) == Tok::Op("=") => return true,
+            Tok::Ident(_) | Tok::Kw("void") if self.name_at(1) => return true,
+            _ => {}
+        }
+        let mut depth = 0usize;
+        let mut k = 0;
+        loop {
+            match self.peek_n(k) {
+                Tok::Eof | Tok::Nl if depth == 0 => return false,
+                Tok::Eof => return false,
+                Tok::Op("(" | "[" | "{") => depth += 1,
+                Tok::Op(")" | "]" | "}") if depth == 0 => return false,
+                Tok::Op(")" | "]" | "}") => depth -= 1,
+                Tok::Op(o) if depth == 0 && ASSIGN_OPS.contains(o) => return true,
+                _ => {}
+            }
+            k += 1;
+        }
+    }
+
+    fn switch_stmt(&mut self) -> Option<Stmt> {
+        let pos = self.pos();
+        self.bump(); // switch
+        let subject = self.head_expr();
+        if !self.is_op("{") {
+            let msg = format!(
+                "expected `{{` to start the body of `switch`, found {}",
+                describe(self.peek())
+            );
+            self.err("R3", self.pos(), msg, None);
+            return None;
+        }
+        let open = self.pos();
+        if !self.enter() {
+            self.skip_block();
+            self.leave();
+            return None;
+        }
+        self.bump(); // {
+        let result = self.switch_body(subject, open, pos);
+        self.leave();
+        result
+    }
+
+    fn switch_body(&mut self, subject: Expr, open: Pos, pos: Pos) -> Option<Stmt> {
+        if !matches!(self.peek(), Tok::Nl) && !self.is_op("}") {
+            let at = self.pos();
+            self.err(
+                "R3",
+                at,
+                "the statements of a case start on the next line",
+                None,
+            );
+            return self.bail();
+        }
+        self.skip_nl();
+        let mut cases = Vec::new();
+        let mut default: Option<(Block, Pos)> = None;
+        loop {
+            match self.peek() {
+                Tok::Op("}") => {
+                    self.bump();
+                    break;
+                }
+                Tok::Eof => {
+                    self.never_closed(open);
+                    break;
+                }
+                Tok::Kw("case") => {
+                    let cpos = self.pos();
+                    self.bump();
+                    if let Some((_, dpos)) = &default {
+                        let msg = format!(
+                            "default at {}:{} must be the last branch",
+                            dpos.line, dpos.col
+                        );
+                        self.err("R10", cpos, msg, None);
+                        return self.bail();
+                    }
+                    let mut pats = Vec::new();
+                    loop {
+                        let Some(pat) = self.pattern() else {
+                            return self.bail();
+                        };
+                        pats.push(pat);
+                        if !self.is_op(",") {
+                            break;
+                        }
+                        self.bump();
+                    }
+                    if !self.expect_op(":") {
+                        return self.bail();
+                    }
+                    let Some(body) = self.case_body() else {
+                        return self.bail();
+                    };
+                    cases.push(Case {
+                        pats,
+                        body,
+                        pos: cpos,
+                    });
+                }
+                Tok::Kw("default") => {
+                    let dpos = self.pos();
+                    self.bump();
+                    if default.is_some() {
+                        self.err("R10", dpos, "switch has two defaults", None);
+                        return self.bail();
+                    }
+                    if !self.expect_op(":") {
+                        return self.bail();
+                    }
+                    let Some(body) = self.case_body() else {
+                        return self.bail();
+                    };
+                    default = Some((body, dpos));
+                }
+                other => {
+                    let msg = format!("expected `case` or `default`, found {}", describe(other));
+                    let at = self.pos();
+                    self.err("S1", at, msg, None);
+                    return self.bail();
+                }
+            }
+        }
+        Some(Stmt::Switch {
+            subject,
+            cases,
+            default,
+            pos,
+        })
+    }
+
+    /// The statements after `case …:` up to the next `case`, `default` or `}`.
+    fn case_body(&mut self) -> Option<Block> {
+        let pos = self.pos();
+        if !matches!(self.peek(), Tok::Nl) {
+            self.err(
+                "R3",
+                pos,
+                "the statements of a case start on the next line",
+                None,
+            );
+            return None;
+        }
+        self.skip_nl();
+        let mut stmts = Vec::new();
+        while !matches!(
+            self.peek(),
+            Tok::Kw("case" | "default") | Tok::Op("}") | Tok::Eof
+        ) {
+            let before = self.i;
+            if let Some(s) = self.unit(|p| p.stmt()) {
+                stmts.push(s);
+            }
+            if self.i == before {
+                self.bump();
+            }
+        }
+        Some(Block { stmts, pos })
+    }
+
+    fn pattern(&mut self) -> Option<Pattern> {
+        let p = self.pos();
+        match self.peek() {
+            Tok::Op("-") if matches!(self.peek_n(1), Tok::Int(_)) => {
+                self.bump();
+                let v = match self.peek() {
+                    Tok::Int(v) => *v as i128,
+                    _ => 0,
+                };
+                self.bump();
+                Some(Pattern::Int(-v, p))
+            }
+            Tok::Int(v) => {
+                let v = *v as i128;
+                self.bump();
+                Some(Pattern::Int(v, p))
+            }
+            Tok::Str(parts) => {
+                let mut text = String::new();
+                for part in parts {
+                    match part {
+                        StrPart::Lit(s) => text.push_str(s),
+                        StrPart::Expr(_) => {
+                            let hint = "write \\{ and \\} for literal braces".to_string();
+                            self.err("S1", p, "a case value is a plain string", Some(hint));
+                            return None;
+                        }
+                    }
+                }
+                self.bump();
+                Some(Pattern::Str(text, p))
+            }
+            Tok::Ident(ty) if *self.peek_n(1) == Tok::Op(".") => {
+                let ty = ty.clone();
+                self.bump();
+                self.bump();
+                let (name, _) = self.name()?;
+                let mut binds = None;
+                if self.is_op("(") {
+                    let open = self.pos();
+                    self.bump();
+                    let mut list = Vec::new();
+                    while !self.is_op(")") {
+                        if matches!(self.peek(), Tok::Ident(w) if w == "_") {
+                            self.bump();
+                            list.push(None);
+                        } else {
+                            let t = self.type_ref();
+                            let (n, np) = self.name()?;
+                            list.push(Some(Param {
+                                ty: t,
+                                name: n,
+                                pos: np,
+                                mut_pos: None,
+                            }));
+                        }
+                        if !self.is_op(",") {
+                            break;
+                        }
+                        self.bump();
+                    }
+                    if !self.close(open, ")") {
+                        return None;
+                    }
+                    binds = Some(list);
+                }
+                Some(Pattern::Variant {
+                    ty,
+                    name,
+                    binds,
+                    pos: p,
+                })
+            }
+            Tok::Ident(n) => {
+                let n = n.clone();
+                self.bump();
+                Some(Pattern::Name(n, p))
+            }
+            other => {
+                let msg = format!("expected a case value, found {}", describe(other));
+                self.err("S1", p, msg, None);
+                None
+            }
+        }
+    }
+}
+
 fn can_start_stmt(t: &Tok) -> bool {
     matches!(
         t,
         Tok::Ident(_)
-            | Tok::Kw("if" | "while" | "for" | "break" | "continue" | "return" | "const" | "void")
+            | Tok::Kw(
+                "if" | "while"
+                    | "for"
+                    | "switch"
+                    | "break"
+                    | "continue"
+                    | "return"
+                    | "const"
+                    | "void"
+                    | "self"
+            )
     )
 }
 
 fn is_place(e: &Expr) -> bool {
     match &e.kind {
-        ExprKind::Ident(_) => true,
+        ExprKind::Ident(_) | ExprKind::SelfRef => true,
         ExprKind::Field(inner, _) | ExprKind::Index(inner, _) => is_place(inner),
         _ => false,
     }

@@ -5,6 +5,7 @@ pub mod checker;
 pub mod diag;
 pub mod emit_c;
 pub mod lexer;
+pub mod live;
 pub mod parser;
 
 use diag::Diag;

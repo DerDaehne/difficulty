@@ -194,6 +194,15 @@ fn has_call(e: &Expr) -> bool {
 impl<'a> Emitter<'a> {
     fn module(&mut self, m: &'a Module) -> String {
         let mut c = format!("static const char *const dif_file = {};\n", self.file);
+        let part2a = m.decls.iter().any(|d| match d {
+            Decl::Struct(_) | Decl::Enum(_) => true,
+            Decl::Func(f) => f.recv.is_some(),
+            Decl::Const(_) => false,
+        });
+        if part2a {
+            // ponytail: the C backend for part 2a follows; fail clearly until then
+            c.push_str("#error \"dif: struct, enum and methods need the C backend of part 2a\"\n");
+        }
         c.push_str(RUNTIME);
         for d in &m.decls {
             match d {
@@ -203,6 +212,7 @@ impl<'a> Emitter<'a> {
                 Decl::Const(v) => {
                     self.consts.insert(&v.name, ty_of(&v.ty));
                 }
+                _ => {}
             }
         }
         // prototypes, so the order of declarations does not matter
@@ -226,6 +236,7 @@ impl<'a> Emitter<'a> {
                     );
                 }
                 Decl::Func(f) => c.push_str(&self.func(f)),
+                _ => {}
             }
         }
         c.push_str("int main(void) {\n    d_main();\n    return 0;\n}\n");
@@ -306,6 +317,7 @@ impl<'a> Emitter<'a> {
             Stmt::Var(v) => v.pos,
             Stmt::Assign { pos, .. } | Stmt::If { pos, .. } | Stmt::While { pos, .. } => *pos,
             Stmt::For { pos, .. } | Stmt::Break(pos) | Stmt::Continue(pos) => *pos,
+            Stmt::Switch { pos, .. } => *pos,
             Stmt::Return(_, pos) | Stmt::Discard(_, pos) => *pos,
             Stmt::Call(e) => e.pos,
         };
@@ -374,6 +386,9 @@ impl<'a> Emitter<'a> {
             Stmt::Discard(e, _) => {
                 let v = self.expr(e);
                 self.line(d, &format!("(void)({v});"));
+            }
+            Stmt::Switch { .. } => {
+                self.line(d, "#error \"dif: switch needs the C backend of part 2a\"");
             }
         }
     }
