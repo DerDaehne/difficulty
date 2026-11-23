@@ -324,7 +324,7 @@ str classify(int n) {
 }
 ```
 
-- `switch` hat kein Fallthrough, ein `case` endet von selbst. `break` und `continue` stehen nie direkt im `switch` (in C und Go würde `break` dort den `switch` verlassen, nicht die Schleife; das wäre eine Falle). Wer aus einer Schleife heraus will, entscheidet das außerhalb des `switch` oder kehrt mit `return` zurück.
+- `switch` hat kein Fallthrough, ein `case` endet von selbst. `break` steht nie direkt im `switch` (in C und Go würde es dort den `switch` verlassen, nicht die Schleife; das wäre eine Falle). Wer aus einer Schleife heraus will, entscheidet das nach dem `switch` oder kehrt mit `return` zurück; `continue` ist eindeutig und erlaubt.
 - Über einem `enum` muss jede Variante behandelt sein oder ein `default` stehen; über `int`/`str` ist `default` Pflicht.
 - Varianten sind immer qualifiziert: `Seat.Taken`, `BookErr.NoBlock(n)`.
 - Schleifen: `for int i in range(n)`, `for int i in range(a, b)`, `for Seat s in hall.seats`, `for str line in io.lines()`, `while cond`, dazu `break` und `continue`. `for` iteriert über einen Schnappschuss (O(1) dank Referenzzählung), Änderungen am Original im Rumpf sind also sicher.
