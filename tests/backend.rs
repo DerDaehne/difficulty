@@ -297,3 +297,27 @@ void main() {
     assert_eq!(err, "panic: integer overflow in + (main.dif:12:23)\n");
     assert_eq!(code, 2);
 }
+
+/// A parameter passed as `mut` is changed, so no bound survives and `n - 1` stays checked.
+#[test]
+fn range_facts_stop_at_mut_argument() {
+    let src = r#"void smash(mut int p) {
+    p = -9223372036854775807 - 1
+}
+
+int low(int n) {
+    if n < 2 {
+        return n
+    }
+    smash(mut n)
+    return n - 1
+}
+
+void main() {
+    print(low(5))
+}
+"#;
+    let (out, err, code) = run("rangemut", src);
+    assert_eq!((out.as_str(), code), ("", 2));
+    assert_eq!(err, "panic: integer overflow in - (main.dif:10:14)\n");
+}

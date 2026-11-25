@@ -237,7 +237,13 @@ fn sets(e: &Expr, n: &str) -> bool {
             let vb = |b: &ValueBlock| changes(&b.stmts, n) || sets(&b.value, n);
             branches.iter().any(|(c, b)| sets(c, n) || vb(b)) || vb(last)
         }
-        _ => false,
+        // no `_` arm: a new expression kind must be classified here (it could change `n`)
+        ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Bool(_)
+        | ExprKind::Ident(_)
+        | ExprKind::SelfRef
+        | ExprKind::Missing => false,
     }
 }
 
