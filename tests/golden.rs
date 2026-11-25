@@ -134,6 +134,11 @@ const PENDING_2C: &[&str] = &[
     "### 4.",
 ];
 
+/// Sections of part 2d (function literals, block argument, list methods with a function argument):
+/// their examples need the compiler of part 2d and are skipped until it exists; the compiler
+/// change removes them here.
+const PENDING_2D: &[&str] = &["### R26 ", "### 4.7 "];
+
 /// Every ```dif block of a document, by kind: valid module, snippet (inside
 /// `void main()`), `error Rn` (exactly that diagnostic), `panic "message"`.
 /// Returns the number of examples checked.
@@ -178,6 +183,7 @@ fn doc_examples(doc: &str, tag: &str) -> usize {
         if PENDING
             .iter()
             .chain(PENDING_2C)
+            .chain(PENDING_2D)
             .any(|p| section.starts_with(p))
         {
             continue;
