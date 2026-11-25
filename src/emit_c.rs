@@ -1343,14 +1343,14 @@ impl<'a> Emitter<'a> {
                     let v = self.at(self.info.opts[i as usize], x);
                     format!("(({}){{.some = true, .v = {v}}})", self.c_ty(t))
                 }
-                _ => "0".into(),
+                _ => unreachable!("some(x) without an optional type"),
             },
             ExprKind::ErrVal(x) => match self.ty(e) {
                 t @ Ty::Res(i) => {
                     let v = self.at(self.info.ress[i as usize].1, x);
                     format!("(({}){{.e = {v}}})", self.c_ty(t))
                 }
-                _ => "0".into(),
+                _ => unreachable!("err(e) without a result type"),
             },
             ExprKind::Try(x, or) => self.try_expr(e, x, or.as_ref().map(|o| &*o.1)),
             // only a pattern (R12): the checker rejects it as a value
@@ -1664,21 +1664,21 @@ impl<'a> Emitter<'a> {
             ExprKind::Ident(name) if name == "expect" && self.in_test => self.expect(e, &args[0]),
             ExprKind::Ident(name) => {
                 let Some(&func) = self.funcs.get(name.as_str()) else {
-                    return "0".into();
+                    unreachable!("call of unknown function `{name}`");
                 };
                 let items = self.args_of(func, args, None);
                 self.apply(&Self::cname(func), &items)
             }
-            _ => "0".into(),
+            _ => unreachable!("call of something that is not a function"),
         }
     }
 
     fn method_call(&mut self, base: &'a Expr, m: &str, args: &'a [Expr]) -> String {
         let Ty::Named(id) = self.ty(base) else {
-            return "0".into();
+            unreachable!("method call on a type without methods");
         };
         let Some(&func) = self.methods.get(&(self.tname(id), m)) else {
-            return "0".into();
+            unreachable!("unknown method `{m}`");
         };
         let recv = if self.changes_self(func) {
             Arg::Addr(base)
