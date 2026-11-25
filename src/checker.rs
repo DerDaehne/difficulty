@@ -20,6 +20,10 @@ pub enum Ty {
     Void,
     /// A `struct` or `enum` of the module, by index in the type table.
     Named(u32),
+    /// `?T`: index of `T` in `Info::opts`.
+    Opt(u32),
+    /// `T!E`: index of `(T, E)` in `Info::ress`.
+    Res(u32),
     /// Already reported; silences everything that depends on it.
     Err,
 }
@@ -65,6 +69,12 @@ pub struct Info {
     pub types: Vec<TypeDef>,
     /// Methods (type name, method name) that change `self`; they take it by pointer.
     pub self_changes: HashSet<(String, String)>,
+    /// `Ty::Opt(i)` is `?opts[i]`.
+    pub opts: Vec<Ty>,
+    /// `Ty::Res(i)` is `ress[i].0 ! ress[i].1`.
+    pub ress: Vec<(Ty, Ty)>,
+    /// The program uses a form of part 2b (results, optionals, `try`, tests).
+    pub part2b: bool,
 }
 
 pub fn check(file: &str, src: &str, m: &Module) -> (Vec<Diag>, Info) {
@@ -107,6 +117,9 @@ pub fn check(file: &str, src: &str, m: &Module) -> (Vec<Diag>, Info) {
         exprs: c.exprs,
         types,
         self_changes,
+        opts: c.opts,
+        ress: c.ress,
+        part2b: c.uses_2b,
     };
     (c.diags, info)
 }
@@ -125,8 +138,11 @@ pub fn main_diag(m: &Module) -> Option<Diag> {
     };
     match main {
         None => Some(Diag::new("R1", start, "no `main` function").hint(hint)),
-        Some(f) if f.ret.name != "void" || !f.params.is_empty() => {
-            Some(Diag::new("R1", f.pos, "`main` must be `void main()`").hint(hint))
+        Some(f) if f.ret.name != "void" && !f.ret.name.starts_with("void!") => {
+            Some(Diag::new("R1", f.pos, "`main` must return void or void!E").hint(hint))
+        }
+        Some(f) if !f.params.is_empty() => {
+            Some(Diag::new("R1", f.pos, "`main` takes no parameters").hint(hint))
         }
         Some(_) => None,
     }
@@ -288,6 +304,13 @@ struct Checker<'a> {
     diags: Vec<Diag>,
     folded: Folded,
     exprs: HashMap<(u32, u32), Ty>,
+    opts: Vec<Ty>,
+    ress: Vec<(Ty, Ty)>,
+    /// Inside a `test` block (R18).
+    in_test: bool,
+    uses_2b: bool,
+    /// Names of the tests seen so far, for duplicates.
+    tests: Vec<(&'a str, Pos)>,
 }
 
 impl<'a> Checker<'a> {
@@ -317,6 +340,11 @@ impl<'a> Checker<'a> {
             diags: Vec::new(),
             folded: HashMap::new(),
             exprs: HashMap::new(),
+            opts: Vec::new(),
+            ress: Vec::new(),
+            in_test: false,
+            uses_2b: false,
+            tests: Vec::new(),
         }
     }
 
@@ -347,6 +375,11 @@ impl<'a> Checker<'a> {
             Ty::Str => "str".into(),
             Ty::Void => "void".into(),
             Ty::Named(id) => self.types[id as usize].name.into(),
+            Ty::Opt(i) => format!("?{}", self.tn(self.opts[i as usize])),
+            Ty::Res(i) => {
+                let (t, e) = self.ress[i as usize];
+                format!("{}!{}", self.tn(t), self.tn(e))
+            }
             Ty::Err => "?".into(),
         }
     }
@@ -356,7 +389,73 @@ impl<'a> Checker<'a> {
             Ty::Int => "0",
             Ty::Bool => "false",
             Ty::Str => "\"\"",
+            Ty::Opt(_) => "none",
+            Ty::Res(i) => self.zero(self.ress[i as usize].0),
             _ => "…",
+        }
+    }
+
+    /// `?t`; an already reported type stays reported.
+    fn opt(&mut self, t: Ty) -> Ty {
+        if t == Ty::Err {
+            return t;
+        }
+        self.uses_2b = true;
+        let i = self.opts.iter().position(|&x| x == t).unwrap_or_else(|| {
+            self.opts.push(t);
+            self.opts.len() - 1
+        });
+        Ty::Opt(i as u32)
+    }
+
+    /// `t!e`.
+    fn res(&mut self, t: Ty, e: Ty) -> Ty {
+        if t == Ty::Err || e == Ty::Err {
+            return Ty::Err;
+        }
+        self.uses_2b = true;
+        let i = self
+            .ress
+            .iter()
+            .position(|&x| x == (t, e))
+            .unwrap_or_else(|| {
+                self.ress.push((t, e));
+                self.ress.len() - 1
+            });
+        Ty::Res(i as u32)
+    }
+
+    /// The `T` of `?T` and `T!E`.
+    fn inner(&self, t: Ty) -> Option<Ty> {
+        match t {
+            Ty::Opt(i) => Some(self.opts[i as usize]),
+            Ty::Res(i) => Some(self.ress[i as usize].0),
+            _ => None,
+        }
+    }
+
+    /// Does a value of type `got` fit where `want` is expected? A `T` fits `?T` and
+    /// `T!E` (R31).
+    fn fits_place(&self, want: Ty, got: Ty) -> bool {
+        want == got || (got != Ty::Void && self.inner(want) == Some(got))
+    }
+
+    /// Functions that end without a value: `void` and `void!E`.
+    fn no_value(&self, t: Ty) -> bool {
+        t == Ty::Void || self.inner(t) == Some(Ty::Void) && matches!(t, Ty::Res(_))
+    }
+
+    /// Struct and enum types that a type holds by value.
+    fn named_in(&self, t: Ty, out: &mut Vec<u32>) {
+        match t {
+            Ty::Named(id) => out.push(id),
+            Ty::Opt(i) => self.named_in(self.opts[i as usize], out),
+            Ty::Res(i) => {
+                let (a, b) = self.ress[i as usize];
+                self.named_in(a, out);
+                self.named_in(b, out);
+            }
+            _ => {}
         }
     }
 
@@ -420,6 +519,7 @@ impl<'a> Checker<'a> {
                     self.consts.insert(&v.name, ConstState::Todo(v));
                     first[k] = true;
                 }
+                Decl::Test(_) => first[k] = true,
                 _ => {}
             }
         }
@@ -435,6 +535,7 @@ impl<'a> Checker<'a> {
                     let _ = self.global_const(&v.name);
                 }
                 Decl::Func(f) => self.func(f),
+                Decl::Test(t) => self.test(t),
                 _ => {}
             }
         }
@@ -561,12 +662,11 @@ impl<'a> Checker<'a> {
                         .flat_map(|v| v.fields.iter().map(|f| f.0))
                         .collect(),
                 };
-                tys.into_iter()
-                    .filter_map(|t| match t {
-                        Ty::Named(id) => Some(id),
-                        _ => None,
-                    })
-                    .collect()
+                let mut ids = Vec::new();
+                for t in tys {
+                    self.named_in(t, &mut ids);
+                }
+                ids
             })
             .collect();
         let reaches = |from: u32, to: u32| {
@@ -608,9 +708,8 @@ impl<'a> Checker<'a> {
             .collect();
         for (ty, d) in list {
             self.in_default = true;
-            let (t, _) = self.rvalue(d);
+            self.at_place(ty, d, None);
             self.in_default = false;
-            self.expect(ty, t, d);
         }
     }
 
@@ -656,20 +755,51 @@ impl<'a> Checker<'a> {
         self.err("R4", pos, msg, Some(hint));
     }
 
+    /// A written type (`T`, `?T`, `T!E`, R12); `ret` allows `void` as `T` or `E`.
     fn ty(&mut self, t: &TypeRef, ret: bool) -> Ty {
-        match t.name.as_str() {
+        let full = t.name.as_str();
+        if full == "?" {
+            return Ty::Err;
+        }
+        let (opt, rest) = match full.strip_prefix('?') {
+            Some(r) => (true, r),
+            None => (false, full),
+        };
+        let (base, err) = match rest.split_once('!') {
+            Some((b, e)) => (b, Some(e)),
+            None => (rest, None),
+        };
+        let mut ty = self.base_ty(base, t.pos, ret);
+        if opt {
+            if ty == Ty::Void {
+                let msg = "?void has no value that could be missing";
+                self.err("R12", t.pos, msg, Some("use void!E".into()));
+                return Ty::Err;
+            }
+            ty = self.opt(ty);
+        }
+        match err {
+            Some(e) => {
+                let et = self.base_ty(e, t.pos, ret);
+                self.res(ty, et)
+            }
+            None => ty,
+        }
+    }
+
+    fn base_ty(&mut self, n: &str, pos: Pos, ret: bool) -> Ty {
+        match n {
             "int" => Ty::Int,
             "bool" => Ty::Bool,
             "str" => Ty::Str,
             "void" if ret => Ty::Void,
             "void" => {
-                self.err("R8", t.pos, "`void` is only a return type", None);
+                self.err("R8", pos, "`void` is only a return type", None);
                 Ty::Err
             }
-            "?" => Ty::Err,
             n if LATER_TYPES.contains(&n) => {
                 let msg = format!("`{n}` is not available yet; use int");
-                self.err("R8", t.pos, msg, None);
+                self.err("R8", pos, msg, None);
                 Ty::Err
             }
             n => match self.type_ids.get(n) {
@@ -679,7 +809,7 @@ impl<'a> Checker<'a> {
                         .into_iter()
                         .chain(self.type_ids.keys().copied());
                     let hint = closest(n, names).map(|c| format!("did you mean {c}?"));
-                    self.err("R4", t.pos, format!("unknown type `{n}`"), hint);
+                    self.err("R4", pos, format!("unknown type `{n}`"), hint);
                     Ty::Err
                 }
             },
@@ -716,7 +846,7 @@ impl<'a> Checker<'a> {
                 let cur = self.cur.take();
                 let ty = self.ty(&d.ty, false);
                 self.const_depth += 1;
-                let (t, v) = self.rvalue(&d.value);
+                let (t, v) = self.at_place(ty, &d.value, None);
                 self.const_depth -= 1;
                 self.scopes = scopes;
                 self.cur = cur;
@@ -728,7 +858,7 @@ impl<'a> Checker<'a> {
                     self.err("R4", d.value.pos, msg, None);
                     v = Val::Known;
                 }
-                self.expect(ty, t, &d.value);
+                let v = self.mask(ty, v);
                 self.consts.insert(key, ConstState::Done(ty, v, d.pos));
                 Some((ty, v))
             }
@@ -783,7 +913,7 @@ impl<'a> Checker<'a> {
         }
         self.block(&f.body);
         self.scopes.pop();
-        if ret != Ty::Void && ret != Ty::Err && !terminates(&f.body, &self.complete) {
+        if !self.no_value(ret) && ret != Ty::Err && !terminates(&f.body, &self.complete) {
             let msg = format!("`{}` does not return a value on every path", f.name);
             let hint = format!("end it with return, e.g. return {}", self.zero(ret));
             self.err("R8", f.pos, msg, Some(hint));
@@ -870,7 +1000,7 @@ impl<'a> Checker<'a> {
             pos,
             slot,
         };
-        if self.cur.is_some() {
+        if self.cur.is_some() || self.in_test {
             self.fn_locals.insert(name.to_string());
         }
         if let Some(s) = self.scopes.last_mut() {
@@ -975,8 +1105,8 @@ impl<'a> Checker<'a> {
         match s {
             Stmt::Var(v) => {
                 let ty = self.ty(&v.ty, false);
-                let (t, val) = self.rvalue(&v.value);
-                self.expect(ty, t, &v.value);
+                let (_, val) = self.at_place(ty, &v.value, Some(&v.name));
+                let val = self.mask(ty, val);
                 self.declare(&v.name, v.pos, ty, v.is_const, val, None);
             }
             Stmt::Assign {
@@ -1034,7 +1164,14 @@ impl<'a> Checker<'a> {
                     (Some(d), Some(id)) => d[id].effect,
                     _ => true,
                 };
-                if t != Ty::Void && t != Ty::Err && !effect {
+                if matches!(t, Ty::Opt(_) | Ty::Res(_)) {
+                    let text = self.text(e);
+                    let msg = format!("result of `{text}` is never used");
+                    let hint = format!(
+                        "use it with try, ?? or switch, or discard it explicitly with `_ = {text}`"
+                    );
+                    self.err("R13", e.pos, msg, Some(hint));
+                } else if t != Ty::Void && t != Ty::Err && !effect {
                     let text = self.text(e);
                     let msg = format!("result of `{text}` is never used");
                     let hint = format!("use it, or discard it explicitly with `_ = {text}`");
@@ -1090,11 +1227,11 @@ impl<'a> Checker<'a> {
         }
         let (want, _) = self.expr(place);
         self.changed(place);
-        let (t, _) = self.rvalue(value);
         if op == "=" {
-            self.expect(want, t, value);
+            self.at_place(want, value, None);
             return;
         }
+        let (t, _) = self.rvalue(value);
         let ok = match op {
             "+=" => (want == Ty::Int && t == Ty::Int) || (want == Ty::Str && t == Ty::Str),
             _ => want == Ty::Int && t == Ty::Int,
@@ -1156,22 +1293,29 @@ impl<'a> Checker<'a> {
     }
 
     fn ret(&mut self, value: Option<&'a Expr>, p: Pos) {
+        if self.in_test {
+            if let Some(e) = value {
+                self.rvalue(e);
+                let msg = "a test returns nothing; remove the value";
+                self.err("R8", e.pos, msg, None);
+            }
+            return;
+        }
         let Some(id) = self.cur else { return };
         let (want, name) = (self.fns[id].ret, self.fns[id].decl.name.clone());
         match value {
-            None if want != Ty::Void && want != Ty::Err => {
+            None if !self.no_value(want) && want != Ty::Err => {
                 let msg = format!("`{name}` returns {}; give `return` a value", self.tn(want));
                 let hint = format!("return {}", self.zero(want));
                 self.err("R8", p, msg, Some(hint));
             }
+            Some(e) if want == Ty::Void => {
+                self.rvalue(e);
+                let msg = format!("`{name}` returns nothing; remove the value");
+                self.err("R8", e.pos, msg, None);
+            }
             Some(e) => {
-                let (t, _) = self.rvalue(e);
-                if want == Ty::Void {
-                    let msg = format!("`{name}` returns nothing; remove the value");
-                    self.err("R8", e.pos, msg, None);
-                } else {
-                    self.expect(want, t, e);
-                }
+                self.at_place(want, e, None);
             }
             None => {}
         }
@@ -1188,7 +1332,7 @@ impl<'a> Checker<'a> {
     ) {
         let (t, _) = self.rvalue(subject);
         let over: Option<Ty> = match t {
-            Ty::Int | Ty::Str | Ty::Err => Some(t),
+            Ty::Int | Ty::Str | Ty::Err | Ty::Opt(_) | Ty::Res(_) => Some(t),
             Ty::Named(id) if !self.is_struct(t) => Some(Ty::Named(id)),
             _ => {
                 let hint = (t == Ty::Bool).then(|| "use if".to_string());
@@ -1224,13 +1368,17 @@ impl<'a> Checker<'a> {
             self.ctx.pop();
         }
         match over {
-            Some(Ty::Named(id)) => {
-                let all: Vec<String> = match &self.types[id as usize].kind {
-                    Kind::Enum(vs) => vs
-                        .iter()
-                        .map(|v| format!("{}.{}", self.types[id as usize].name, v.name))
-                        .collect(),
-                    Kind::Struct(_) => Vec::new(),
+            Some(Ty::Named(_) | Ty::Opt(_) | Ty::Res(_)) => {
+                let all: Vec<String> = match over {
+                    Some(Ty::Named(id)) => match &self.types[id as usize].kind {
+                        Kind::Enum(vs) => vs
+                            .iter()
+                            .map(|v| format!("{}.{}", self.types[id as usize].name, v.name))
+                            .collect(),
+                        Kind::Struct(_) => Vec::new(),
+                    },
+                    Some(Ty::Opt(_)) => vec!["some".into(), "none".into()],
+                    _ => vec!["ok".into(), "err".into()],
                 };
                 let missing: Vec<&String> = all
                     .iter()
@@ -1381,14 +1529,107 @@ impl<'a> Checker<'a> {
                 }
                 Some((key, *pos))
             }
+            Pattern::Result { kind, bind, pos } => {
+                self.result_pattern(kind, bind, *pos, over, values)
+            }
         }
+    }
+
+    /// `ok`, `err`, `some`, `none` over `T!E` and `?T` (R10, R12).
+    fn result_pattern(
+        &mut self,
+        kind: &'static str,
+        bind: &'a Option<Option<Param>>,
+        pos: Pos,
+        over: Ty,
+        values: usize,
+    ) -> Option<(String, Pos)> {
+        self.uses_2b = true;
+        let key = (kind.to_string(), pos);
+        let names = |bind: &'a Option<Option<Param>>| bind.iter().flatten();
+        let skip = |c: &mut Self| {
+            // the names still exist, so their uses add no second message
+            for p in names(bind) {
+                c.declare(&p.name, p.pos, Ty::Err, false, Val::Runtime, None);
+            }
+        };
+        if over == Ty::Err {
+            skip(self);
+            return None;
+        }
+        let want_res = matches!(kind, "ok" | "err");
+        let value = match over {
+            Ty::Res(i) if want_res => Some(self.ress[i as usize]),
+            Ty::Opt(i) if !want_res => Some((self.opts[i as usize], Ty::Void)),
+            _ => None,
+        };
+        let Some((ok_t, err_t)) = value else {
+            let form = if want_res { "T!E" } else { "?T" };
+            let msg = format!(
+                "`{kind}` needs a switch over {form}, found {}",
+                self.tn(over)
+            );
+            self.err("R8", pos, msg, None);
+            skip(self);
+            return None;
+        };
+        let held = match kind {
+            "err" => Some(err_t),
+            "none" => None,
+            _ => Some(ok_t),
+        };
+        let Some(b) = bind else {
+            return Some(key);
+        };
+        if values > 1 {
+            let msg = "a case with several values cannot bind values";
+            self.err("R10", pos, msg, None);
+            skip(self);
+            return Some(key);
+        }
+        match held {
+            None => {
+                self.err("R10", pos, "`none` has no value", Some("case none:".into()));
+                skip(self);
+            }
+            Some(Ty::Void) => {
+                let msg = format!("`ok` has no value in {}", self.tn(over));
+                self.err("R10", pos, msg, Some("case ok:".into()));
+                skip(self);
+            }
+            Some(t) => {
+                if let Some(p) = b {
+                    let bt = self.ty(&p.ty, false);
+                    if bt == t || bt == Ty::Err || t == Ty::Err {
+                        self.declare(&p.name, p.pos, t, false, Val::Runtime, None);
+                    } else {
+                        let tn = self.tn(t);
+                        let art =
+                            if tn.starts_with(['a', 'e', 'i', 'o', 'u', 'A', 'E', 'I', 'O', 'U']) {
+                                "an"
+                            } else {
+                                "a"
+                            };
+                        let hint = format!("case {kind}({tn} {}):", p.name);
+                        self.err(
+                            "R8",
+                            p.ty.pos,
+                            format!("`{kind}` holds {art} {tn}"),
+                            Some(hint),
+                        );
+                        skip(self);
+                    }
+                }
+            }
+        }
+        Some(key)
     }
 
     // ---- expressions ----
 
     /// The type the context wants versus the type found (R8).
     fn expect(&mut self, want: Ty, got: Ty, e: &Expr) {
-        if want != got && want != Ty::Err && got != Ty::Err {
+        if !self.fits_place(want, got) && want != Ty::Err && got != Ty::Err {
             let msg = format!("expected {}, found {}", self.tn(want), self.tn(got));
             self.err("R8", e.pos, msg, None);
         }
@@ -1408,7 +1649,7 @@ impl<'a> Checker<'a> {
         };
         let tn = self.tn(t);
         let (msg, hint) = match ctx {
-            "if" | "else if" | "while" => (
+            "if" | "else if" | "while" | "expect" => (
                 format!("condition is {tn}, not bool"),
                 cmp.map(|c| format!("compare explicitly: {ctx} {c}")),
             ),
@@ -1497,6 +1738,29 @@ impl<'a> Checker<'a> {
                 self.err("R6", e.pos, msg, None);
                 self.expr(x)
             }
+            ExprKind::NoneVal => {
+                self.uses_2b = true;
+                let msg = "`none` needs a place of type ?T";
+                self.err("R12", e.pos, msg, None);
+                (Ty::Err, Val::Runtime)
+            }
+            ExprKind::ErrVal(_) => {
+                self.uses_2b = true;
+                let msg = "`err(…)` needs a place of type T!E";
+                self.err("R12", e.pos, msg, None);
+                (Ty::Err, Val::Runtime)
+            }
+            ExprKind::SomeVal(x) => self.some_val(e, x, None, None),
+            ExprKind::OkVal(x) => {
+                self.uses_2b = true;
+                let hint = match x {
+                    Some(x) => format!("return the value directly: return {}", self.text(x)),
+                    None => "end the function, or write return".to_string(),
+                };
+                self.err("R12", e.pos, "`ok` is only a pattern in switch", Some(hint));
+                (Ty::Err, Val::Runtime)
+            }
+            ExprKind::Try(x, or) => self.try_expr(e, x, or.as_ref()),
             ExprKind::Index(..) => {
                 let msg = format!("`{}`: indexes come in a later part", self.text(e));
                 self.err("R8", e.pos, msg, None);
@@ -1509,15 +1773,6 @@ impl<'a> Checker<'a> {
         if op == "!" {
             let v = self.cond(x, "!");
             return (Ty::Bool, if v == Val::Runtime { v } else { Val::Known });
-        }
-        if op == "try" {
-            self.err(
-                "R8",
-                pos,
-                "`try` needs a result type T!E (a later part)",
-                None,
-            );
-            return (Ty::Err, Val::Runtime);
         }
         let (t, v) = self.expr(x);
         if t == Ty::Err {
@@ -1545,6 +1800,30 @@ impl<'a> Checker<'a> {
             let known = self.cond(r, op) != Val::Runtime && known;
             return (Ty::Bool, if known { Val::Known } else { Val::Runtime });
         }
+        if op == "??" {
+            return self.coalesce(l, r, opos);
+        }
+        let placeless = |e: &Expr| {
+            let mut e = e;
+            while let ExprKind::Paren(x) = &e.kind {
+                e = x;
+            }
+            matches!(e.kind, ExprKind::NoneVal | ExprKind::ErrVal(_))
+        };
+        if matches!(op, "==" | "!=") && (placeless(l) || placeless(r)) {
+            // `none` and `err(e)` take their type from the other operand
+            if placeless(l) && placeless(r) {
+                self.expr(l);
+                return (Ty::Err, Val::Runtime);
+            }
+            let (known, other) = if placeless(l) { (r, l) } else { (l, r) };
+            let (kt, _) = self.rvalue(known);
+            let (ot, _) = self.at_place(kt, other, None);
+            if kt == Ty::Err || ot == Ty::Err {
+                return (Ty::Err, Val::Runtime);
+            }
+            return (Ty::Bool, Val::Runtime);
+        }
         let (lt, lv) = self.expr(l);
         let (rt, rv) = self.expr(r);
         if lt == Ty::Err || rt == Ty::Err {
@@ -1559,15 +1838,15 @@ impl<'a> Checker<'a> {
             }
             "==" | "!=" if lt == rt && lt != Ty::Void => Ty::Bool,
             "<" | "<=" | ">" | ">=" if lt == rt && (lt == Ty::Int || lt == Ty::Str) => Ty::Bool,
-            "??" => {
-                let msg = "`??` needs an optional value ?T (a later part)";
-                self.err("R8", opos, msg, None);
-                return (Ty::Err, Val::Runtime);
-            }
             _ => {
                 let msg = format!("cannot apply `{op}` to {} and {}", self.tn(lt), self.tn(rt));
-                let hint = (op == "+" && (lt == Ty::Str || rt == Ty::Str))
-                    .then(|| "build text with interpolation: \"{a}{b}\"".to_string());
+                let hint = if op == "+" && (lt == Ty::Str || rt == Ty::Str) {
+                    Some("build text with interpolation: \"{a}{b}\"".to_string())
+                } else if matches!(op, "==" | "!=") {
+                    self.equality_hint(op, (l, lt), (r, rt))
+                } else {
+                    None
+                };
                 self.err("R8", opos, msg, hint);
                 return (Ty::Err, Val::Runtime);
             }
@@ -1743,8 +2022,7 @@ impl<'a> Checker<'a> {
             Some(args) => {
                 let mut known = true;
                 for (a, (t, _)) in args.iter().zip(&fields) {
-                    let (at, av) = self.rvalue(a);
-                    self.expect(*t, at, a);
+                    let (_, av) = self.at_place(*t, a, None);
                     known &= av != Val::Runtime;
                 }
                 (
@@ -1797,8 +2075,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             given.push((&i.name, i.pos));
-            let (t, v) = self.rvalue(&i.value);
-            self.expect(fty, t, &i.value);
+            let (_, v) = self.at_place(fty, &i.value, None);
             known &= v != Val::Runtime;
         }
         let missing: Vec<(&str, Ty)> = fields
@@ -1932,7 +2209,23 @@ impl<'a> Checker<'a> {
                 self.err("R11", e.pos, msg, Some(hint));
                 return (Ty::Err, Val::Runtime);
             }
-            "repeat" | "expect" | "assert" => {
+            "expect" => {
+                if !self.in_test {
+                    let cond = args.first().map_or("cond", |a| self.text(a));
+                    let hint = format!("use assert({cond}) in functions");
+                    self.err("R18", f.pos, "`expect` is only for tests", Some(hint));
+                    return (Ty::Err, Val::Runtime);
+                }
+                if args.len() != 1 {
+                    let msg = format!("`expect` takes 1 argument, found {}", args.len());
+                    self.err("R8", e.pos, msg, None);
+                }
+                for a in args {
+                    self.cond(a, "expect");
+                }
+                return (Ty::Void, Val::Runtime);
+            }
+            "repeat" | "assert" => {
                 self.err("R8", f.pos, format!("`{name}` is not available yet"), None);
                 return (Ty::Err, Val::Runtime);
             }
@@ -2074,8 +2367,7 @@ impl<'a> Checker<'a> {
                         self.span(a.end, e.end)
                     );
                     self.err("R6", a.pos, msg, Some(hint));
-                    let (t, _) = self.rvalue(inner);
-                    self.expect(pt, t, inner);
+                    self.at_place(pt, inner, None);
                 }
                 (ExprKind::Mut(inner), true) => {
                     if !is_place(inner) {
@@ -2119,16 +2411,315 @@ impl<'a> Checker<'a> {
                         self.span(a.pos.offset, e.end)
                     );
                     self.err("R6", a.pos, msg, Some(hint));
-                    let (t, _) = self.rvalue(a);
-                    self.expect(pt, t, a);
+                    self.at_place(pt, a, None);
                 }
                 (_, false) => {
-                    let (t, _) = self.rvalue(a);
-                    self.expect(pt, t, a);
+                    self.at_place(pt, a, None);
                 }
             }
         }
         true
+    }
+}
+
+/// Part 2b: results, optionals, `try`, `??` and tests (R12, R13, R18, R28).
+impl<'a> Checker<'a> {
+    /// A compile-time value of a compound type is only "known", never an `int`.
+    fn mask(&self, ty: Ty, v: Val) -> Val {
+        match (ty, v) {
+            (Ty::Opt(_) | Ty::Res(_), Val::Int(_)) => Val::Known,
+            _ => v,
+        }
+    }
+
+    /// `e` where a value of type `want` is expected (R8, R31). `none`, `err(…)` and
+    /// `some(…)` take their type from this place (R12). `decl` is the name of the
+    /// variable being declared, for the hint. Returns the type found and its value.
+    fn at_place(&mut self, want: Ty, e: &'a Expr, decl: Option<&str>) -> (Ty, Val) {
+        let r = match &e.kind {
+            ExprKind::Paren(x) if !matches!(x.kind, ExprKind::Missing) => {
+                self.at_place(want, x, decl)
+            }
+            ExprKind::NoneVal => {
+                self.uses_2b = true;
+                match want {
+                    Ty::Opt(_) | Ty::Err => (want, Val::Known),
+                    _ => {
+                        let hint = decl
+                            .filter(|_| !matches!(want, Ty::Res(_)))
+                            .map(|n| format!("declare it as ?{} {n}", self.tn(want)));
+                        self.wrong_place(want, "none", e, hint);
+                        (Ty::Err, Val::Runtime)
+                    }
+                }
+            }
+            ExprKind::ErrVal(x) => {
+                self.uses_2b = true;
+                match want {
+                    Ty::Res(i) => {
+                        let et = self.ress[i as usize].1;
+                        let (_, v) = self.at_place(et, x, None);
+                        (want, if v == Val::Runtime { v } else { Val::Known })
+                    }
+                    Ty::Err => {
+                        self.rvalue(x);
+                        (Ty::Err, Val::Runtime)
+                    }
+                    _ => {
+                        let (et, _) = self.rvalue(x);
+                        let hint = decl
+                            .filter(|_| et != Ty::Err && !matches!(want, Ty::Opt(_)))
+                            .map(|n| {
+                                format!("declare it as {}!{} {n}", self.tn(want), self.tn(et))
+                            });
+                        self.wrong_place(want, "err(…)", e, hint);
+                        (Ty::Err, Val::Runtime)
+                    }
+                }
+            }
+            ExprKind::SomeVal(x) => {
+                let (t, v) = self.some_val(e, x, Some(want), None);
+                if t != Ty::Err && !self.fits_place(want, t) && want != Ty::Err {
+                    let hint = decl.map(|n| format!("declare it as {} {n}", self.tn(t)));
+                    self.wrong_place(want, &self.tn(t), e, hint);
+                    (Ty::Err, Val::Runtime)
+                } else {
+                    (t, v)
+                }
+            }
+            _ => {
+                let (t, v) = self.rvalue(e);
+                self.expect(want, t, e);
+                (t, v)
+            }
+        };
+        self.exprs.insert((e.pos.offset, e.end), r.0);
+        r
+    }
+
+    fn wrong_place(&mut self, want: Ty, found: &str, e: &Expr, hint: Option<String>) {
+        if want != Ty::Err {
+            let msg = format!("expected {}, found {found}", self.tn(want));
+            self.err("R8", e.pos, msg, hint);
+        }
+    }
+
+    /// `some(x)`; at a place `?T` the value `x` has that place's `T`.
+    fn some_val(
+        &mut self,
+        e: &'a Expr,
+        x: &'a Expr,
+        want: Option<Ty>,
+        _decl: Option<&str>,
+    ) -> (Ty, Val) {
+        self.uses_2b = true;
+        let inner_want = match want {
+            Some(Ty::Opt(i)) => Some(self.opts[i as usize]),
+            _ => None,
+        };
+        let (xt, xv) = match (&x.kind, inner_want) {
+            (ExprKind::NoneVal | ExprKind::ErrVal(_) | ExprKind::SomeVal(_), Some(w)) => {
+                self.at_place(w, x, None)
+            }
+            _ => self.rvalue(x),
+        };
+        if matches!(xt, Ty::Opt(_)) {
+            let msg = format!("`some` needs a plain value, found {}", self.tn(xt));
+            let hint = format!("use {} directly", self.text(x));
+            self.err("R12", e.pos, msg, Some(hint));
+            return (Ty::Err, Val::Runtime);
+        }
+        let known = if xv == Val::Runtime { xv } else { Val::Known };
+        match inner_want {
+            Some(w) => {
+                self.expect(w, xt, x);
+                (want.unwrap_or(Ty::Err), known)
+            }
+            None => (self.opt(xt), known),
+        }
+    }
+
+    /// `a ?? b` (R12).
+    fn coalesce(&mut self, l: &'a Expr, r: &'a Expr, opos: Pos) -> (Ty, Val) {
+        self.uses_2b = true;
+        let (lt, _) = self.rvalue(l);
+        let inner = match self.inner(lt) {
+            Some(t) if t != Ty::Void => t,
+            _ if lt == Ty::Err => {
+                self.rvalue(r);
+                return (Ty::Err, Val::Runtime);
+            }
+            _ => {
+                let msg = format!("`??` needs a ?T or T!E on the left, found {}", self.tn(lt));
+                let hint = "remove the ?? and its default".to_string();
+                self.err("R12", opos, msg, Some(hint));
+                self.rvalue(r);
+                return (Ty::Err, Val::Runtime);
+            }
+        };
+        self.at_place(inner, r, None);
+        (inner, Val::Runtime)
+    }
+
+    fn equality_hint(
+        &self,
+        op: &str,
+        (l, lt): (&Expr, Ty),
+        (r, rt): (&Expr, Ty),
+    ) -> Option<String> {
+        match (lt, rt) {
+            (Ty::Opt(_), t) if self.inner(lt) == Some(t) => {
+                Some(format!("{} {op} some({})", self.text(l), self.text(r)))
+            }
+            (t, Ty::Opt(_)) if self.inner(rt) == Some(t) => {
+                Some(format!("some({}) {op} {}", self.text(l), self.text(r)))
+            }
+            (Ty::Res(_), t) if self.inner(lt) == Some(t) => {
+                Some("use switch to look at the value".into())
+            }
+            (t, Ty::Res(_)) if self.inner(rt) == Some(t) => {
+                Some("use switch to look at the value".into())
+            }
+            _ => None,
+        }
+    }
+
+    /// `try x` and `try x or e` (R12, R18).
+    fn try_expr(
+        &mut self,
+        e: &'a Expr,
+        x: &'a Expr,
+        or: Option<&'a (Pos, Box<Expr>)>,
+    ) -> (Ty, Val) {
+        self.uses_2b = true;
+        let (xt, _) = self.rvalue(x);
+        let callee = self.last_callee;
+        let Some(value) = self.inner(xt) else {
+            if xt != Ty::Err {
+                let msg = format!(
+                    "`try` needs a result of type T!E or ?T, found {}",
+                    self.tn(xt)
+                );
+                self.err("R12", e.pos, msg, Some("remove try".into()));
+            }
+            return (Ty::Err, Val::Runtime);
+        };
+        let ret = if self.in_test {
+            None
+        } else {
+            match self.cur.map(|id| self.fns[id].ret) {
+                Some(Ty::Err) => return (Ty::Err, Val::Runtime),
+                Some(r) => Some(r),
+                None => {
+                    let msg = "`try` needs a function that returns T!E or ?T";
+                    self.err("R12", e.pos, msg, None);
+                    return (Ty::Err, Val::Runtime);
+                }
+            }
+        };
+        let Some(ret) = ret else {
+            // in a test any failure ends the test; there is no error type to translate to
+            if let Some((opos, _)) = or {
+                let msg = "`or` needs a function that returns U!F";
+                self.err("R12", *opos, msg, Some("remove the or part".into()));
+                return (Ty::Err, Val::Runtime);
+            }
+            return (value, Val::Runtime);
+        };
+        let from = match xt {
+            Ty::Res(i) => self.tn(self.ress[i as usize].1),
+            _ => "none".to_string(),
+        };
+        match ret {
+            Ty::Res(i) => {
+                let f = self.ress[i as usize].1;
+                match or {
+                    Some((_, alt)) => {
+                        self.at_place(f, alt, None);
+                        self.last_callee = callee;
+                    }
+                    None if matches!(xt, Ty::Res(j) if self.ress[j as usize].1 == f) => {}
+                    None => {
+                        let msg = format!(
+                            "`try` gives {from}, but the function returns {}",
+                            self.tn(ret)
+                        );
+                        let hint = match f {
+                            Ty::Named(id)
+                                if self.enum_id(self.types[id as usize].name).is_some() =>
+                            {
+                                format!("translate it with try … or {}.V(…)", self.tn(f))
+                            }
+                            _ => format!("translate it with try … or <a {}>", self.tn(f)),
+                        };
+                        self.err("R12", e.pos, msg, Some(hint));
+                        return (Ty::Err, Val::Runtime);
+                    }
+                }
+            }
+            Ty::Opt(i) => {
+                if let Some((opos, _)) = or {
+                    let msg = "`or` needs a function that returns U!F";
+                    let hint = format!(
+                        "remove the or part, or return {}!F",
+                        self.tn(self.opts[i as usize])
+                    );
+                    self.err("R12", *opos, msg, Some(hint));
+                    return (Ty::Err, Val::Runtime);
+                }
+                if matches!(xt, Ty::Res(_)) {
+                    let msg = format!(
+                        "`try` gives {from}, but the function returns {}",
+                        self.tn(ret)
+                    );
+                    let hint = "handle the error with ?? or switch".to_string();
+                    self.err("R12", e.pos, msg, Some(hint));
+                    return (Ty::Err, Val::Runtime);
+                }
+            }
+            _ => {
+                let want = match xt {
+                    Ty::Res(i) => format!("{}!{}", self.tn(ret), self.tn(self.ress[i as usize].1)),
+                    _ => format!("?{}", self.tn(ret)),
+                };
+                let msg = "`try` needs a function that returns T!E or ?T";
+                let hint = if ret == Ty::Void && matches!(xt, Ty::Opt(_)) {
+                    "use ?? or switch".to_string() // ?void does not exist
+                } else {
+                    format!("change the return type to {want}, or use ?? or switch")
+                };
+                self.err("R12", e.pos, msg, Some(hint));
+                return (Ty::Err, Val::Runtime);
+            }
+        }
+        (value, Val::Runtime)
+    }
+
+    /// A `test` block (R18).
+    fn test(&mut self, t: &'a TestDecl) {
+        self.uses_2b = true;
+        match self.tests.iter().find(|(n, _)| *n == t.name) {
+            Some(&(_, first)) => {
+                let msg = format!("test \"{}\" is declared twice", t.name);
+                let hint = format!("first declared at {}", self.at(first));
+                self.err("R18", t.name_pos, msg, Some(hint));
+            }
+            None => self.tests.push((&t.name, t.name_pos)),
+        }
+        self.in_test = true;
+        self.fn_locals.clear();
+        let before = self.diags.len();
+        self.block(&t.body);
+        if self.derived.is_some() && self.diags.len() == before {
+            for (root, pos) in live::lost(&t.body, &self.call_changes, &[]) {
+                if self.fn_locals.contains(&root) {
+                    let msg = format!("`{root}` is changed but never read afterwards");
+                    let hint = "use the value, or remove the change".to_string();
+                    self.err("R6", pos, msg, Some(hint));
+                }
+            }
+        }
+        self.in_test = false;
     }
 }
 

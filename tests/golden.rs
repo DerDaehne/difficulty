@@ -95,13 +95,13 @@ fn llms_txt() {
     assert!(doc_examples("llms.txt", "llms") >= 2);
 }
 
-/// Sections of the spec whose examples are checked but not built and run (none now);
+/// Sections of the spec whose examples are checked but not built and run;
 /// a section is listed here only while its backend is missing.
-const CHECK_ONLY: &[&str] = &[];
+const CHECK_ONLY: &[&str] = &["### R12 ", "### R18 "];
 
 /// Sections whose examples need the compiler of part 2b and are skipped entirely
 /// until it exists; the compiler change removes them here.
-const PENDING: &[&str] = &["### R12 ", "### R18 "];
+const PENDING: &[&str] = &[];
 
 /// Every ```dif block of a document, by kind: valid module, snippet (inside
 /// `void main()`), `error Rn` (exactly that diagnostic), `panic "message"`.

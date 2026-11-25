@@ -208,9 +208,14 @@ fn main_r1() {
     assert_eq!(m("void f() {\n}\n").as_deref(), Some("no `main` function"));
     assert_eq!(
         m("int main() {\n    return 0\n}\n").as_deref(),
-        Some("`main` must be `void main()`")
+        Some("`main` must return void or void!E")
     );
     assert_eq!(m("void main() {\n}\n"), None);
+    assert_eq!(m("enum E { A }\nvoid!E main() {\n}\n"), None);
+    assert_eq!(
+        m("void main(int n) {\n}\n").as_deref(),
+        Some("`main` takes no parameters")
+    );
 }
 
 #[test]

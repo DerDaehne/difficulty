@@ -1,0 +1,91 @@
+enum AgeErr {
+    Negative
+    TooOld(int n)
+}
+
+struct Box {
+    ?int v
+    str!AgeErr r
+}
+
+int!AgeErr check_age(int n) {
+    if n < 0 {
+        return err(AgeErr.Negative)
+    }
+    return n
+}
+
+?int half(int n) {
+    if n % 2 != 0 {
+        return none
+    }
+    return some(n / 2)
+}
+
+void!AgeErr book(int n) {
+    if n > 5 {
+        return err(AgeErr.TooOld(n))
+    }
+    print("booked {n}")
+}
+
+?int via(int n) {
+    int h = try half(n)
+    return h + 1
+}
+
+int!AgeErr twice(int n) {
+    return try check_age(n) * 2
+}
+
+void!AgeErr run() {
+    try book(3)
+    int a = try check_age(4)
+    print(a)
+}
+
+void!AgeErr main() {
+    ?int x = 4
+    int!AgeErr r = 3
+    ?int y = none
+    int!AgeErr e = err(AgeErr.Negative)
+    print(x == some(4))
+    print(x == none)
+    print(r == err(AgeErr.Negative))
+    print(x ?? 0)
+    print(half(7) ?? half(8) ?? -1)
+    print(y)
+    Box b = Box{v: 3, r: "x"}
+    print(b)
+    switch twice(4) {
+    case ok(int n):
+        print(n)
+    case err(AgeErr e2):
+        print(e2)
+    }
+    switch book(1) {
+    case ok:
+        print("ok")
+    case err(_):
+        print("err")
+    }
+    switch half(2) {
+    case some(int h):
+        print(h)
+    default:
+        print("none")
+    }
+    _ = e
+    try run()
+}
+
+test "first" {
+    int n = try check_age(3)
+    expect(n == 3)
+    expect(half(4) == some(2) && n > 0)
+}
+
+test "boom" panics "integer overflow" {
+    int big = 9223372036854775807
+    print(big + 1)
+}

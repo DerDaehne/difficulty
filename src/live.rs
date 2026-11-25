@@ -149,13 +149,21 @@ impl Live<'_> {
                 for c in cases {
                     let mut inner = self.block(&c.body, live.clone());
                     for p in &c.pats {
-                        if let Pattern::Variant {
-                            binds: Some(bs), ..
-                        } = p
-                        {
-                            for b in bs.iter().flatten() {
+                        match p {
+                            Pattern::Variant {
+                                binds: Some(bs), ..
+                            } => {
+                                for b in bs.iter().flatten() {
+                                    inner.remove(&b.name);
+                                }
+                            }
+                            Pattern::Result {
+                                bind: Some(Some(b)),
+                                ..
+                            } => {
                                 inner.remove(&b.name);
                             }
+                            _ => {}
                         }
                     }
                     acc.extend(inner);
@@ -245,7 +253,23 @@ impl Live<'_> {
                 }
                 live
             }
-            ExprKind::Unary(_, x) | ExprKind::Paren(x) | ExprKind::Mut(x) => self.expr(x, live),
+            ExprKind::Unary(_, x)
+            | ExprKind::Paren(x)
+            | ExprKind::Mut(x)
+            | ExprKind::SomeVal(x)
+            | ExprKind::ErrVal(x)
+            | ExprKind::OkVal(Some(x)) => self.expr(x, live),
+            // `try` may leave the function right after `x`: the escaping roots are read
+            // there (like `return`); the `or` value is computed only on that path.
+            ExprKind::Try(x, or) => {
+                let mut after = live;
+                after.extend(self.escape.iter().cloned());
+                if let Some((_, alt)) = or {
+                    let end = self.escape.clone();
+                    after.extend(self.expr(alt, end));
+                }
+                self.expr(x, after)
+            }
             ExprKind::Field(b, _) => self.expr(b, live),
             ExprKind::Binary(_, l, r, _) | ExprKind::Index(l, r) => {
                 let live = self.expr(r, live);

@@ -148,6 +148,9 @@ static inline void dif_put_quoted(dif_buf *b, dif_str s) {
 
 /// C source for a module that passed the checker.
 pub fn emit(file: &str, m: &Module, info: &Info) -> String {
+    if info.part2b {
+        return "#error \"error types, optionals and tests (part 2b) are not supported by the C backend yet\"\n".into();
+    }
     let mut e = Emitter {
         file: c_string(file.as_bytes()),
         info,
@@ -546,7 +549,7 @@ impl<'a> Emitter<'a> {
                 Decl::Struct(s) => {
                     self.structs.insert(&s.name, s);
                 }
-                Decl::Enum(_) => {}
+                Decl::Enum(_) | Decl::Test(_) => {}
             }
         }
         c.push_str(&self.type_defs());
@@ -894,6 +897,7 @@ impl<'a> Emitter<'a> {
                 let eid = self.enum_named(ty).unwrap_or(0);
                 format!("{s}.tag == {}", self.variant_index(eid, name))
             }
+            Pattern::Result { .. } => "0".into(),
         }
     }
 
@@ -979,6 +983,12 @@ impl<'a> Emitter<'a> {
             ExprKind::IfExpr(branches, last) => self.if_expr(self.ty(e), branches, last),
             ExprKind::Mut(x) => format!("(&{})", self.expr(x)),
             ExprKind::Float(_) | ExprKind::Index(..) | ExprKind::Missing => "0".into(),
+            // part 2b: `emit` stops with #error before any of these is reached
+            ExprKind::NoneVal
+            | ExprKind::SomeVal(_)
+            | ExprKind::ErrVal(_)
+            | ExprKind::OkVal(_)
+            | ExprKind::Try(..) => "0".into(),
         }
     }
 

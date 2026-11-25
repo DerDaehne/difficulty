@@ -14,8 +14,22 @@ pub enum Decl {
     Func(Func),
     Struct(StructDecl),
     Enum(EnumDecl),
+    Test(TestDecl),
 }
 
+/// `test "name" [panics "text"] { … }` (R18).
+#[derive(Debug, Clone)]
+pub struct TestDecl {
+    pub name: String,
+    /// Position of the name string.
+    pub name_pos: Pos,
+    pub panics: Option<(String, Pos)>,
+    pub body: Block,
+    /// Position of the word `test`.
+    pub pos: Pos,
+}
+
+/// A written type; `name` is its text without spaces: `int`, `?int`, `int!AgeErr`, `void!E`.
 #[derive(Debug, Clone)]
 pub struct TypeRef {
     pub name: String,
@@ -91,6 +105,13 @@ pub enum Pattern {
         ty: String,
         name: String,
         binds: Option<Vec<Option<Param>>>,
+        pos: Pos,
+    },
+    /// `ok`, `err`, `some`, `none` with an optional binding: the outer `None` means no
+    /// parentheses, `Some(None)` means `(_)`.
+    Result {
+        kind: &'static str,
+        bind: Option<Option<Param>>,
         pos: Pos,
     },
 }
@@ -194,6 +215,16 @@ pub enum ExprKind {
     IfExpr(Vec<(Expr, ValueBlock)>, Box<ValueBlock>),
     /// `mut place` as an argument (R6).
     Mut(Box<Expr>),
+    /// `none`
+    NoneVal,
+    /// `some(x)`
+    SomeVal(Box<Expr>),
+    /// `err(e)`
+    ErrVal(Box<Expr>),
+    /// `ok(x)` or `ok`: only a pattern (R12), kept so the checker can report it.
+    OkVal(Option<Box<Expr>>),
+    /// `try x`, or `try x or e` with the position of `or`.
+    Try(Box<Expr>, Option<(Pos, Box<Expr>)>),
     /// Placeholder after an error that was already reported.
     Missing,
 }
