@@ -103,6 +103,18 @@ const CHECK_ONLY: &[&str] = &["### R12 ", "### R18 "];
 /// until it exists; the compiler change removes them here.
 const PENDING: &[&str] = &[];
 
+/// Sections of part 2c (collections, number widths, text, io/os): their examples need the
+/// compiler of part 2c and are skipped until it exists; the compiler change removes them here.
+const PENDING_2C: &[&str] = &[
+    "### 1.4 ",
+    "### R5, Teil 2c",
+    "### R8, Teil 2c",
+    "### R29, Teil 2c",
+    "### R30 ",
+    "### R31 ",
+    "### 4.",
+];
+
 /// Every ```dif block of a document, by kind: valid module, snippet (inside
 /// `void main()`), `error Rn` (exactly that diagnostic), `panic "message"`.
 /// Returns the number of examples checked.
@@ -141,7 +153,11 @@ fn doc_examples(doc: &str, tag: &str) -> usize {
                 }
                 lines[from..to].join("\n")
             });
-        if PENDING.iter().any(|p| section.starts_with(p)) {
+        if PENDING
+            .iter()
+            .chain(PENDING_2C)
+            .any(|p| section.starts_with(p))
+        {
             continue;
         }
         let check_only = CHECK_ONLY.iter().any(|p| section.starts_with(p));
