@@ -95,7 +95,7 @@ pub fn compile_tests(file: &str, bytes: &[u8]) -> Result<(String, Vec<TestMeta>)
             .filter_map(|d| match d {
                 ast::Decl::Test(t) => Some(TestMeta {
                     name: t.name.clone(),
-                    line: t.pos.line as u32,
+                    line: t.pos.line,
                     panics: t.panics.as_ref().map(|p| p.0.clone()),
                 }),
                 _ => None,

@@ -125,13 +125,8 @@ fn a_crash_or_timeout_hits_only_its_test() {
     return down(n + 1) + 1
 }
 
-int spin(int n) {
-    int k = n
+int spin() {
     while true {
-        k += 1
-        if k == 0 {
-            return k
-        }
     }
 }
 
@@ -145,7 +140,7 @@ test \"stack\" {
 }
 
 test \"spins\" {
-    print(spin(1))
+    print(spin())
 }
 
 test \"overflow\" panics \"integer overflow\" {
@@ -155,14 +150,14 @@ test \"overflow\" panics \"integer overflow\" {
 ",
     );
     let (out, _, code) = d.dif(&["test", "c.dif"]);
-    let want = "ok   c.dif:15 test \"fine\"
-FAIL c.dif:19 test \"stack\"
+    let want = "ok   c.dif:10 test \"fine\"
+FAIL c.dif:14 test \"stack\"
     killed by signal 11
     output:
         before
-FAIL c.dif:24 test \"spins\"
+FAIL c.dif:19 test \"spins\"
     timed out after 10 s
-ok   c.dif:28 test \"overflow\"
+ok   c.dif:23 test \"overflow\"
 test result: 2 passed, 2 failed
 ";
     assert_eq!((out.as_str(), code), (want, 1));
@@ -273,4 +268,19 @@ test \"never runs\" {
     );
     // a test file without main still checks
     assert_eq!(d.dif(&["check", "m.dif"]).2, 0);
+}
+
+#[test]
+fn ledger_example_runs_and_tests() {
+    let d = Dir::new("ledger");
+    let ledger = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/ledger.dif");
+    let (out, err, code) = d.dif(&["run", ledger]);
+    let want = "100\nerr(TxErr.Frozen)\nerr(TxErr.Empty)\nAccount{owner: \"nobody\", balance: 0, frozen: false}\n";
+    assert_eq!(
+        (out.as_str(), err.as_str(), code),
+        (want, "error: TxErr.Insufficient(380)\n", 1)
+    );
+    let (out, _, code) = d.dif(&["test", ledger]);
+    assert!(out.ends_with("test result: 6 passed, 0 failed\n"), "{out}");
+    assert_eq!(code, 0);
 }
