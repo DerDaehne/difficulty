@@ -284,3 +284,37 @@ fn ledger_example_runs_and_tests() {
     assert!(out.ends_with("test result: 6 passed, 0 failed\n"), "{out}");
     assert_eq!(code, 0);
 }
+
+#[test]
+fn names_are_escaped_blank_output_lines_are_bare_and_build_cleans_up() {
+    let d = Dir::new("polish");
+    d.file(
+        "p.dif",
+        "test \"a\\nb \\\"q\\\"\" {
+    print(\"x\\n\\ny\")
+    expect(false)
+}
+",
+    );
+    let (out, _, _) = d.dif(&["test", "p.dif"]);
+    assert!(out.contains("test \"a\\nb \\\"q\\\"\"\n"), "{out}");
+    assert!(
+        out.contains("    output:\n        x\n\n        y\n"),
+        "{out}"
+    );
+    // a C compiler that always fails still leaves nothing behind
+    d.file("m.dif", "void main() {\n}\n");
+    let tmp = d.0.join("tmp");
+    std::fs::create_dir_all(&tmp).unwrap();
+    for cc in ["true", "false"] {
+        let r = Command::new(env!("CARGO_BIN_EXE_dif"))
+            .current_dir(&d.0)
+            .env("TMPDIR", &tmp)
+            .env("CC", cc)
+            .args(["build", "m.dif"])
+            .output()
+            .unwrap();
+        let _ = r;
+        assert_eq!(std::fs::read_dir(&tmp).unwrap().count(), 0, "CC={cc}");
+    }
+}

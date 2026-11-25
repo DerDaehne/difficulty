@@ -156,7 +156,7 @@ pub fn run(
     } else {
         for (&(i, k), r) in jobs.iter().zip(&results) {
             let (u, t) = (&units[i], &units[i].tests[k]);
-            let head = format!("{}:{} test \"{}\"", u.file, t.line, t.name);
+            let head = format!("{}:{} test \"{}\"", u.file, t.line, escape(&t.name));
             match r {
                 Ok(()) => out.push_str(&format!("ok   {head}\n")),
                 Err(f) => {
@@ -173,7 +173,8 @@ pub fn run(
                     if !f.output.is_empty() {
                         out.push_str("    output:\n");
                         for l in f.output.split_terminator('\n') {
-                            out.push_str(&format!("        {l}\n"));
+                            let pad = if l.is_empty() { "" } else { "        " };
+                            out.push_str(&format!("{pad}{l}\n"));
                         }
                     }
                 }
@@ -187,6 +188,23 @@ pub fn run(
     } else {
         ExitCode::FAILURE
     })
+}
+
+/// A test name as written in the source: `"`, `\` and control characters escaped.
+fn escape(s: &str) -> String {
+    let mut o = String::new();
+    for c in s.chars() {
+        match c {
+            '"' | '\\' => o.extend(['\\', c]),
+            '\n' => o.push_str("\\n"),
+            '\t' => o.push_str("\\t"),
+            '\r' => o.push_str("\\r"),
+            '\0' => o.push_str("\\0"),
+            c if c < ' ' => o.push_str(&format!("\\u{{{:x}}}", c as u32)),
+            c => o.push(c),
+        }
+    }
+    o
 }
 
 fn json_failure(f: &Failure) -> String {

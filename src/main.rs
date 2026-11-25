@@ -104,7 +104,9 @@ fn build(args: &[String]) -> Result<ExitCode, ExitCode> {
             .file_stem()
             .map_or("a.out".into(), |s| s.to_string_lossy().into_owned())
     });
-    compile(&o.file, Path::new(&out))?;
+    let built = compile(&o.file, Path::new(&out));
+    let _ = std::fs::remove_dir_all(work_dir()?);
+    built?;
     Ok(ExitCode::SUCCESS)
 }
 
