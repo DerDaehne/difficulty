@@ -255,3 +255,45 @@ void main() {
         "5 1\n5015 16\nlog 2\nlog 1\nBox{n: 1, m: 2}\n32\nlog 7\n7\n0\n2\n3\n"
     );
 }
+
+/// `n - c` after `if n < K { return }` needs no check, but only for a parameter that is
+/// never changed; everything else keeps its panic.
+#[test]
+fn range_facts_keep_checks() {
+    let src = r#"int fib(int n) {
+    if n < 2 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+int big(int n) {
+    if n < 2 {
+        return 4611686018427387904
+    }
+    return big(n - 1) + big(n - 1)
+}
+
+int low(int n) {
+    if n < 2 {
+        return n
+    }
+    n = -9223372036854775807 - 1
+    return n - 1
+}
+
+void main() {
+    print(fib(20))
+    print(big(1))
+    print(low(5))
+}
+"#;
+    let (out, err, code) = run("range", src);
+    assert_eq!(out, "6765\n4611686018427387904\n");
+    assert_eq!(err, "panic: integer overflow in - (main.dif:20:14)\n");
+    assert_eq!(code, 2);
+    let (out, err, code) = run("range2", &src.replace("big(1)", "big(2)"));
+    assert_eq!(out, "6765\n");
+    assert_eq!(err, "panic: integer overflow in + (main.dif:12:23)\n");
+    assert_eq!(code, 2);
+}

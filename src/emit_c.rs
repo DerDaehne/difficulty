@@ -20,7 +20,7 @@ const RUNTIME: &str = r#"#include <inttypes.h>
 typedef struct { const char *p; int64_t n; } dif_str;
 typedef struct { char *p; int64_t n, cap; } dif_buf;
 
-static inline _Noreturn void dif_panic(const char *msg, int line, int col) {
+__attribute__((noinline, cold)) static _Noreturn void dif_panic(const char *msg, int line, int col) {
     fflush(stdout);
     fprintf(stderr, "panic: %s (%s:%d:%d)\n", msg, dif_file, line, col);
     exit(2);
@@ -160,6 +160,8 @@ pub fn emit(file: &str, m: &Module, info: &Info) -> String {
         out: String::new(),
         nested: 0,
         uid: 0,
+        lows: HashMap::new(),
+        steady: HashSet::new(),
     };
     e.module(m)
 }
@@ -179,6 +181,64 @@ struct Emitter<'a> {
     /// Depth of statements inside an expression (no `#line` there).
     nested: usize,
     uid: usize,
+    /// Proven lower bounds of `int` parameters that the function never changes: after
+    /// `if n < K { return }` the rest of the block knows `n >= K`, so `n - c` cannot overflow.
+    lows: HashMap<&'a str, i64>,
+    /// The `int` parameters of the current function that are never changed.
+    steady: HashSet<&'a str>,
+}
+
+/// Does `n` get changed in `stmts`: assigned, or passed as `mut`?
+fn changes(stmts: &[Stmt], n: &str) -> bool {
+    stmts.iter().any(|s| match s {
+        Stmt::Var(v) => sets(&v.value, n),
+        Stmt::Assign { place, value, .. } => {
+            matches!(&place.kind, ExprKind::Ident(p) if p == n) || sets(value, n)
+        }
+        Stmt::If {
+            branches,
+            otherwise,
+            ..
+        } => {
+            branches
+                .iter()
+                .any(|(c, b)| sets(c, n) || changes(&b.stmts, n))
+                || otherwise.as_ref().is_some_and(|b| changes(&b.stmts, n))
+        }
+        Stmt::While { cond, body, .. } => sets(cond, n) || changes(&body.stmts, n),
+        Stmt::For { iter, body, .. } => sets(iter, n) || changes(&body.stmts, n),
+        Stmt::Switch {
+            subject,
+            cases,
+            default,
+            ..
+        } => {
+            sets(subject, n)
+                || cases.iter().any(|c| changes(&c.body.stmts, n))
+                || default.as_ref().is_some_and(|d| changes(&d.0.stmts, n))
+        }
+        Stmt::Return(e, _) => e.as_ref().is_some_and(|e| sets(e, n)),
+        Stmt::Call(e) | Stmt::Discard(e, _) => sets(e, n),
+        Stmt::Break(_) | Stmt::Continue(_) => false,
+    })
+}
+
+fn sets(e: &Expr, n: &str) -> bool {
+    match &e.kind {
+        ExprKind::Mut(x) => matches!(&x.kind, ExprKind::Ident(p) if p == n) || sets(x, n),
+        ExprKind::Unary(_, x) | ExprKind::Paren(x) | ExprKind::Field(x, _) => sets(x, n),
+        ExprKind::Binary(_, l, r, _) | ExprKind::Index(l, r) => sets(l, n) || sets(r, n),
+        ExprKind::Call(f, args) => sets(f, n) || args.iter().any(|a| sets(a, n)),
+        ExprKind::StructLit(_, inits) => inits.iter().any(|i| sets(&i.value, n)),
+        ExprKind::Str(segs) => segs
+            .iter()
+            .any(|s| matches!(s, StrSeg::Expr(x) if sets(x, n))),
+        ExprKind::IfExpr(branches, last) => {
+            let vb = |b: &ValueBlock| changes(&b.stmts, n) || sets(&b.value, n);
+            branches.iter().any(|(c, b)| sets(c, n) || vb(b)) || vb(last)
+        }
+        _ => false,
+    }
 }
 
 fn c_ty_prim(t: Ty) -> &'static str {
@@ -583,6 +643,12 @@ impl<'a> Emitter<'a> {
         self.temps.clear();
         self.out.clear();
         self.derefs.clear();
+        self.lows.clear();
+        self.steady = (f.params.iter())
+            .filter(|p| p.mut_pos.is_none() && self.ty_of(&p.ty) == Ty::Int)
+            .filter(|p| !changes(&f.body.stmts, &p.name))
+            .map(|p| p.name.as_str())
+            .collect();
         if f.recv.is_some() {
             if self.changes_self(f) {
                 self.derefs.insert("self");
@@ -619,9 +685,63 @@ impl<'a> Emitter<'a> {
     }
 
     fn block_body(&mut self, b: &'a Block, depth: usize) {
+        let saved = self.lows.clone();
         for s in &b.stmts {
             self.stmt(s, depth);
+            self.learn(s);
         }
+        self.lows = saved;
+    }
+
+    /// After `if p < K { ...; return }` (no `else`) the rest of the block knows `p >= K`.
+    fn learn(&mut self, s: &'a Stmt) {
+        let Stmt::If {
+            branches,
+            otherwise: None,
+            ..
+        } = s
+        else {
+            return;
+        };
+        let [(c, b)] = branches.as_slice() else {
+            return;
+        };
+        let (ExprKind::Binary(op, l, r, _), Some(Stmt::Return(..))) = (&c.kind, b.stmts.last())
+        else {
+            return;
+        };
+        let (ExprKind::Ident(n), Some(k)) = (&l.kind, self.int_value(r)) else {
+            return;
+        };
+        let k = match *op {
+            "<" => k,
+            "<=" => k.saturating_add(1),
+            _ => return,
+        };
+        if let Some(n) = self.steady.get(n.as_str()) {
+            let low = self.lows.entry(n).or_insert(k);
+            *low = (*low).max(k);
+        }
+    }
+
+    fn int_value(&self, e: &Expr) -> Option<i64> {
+        match (&e.kind, self.info.folded.get(&(e.pos.offset, e.end))) {
+            (_, Some(v)) => Some(*v),
+            (ExprKind::Int(v), _) => i64::try_from(*v).ok(),
+            _ => None,
+        }
+    }
+
+    /// `n - c` with `n >= K` known and `K - c` representable: no overflow check needed.
+    fn safe_sub(&self, l: &Expr, r: &Expr) -> bool {
+        let (ExprKind::Ident(n), Some(c)) = (&l.kind, self.int_value(r)) else {
+            return false;
+        };
+        c >= 0
+            && self
+                .lows
+                .get(n.as_str())
+                .is_some_and(|k| k.checked_sub(c).is_some())
     }
 
     fn stmt(&mut self, s: &'a Stmt, d: usize) {
@@ -828,6 +948,9 @@ impl<'a> Emitter<'a> {
                 let t = self.ty(l);
                 if *op == "&&" || *op == "||" {
                     return format!("({} {op} {})", self.expr(l), self.expr(r));
+                }
+                if *op == "-" && t == Ty::Int && self.safe_sub(l, r) {
+                    return format!("({} - {})", self.expr(l), self.expr(r));
                 }
                 let (pre, vals) = self.ordered(&[Arg::Val(l), Arg::Val(r)]);
                 let [a, b] = <[String; 2]>::try_from(vals).unwrap_or_default();
