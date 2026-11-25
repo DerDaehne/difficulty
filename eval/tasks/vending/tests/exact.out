@@ -1,0 +1,7 @@
+credit 50
+credit 60
+vend A change 0
+credit 100
+credit 150
+vend C change 0
+state idle credit 0

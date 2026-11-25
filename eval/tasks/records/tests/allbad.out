@@ -1,0 +1,13 @@
+line 1: expected 3 fields
+line 2: bad id
+line 3: expected 3 fields
+line 4: empty name
+line 5: bad amount
+line 6: bad amount
+line 7: bad amount
+line 8: expected 3 fields
+line 9: bad id
+line 10: bad id
+line 11: bad id
+line 12: bad id
+ok 0, bad 12, total 0.00

@@ -1,0 +1,6 @@
+line 3: empty name
+line 4: bad id
+line 5: bad amount
+line 6: duplicate id
+line 7: expected 3 fields
+ok 2, bad 5, total 8.25

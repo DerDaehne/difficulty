@@ -1,0 +1,12 @@
+error: no such seat 0 1
+error: no such seat 6 1
+error: no such seat 1 9
+error: bad command
+error: bad command
+error: bad command
+error: bad command
+error: seat 1 1 is not booked
+error: bad group size 0
+error: bad group size 9
+error: bad group size -1
+sold 0 of 40, occupancy 0.0%

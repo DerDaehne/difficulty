@@ -33,3 +33,7 @@ Emacs: in der Konfiguration
 ```
 
 Lizenz: [MIT](LICENSE).
+
+## Agenten-Messung
+
+`eval/` enthält das Messgerüst: Aufgaben, versteckte Tests, Python-Referenzen und den Runner. Siehe [eval/README.md](eval/README.md).

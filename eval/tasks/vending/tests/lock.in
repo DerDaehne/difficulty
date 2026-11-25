@@ -1,0 +1,16 @@
+coin 5
+coin x
+status
+coin 20
+coin 3
+coin 10
+status
+select A
+refund
+coin 10
+unlock
+unlock
+status
+coin 10
+coin 7
+status

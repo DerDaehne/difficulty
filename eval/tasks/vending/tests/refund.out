@@ -1,0 +1,6 @@
+refund 0
+credit 100
+credit 150
+refund 150
+state idle credit 0
+error: need 150 more

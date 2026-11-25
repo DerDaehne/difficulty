@@ -1,0 +1,4 @@
+line 1: expected 3 fields
+line 6: duplicate id
+line 8: duplicate id
+ok 3, bad 3, total 5.50

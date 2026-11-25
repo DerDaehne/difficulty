@@ -1,0 +1,14 @@
+coin 1
+coin 2
+coin 3
+coin 4
+coin 10
+select A
+status
+unlock
+coin 4
+status
+coin 010
+coin +10
+coin -10
+status

@@ -1,0 +1,16 @@
+booked 1 4
+booked 1 8
+booked 2 1
+group 4 booked: row 2, seats 2 to 5
+group 3 booked: row 1, seats 1 to 3
+group 4 booked: row 3, seats 1 to 4
+group 4 booked: row 3, seats 5 to 8
+group 5 booked: row 4, seats 1 to 5
+group 4 booked: row 5, seats 1 to 4
+  12345678
+1 XXXX...X
+2 XXXXX...
+3 XXXXXXXX
+4 XXXXX...
+5 XXXX....
+sold 27 of 40, occupancy 67.5%

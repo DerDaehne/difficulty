@@ -1,0 +1,6 @@
+credit 50
+credit 70
+error: need 50 more
+credit 170
+vend B change 50
+state idle credit 0

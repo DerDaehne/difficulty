@@ -1,0 +1,5 @@
+line 2: bad amount
+line 3: empty name
+line 4: duplicate id
+line 6: duplicate id
+ok 2, bad 4, total 4.00

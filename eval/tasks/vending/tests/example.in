@@ -1,0 +1,6 @@
+coin 50
+coin 20
+select B
+coin 100
+select B
+status

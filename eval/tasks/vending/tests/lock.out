@@ -1,0 +1,17 @@
+rejected
+rejected
+state idle credit 0
+credit 20
+rejected
+locked
+error: locked
+state locked credit 20
+error: locked
+error: locked
+error: locked
+unlocked
+error: not locked
+state active credit 20
+credit 30
+rejected
+state active credit 30

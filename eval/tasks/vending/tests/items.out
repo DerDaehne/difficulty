@@ -1,0 +1,13 @@
+credit 100
+credit 200
+vend C change 50
+credit 100
+credit 200
+error: unknown item Z
+vend A change 140
+error: bad command
+error: bad command
+error: bad command
+error: bad command
+error: bad command
+state idle credit 0

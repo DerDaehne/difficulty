@@ -1,0 +1,14 @@
+group 8 booked: row 1, seats 1 to 8
+group 8 booked: row 2, seats 1 to 8
+group 8 booked: row 3, seats 1 to 8
+group 8 booked: row 4, seats 1 to 8
+group 8 booked: row 5, seats 1 to 8
+error: no block of 1 free seats
+error: no block of 8 free seats
+sold 40 of 40, occupancy 100.0%
+  12345678
+1 XXXXXXXX
+2 XXXXXXXX
+3 XXXXXXXX
+4 XXXXXXXX
+5 XXXXXXXX
