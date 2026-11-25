@@ -36,6 +36,24 @@ fn run(name: &str, src: &str) -> (String, String, i32) {
     )
 }
 
+/// `dif test main.dif [--json]` in a fresh directory; returns (stdout, exit code).
+fn dif_test(name: &str, src: &str, json: bool) -> (String, i32) {
+    let dir = std::env::temp_dir().join(format!("dif-golden-{}-{name}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("main.dif"), src).unwrap();
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_dif"));
+    cmd.current_dir(&dir).args(["test", "main.dif"]);
+    if json {
+        cmd.arg("--json");
+    }
+    let r = cmd.output().unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    (
+        String::from_utf8_lossy(&r.stdout).into_owned(),
+        r.status.code().unwrap_or(-1),
+    )
+}
+
 fn files(dir: &str) -> Vec<std::path::PathBuf> {
     let mut v: Vec<_> = std::fs::read_dir(Path::new(ROOT).join(dir))
         .unwrap()
@@ -97,7 +115,7 @@ fn llms_txt() {
 
 /// Sections of the spec whose examples are checked but not built and run;
 /// a section is listed here only while its backend is missing.
-const CHECK_ONLY: &[&str] = &["### R12 ", "### R18 "];
+const CHECK_ONLY: &[&str] = &[];
 
 /// Sections whose examples need the compiler of part 2b and are skipped entirely
 /// until it exists; the compiler change removes them here.
@@ -145,15 +163,18 @@ fn doc_examples(doc: &str, tag: &str) -> usize {
         while k < lines.len() && lines[k].is_empty() {
             k += 1;
         }
-        let expected: Option<String> =
-            (kind.trim().starts_with("error") && lines.get(k) == Some(&"```")).then(|| {
-                let from = k + 1;
-                let mut to = from;
-                while lines[to] != "```" {
-                    to += 1;
-                }
-                lines[from..to].join("\n")
-            });
+        let expected: Option<String> = (matches!(kind.trim(), "test")
+            || kind.trim().starts_with("error"))
+        .then_some(())
+        .filter(|_| lines.get(k) == Some(&"```"))
+        .map(|_| {
+            let from = k + 1;
+            let mut to = from;
+            while lines[to] != "```" {
+                to += 1;
+            }
+            lines[from..to].join("\n")
+        });
         if PENDING
             .iter()
             .chain(PENDING_2C)
@@ -174,8 +195,8 @@ fn doc_examples(doc: &str, tag: &str) -> usize {
         let codes: Vec<&str> = diags.iter().map(|d| d.code).collect();
         if let Some(code) = kind.strip_prefix("error ") {
             assert_eq!(codes, [code], "spec example {n}:\n{src}");
-            if let Some(want) = expected {
-                assert_eq!(diags[0].render("main.dif"), want, "{doc} example {n}");
+            if let Some(want) = &expected {
+                assert_eq!(diags[0].render("main.dif"), *want, "{doc} example {n}");
             }
         } else {
             assert_eq!(codes, [] as [&str; 0], "spec example {n}:\n{src}");
@@ -190,6 +211,32 @@ fn doc_examples(doc: &str, tag: &str) -> usize {
                 err.starts_with(&format!("panic: {}", msg.trim_matches('"'))),
                 "spec example {n}: {err}"
             );
+        } else if let Some(text) = kind.strip_prefix("fails ") {
+            // `void!E main()` ends with `error: <text>` on stderr and exit code 1 (R12)
+            let (_, err, code) = run(&format!("{tag}{n}"), &src);
+            assert_eq!(code, 1, "spec example {n}");
+            assert_eq!(
+                err,
+                format!("error: {}\n", text.trim_matches('"')),
+                "{doc} example {n}"
+            );
+        } else if kind == "test" {
+            // `dif test main.dif` prints the block that follows; with `--json`, the line after it
+            let want = expected.expect("a `dif test` example is followed by its output");
+            let (out, code) = dif_test(&format!("{tag}{n}"), &src, false);
+            assert_eq!((out, code), (want + "\n", 1), "{doc} example {n}");
+            let json = lines[k..]
+                .iter()
+                .take(12)
+                .find(|l| l.starts_with("{\"tests\":"));
+            if let Some(json) = json {
+                let (out, code) = dif_test(&format!("{tag}{n}j"), &src, true);
+                assert_eq!(
+                    (out.as_str(), code),
+                    (&format!("{json}\n")[..], 1),
+                    "{doc} example {n}"
+                );
+            }
         } else if kind.is_empty() || kind.starts_with("snippet") {
             // valid examples also build and run (modules without main only check)
             if src.contains("void main()") {

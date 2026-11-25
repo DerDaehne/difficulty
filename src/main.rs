@@ -1,9 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+mod dif_test;
+
 const USAGE: &str = "usage: dif check [--json] <file.dif>
        dif run <file.dif>
        dif build <file.dif> [-o <output>]
+       dif test [path] [filter] [--json]
        dif version";
 
 fn main() -> ExitCode {
@@ -12,6 +15,7 @@ fn main() -> ExitCode {
         Some("check") => check(&args[1..]),
         Some("run") => run(&args[1..]),
         Some("build") => build(&args[1..]),
+        Some("test") => dif_test::run(&args[1..], usage, find_cc, work_dir, report),
         Some("version" | "--version" | "-v") => {
             println!("dif {}", env!("CARGO_PKG_VERSION"));
             Ok(ExitCode::SUCCESS)

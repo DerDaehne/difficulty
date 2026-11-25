@@ -129,6 +129,67 @@ static inline void dif_put_quoted(dif_buf *b, dif_str s) {
 }
 "#;
 
+/// A literal needs no line in the failure report of `expect` (R18).
+fn is_literal(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::NoneVal => true,
+        ExprKind::Str(segs) => segs.iter().all(|s| matches!(s, StrSeg::Lit(_))),
+        ExprKind::Unary("-", x) | ExprKind::Paren(x) => is_literal(x),
+        _ => false,
+    }
+}
+
+/// Test binary only. A failure is one line on stderr, `dif-test-fail`, tab-separated
+/// (`\`, tab, newline escaped), and exit code 3; `dif test` reads it (R18).
+const TEST_RUNTIME: &str = r#"
+static inline void dif_esc(dif_buf *b, const char *p, int64_t n) {
+    for (int64_t i = 0; i < n; i++) {
+        switch (p[i]) {
+        case '\\': dif_put(b, "\\\\", 2); break;
+        case '\n': dif_put(b, "\\n", 2); break;
+        case '\t': dif_put(b, "\\t", 2); break;
+        case '\r': dif_put(b, "\\r", 2); break;
+        default: dif_put(b, &p[i], 1);
+        }
+    }
+}
+static _Noreturn void dif_fail(dif_buf *b) {
+    dif_put(b, "\n", 1);
+    fflush(stdout);
+    fwrite(b->p, 1, (size_t)b->n, stderr);
+    exit(3);
+}
+static void dif_fail_head(dif_buf *b, const char *kind, int line, int col, int64_t off) {
+    char t[96];
+    int n = snprintf(t, sizeof t, "dif-test-fail\t%s\t%d\t%d\t%" PRId64 "\t", kind, line, col, off);
+    dif_put(b, t, n);
+}
+static _Noreturn void dif_try_fail(int line, int col, int64_t off, dif_str msg) {
+    dif_buf b = dif_buf_new();
+    dif_fail_head(&b, "try", line, col, off);
+    dif_esc(&b, msg.p, msg.n);
+    dif_fail(&b);
+}
+static _Noreturn void dif_expect_fail(int line, int col, int64_t off, const char *cond, int n,
+                                      const char *const *texts, const dif_str *vals, const bool *done) {
+    dif_buf b = dif_buf_new();
+    dif_fail_head(&b, "expect", line, col, off);
+    dif_esc(&b, cond, (int64_t)strlen(cond));
+    for (int i = 0; i < n; i++) {
+        bool seen = false;
+        for (int j = 0; j < i; j++) {
+            if (done[j] && strcmp(texts[j], texts[i]) == 0) seen = true;
+        }
+        if (!done[i] || seen) continue;
+        dif_put(&b, "\t", 1);
+        dif_esc(&b, texts[i], (int64_t)strlen(texts[i]));
+        dif_put(&b, "\t", 1);
+        dif_esc(&b, vals[i].p, vals[i].n);
+    }
+    dif_fail(&b);
+}
+"#;
+
 // Design notes (part 2a).
 // - Types come from the checker (`Info`): the type of every expression by span, the
 //   type table, and which methods change `self`. The emitter derives nothing.
@@ -146,13 +207,24 @@ static inline void dif_put_quoted(dif_buf *b, dif_str s) {
 //   assign field by field, and a call with several operands puts them into temporaries
 //   when any of them calls something.
 
-/// C source for a module that passed the checker.
-pub fn emit(file: &str, m: &Module, info: &Info) -> String {
-    if info.part2b {
-        return "#error \"error types, optionals and tests (part 2b) are not supported by the C backend yet\"\n".into();
-    }
-    let mut e = Emitter {
+/// C source for a module that passed the checker; `test` blocks are left out.
+pub fn emit(file: &str, src: &str, m: &Module, info: &Info) -> String {
+    emitter(file, src, info).module(m, false)
+}
+
+/// C source of the test binary: `./prog <k>` runs test number `k` (R18). `main` is not
+/// called, and a module without `main` is fine.
+pub fn emit_tests(file: &str, src: &str, m: &Module, info: &Info) -> String {
+    emitter(file, src, info).module(m, true)
+}
+
+fn emitter<'a>(file: &str, src: &'a str, info: &'a Info) -> Emitter<'a> {
+    Emitter {
         file: c_string(file.as_bytes()),
+        src,
+        ret: Ty::Void,
+        in_test: false,
+        slots: Vec::new(),
         info,
         funcs: HashMap::new(),
         methods: HashMap::new(),
@@ -165,12 +237,17 @@ pub fn emit(file: &str, m: &Module, info: &Info) -> String {
         uid: 0,
         lows: HashMap::new(),
         steady: HashSet::new(),
-    };
-    e.module(m)
+    }
 }
 
 struct Emitter<'a> {
     file: String,
+    src: &'a str,
+    /// Return type of the current function (`void` in a test).
+    ret: Ty,
+    in_test: bool,
+    /// Texts of the operands of the `expect` being lowered, in source order.
+    slots: Vec<String>,
     info: &'a Info,
     funcs: HashMap<&'a str, &'a Func>,
     methods: HashMap<(&'a str, &'a str), &'a Func>,
@@ -293,26 +370,40 @@ fn c_int(v: i64) -> String {
     }
 }
 
+/// Can evaluating `e` have an effect that order matters for (R29)? A call can change a
+/// place; `try` can leave the function, so it must happen before whatever follows it.
 fn has_call(e: &Expr) -> bool {
     match &e.kind {
-        ExprKind::Call(..) | ExprKind::IfExpr(..) => true,
-        ExprKind::Unary(_, x) | ExprKind::Paren(x) | ExprKind::Mut(x) | ExprKind::Field(x, _) => {
-            has_call(x)
-        }
-        ExprKind::Binary(_, l, r, _) => has_call(l) || has_call(r),
+        ExprKind::Call(..) | ExprKind::IfExpr(..) | ExprKind::Try(..) => true,
+        ExprKind::Unary(_, x)
+        | ExprKind::Paren(x)
+        | ExprKind::Mut(x)
+        | ExprKind::Field(x, _)
+        | ExprKind::SomeVal(x)
+        | ExprKind::ErrVal(x)
+        | ExprKind::OkVal(Some(x)) => has_call(x),
+        ExprKind::Binary(_, l, r, _) | ExprKind::Index(l, r) => has_call(l) || has_call(r),
         ExprKind::StructLit(_, inits) => inits.iter().any(|i| has_call(&i.value)),
         ExprKind::Str(segs) => segs
             .iter()
             .any(|s| matches!(s, StrSeg::Expr(x) if has_call(x))),
-        _ => false,
+        // no `_` arm: a new expression kind must be classified here (R29)
+        ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Bool(_)
+        | ExprKind::Ident(_)
+        | ExprKind::SelfRef
+        | ExprKind::NoneVal
+        | ExprKind::OkVal(None)
+        | ExprKind::Missing => false,
     }
 }
 
-/// An operand of a call: its value, or the address of a place (`mut`, a receiver
-/// that is changed).
+/// An operand of a call: its value (with the type of its place, so `T` becomes
+/// `?T`/`T!E` there), or the address of a place (`mut`, a receiver that is changed).
 #[derive(Clone, Copy)]
 enum Arg<'a> {
-    Val(&'a Expr),
+    Val(&'a Expr, Ty),
     Addr(&'a Expr),
 }
 
@@ -320,7 +411,22 @@ impl<'a> Emitter<'a> {
     // ---- types ----
 
     fn ty_of(&self, t: &TypeRef) -> Ty {
-        match t.name.as_str() {
+        self.ty_named(&t.name)
+    }
+
+    /// A written type: `int`, `Point`, `?int`, `int!E`, `?int!E` (`!E` binds weakest).
+    fn ty_named(&self, n: &str) -> Ty {
+        if let Some((t, e)) = n.split_once('!') {
+            let want = (self.ty_named(t), self.ty_named(e));
+            return (self.info.ress.iter().position(|&x| x == want))
+                .map_or(Ty::Err, |i| Ty::Res(i as u32));
+        }
+        if let Some(t) = n.strip_prefix('?') {
+            let want = self.ty_named(t);
+            return (self.info.opts.iter().position(|&x| x == want))
+                .map_or(Ty::Err, |i| Ty::Opt(i as u32));
+        }
+        match n {
             "int" => Ty::Int,
             "bool" => Ty::Bool,
             "str" => Ty::Str,
@@ -337,12 +443,30 @@ impl<'a> Emitter<'a> {
     fn c_ty(&self, t: Ty) -> String {
         match t {
             Ty::Named(id) => format!("d_{}", self.info.types[id as usize].name),
+            Ty::Opt(i) => format!("dif_o{i}"),
+            Ty::Res(i) => format!("dif_r{i}"),
             t => c_ty_prim(t).into(),
         }
     }
 
-    fn tname(&self, id: u32) -> &'a str {
-        &self.info.types[id as usize].name
+    /// Name part of the helpers (`dif_eq_…`, `dif_put_…`, `dif_print_…`) of a type.
+    fn sfx(&self, t: Ty) -> String {
+        match t {
+            Ty::Named(id) => self.info.types[id as usize].name.clone(),
+            Ty::Opt(i) => format!("__o{i}"),
+            Ty::Res(i) => format!("__r{i}"),
+            _ => String::new(),
+        }
+    }
+
+    /// Does the type have helpers (a struct, an enum, `?T`, `T!E`)?
+    fn composite(t: Ty) -> bool {
+        matches!(t, Ty::Named(_) | Ty::Opt(_) | Ty::Res(_))
+    }
+
+    /// `T` of `T!E` is `void`: the C struct has no value member.
+    fn void_res(&self, t: Ty) -> bool {
+        matches!(t, Ty::Res(i) if self.info.ress[i as usize].0 == Ty::Void)
     }
 
     /// The checked type of an expression.
@@ -352,6 +476,24 @@ impl<'a> Emitter<'a> {
             .get(&(e.pos.offset, e.end))
             .copied()
             .unwrap_or(Ty::Err)
+    }
+
+    /// `v` of type `got` where `want` is expected: a `T` becomes `some(T)` or `ok(T)` (R31).
+    fn wrap(&self, want: Ty, got: Ty, v: String) -> String {
+        if want == got || got == Ty::Err {
+            return v;
+        }
+        match want {
+            Ty::Opt(_) => format!("(({}){{.some = true, .v = {v}}})", self.c_ty(want)),
+            Ty::Res(_) => format!("(({}){{.ok = true, .v = {v}}})", self.c_ty(want)),
+            _ => v,
+        }
+    }
+
+    /// `e` at a place of type `want`.
+    fn at(&mut self, want: Ty, e: &'a Expr) -> String {
+        let v = self.expr(e);
+        self.wrap(want, self.ty(e), v)
     }
 
     fn enum_named(&self, name: &str) -> Option<u32> {
@@ -366,74 +508,124 @@ impl<'a> Emitter<'a> {
         }
     }
 
+    /// The types of the fields of variant `k` of enum `eid`.
+    fn variant_fields(&self, eid: u32, k: usize) -> Vec<Ty> {
+        match &self.info.types[eid as usize].body {
+            TypeBody::Enum(vs) => vs[k].1.iter().map(|f| f.0).collect(),
+            TypeBody::Struct(_) => Vec::new(),
+        }
+    }
+
+    fn field_ty(&self, sname: &str, field: &str) -> Ty {
+        let body = self.info.types.iter().find(|d| d.name == sname);
+        match body.map(|d| &d.body) {
+            Some(TypeBody::Struct(fs)) => fs.iter().find(|f| f.0 == field).map_or(Ty::Err, |f| f.1),
+            _ => Ty::Err,
+        }
+    }
+
     // ---- type definitions and their helpers (equality, text) ----
 
+    /// Every type of the module, after the types it contains (a value has a fixed size, R5).
     fn type_defs(&self) -> String {
-        let mut done = vec![false; self.info.types.len()];
+        let mut done = HashSet::new();
         let mut c = String::new();
-        for i in 0..done.len() {
-            self.type_def(i, &mut done, &mut c);
+        let all = (0..self.info.types.len() as u32)
+            .map(Ty::Named)
+            .chain((0..self.info.opts.len() as u32).map(Ty::Opt))
+            .chain((0..self.info.ress.len() as u32).map(Ty::Res));
+        for t in all {
+            self.type_def(t, &mut done, &mut c);
         }
         c
     }
 
-    /// A type after the types it contains (a value has a fixed size, R5).
-    fn type_def(&self, i: usize, done: &mut Vec<bool>, c: &mut String) {
-        if done[i] {
+    fn type_def(&self, t: Ty, done: &mut HashSet<Ty>, c: &mut String) {
+        if !Self::composite(t) || !done.insert(t) {
             return;
         }
-        done[i] = true;
-        let d = &self.info.types[i];
         let members = |fs: &mut dyn Iterator<Item = (Ty, String)>| -> Vec<String> {
             fs.map(|(t, n)| format!("{} {n};", self.c_ty(t))).collect()
         };
-        let contained: Vec<Ty> = match &d.body {
-            TypeBody::Struct(fs) => fs.iter().map(|f| f.1).collect(),
-            TypeBody::Enum(vs) => vs.iter().flat_map(|v| v.1.iter().map(|f| f.0)).collect(),
-        };
-        for t in contained {
-            if let Ty::Named(j) = t {
-                self.type_def(j as usize, done, c);
+        let (contained, body): (Vec<Ty>, String) = match t {
+            Ty::Opt(i) => {
+                let v = self.info.opts[i as usize];
+                (vec![v], format!("bool some; {} v;", self.c_ty(v)))
             }
-        }
-        let body = match &d.body {
-            TypeBody::Struct(fs) => {
-                let mut m = members(&mut fs.iter().map(|f| (f.1, format!("f_{}", f.0))));
-                if m.is_empty() {
-                    m.push("char unused;".into());
-                }
-                m.join(" ")
-            }
-            TypeBody::Enum(vs) => {
-                let arms: Vec<String> = vs
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, v)| !v.1.is_empty())
-                    .map(|(k, v)| {
-                        let m = members(
-                            &mut v.1.iter().enumerate().map(|(j, f)| (f.0, format!("f{j}"))),
-                        );
-                        format!("struct {{ {} }} v{k};", m.join(" "))
-                    })
-                    .collect();
-                if arms.is_empty() {
-                    "int64_t tag;".into()
+            Ty::Res(i) => {
+                let (v, e) = self.info.ress[i as usize];
+                let value = if v == Ty::Void {
+                    String::new()
                 } else {
-                    format!("int64_t tag; union {{ {} }} u;", arms.join(" "))
-                }
+                    format!(" {} v;", self.c_ty(v))
+                };
+                (vec![v, e], format!("bool ok;{value} {} e;", self.c_ty(e)))
             }
+            Ty::Named(i) => {
+                let d = &self.info.types[i as usize];
+                let contained: Vec<Ty> = match &d.body {
+                    TypeBody::Struct(fs) => fs.iter().map(|f| f.1).collect(),
+                    TypeBody::Enum(vs) => vs.iter().flat_map(|v| v.1.iter().map(|f| f.0)).collect(),
+                };
+                let body = match &d.body {
+                    TypeBody::Struct(fs) => {
+                        let mut m = members(&mut fs.iter().map(|f| (f.1, format!("f_{}", f.0))));
+                        if m.is_empty() {
+                            m.push("char unused;".into());
+                        }
+                        m.join(" ")
+                    }
+                    TypeBody::Enum(vs) => {
+                        let arms: Vec<String> = vs
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, v)| !v.1.is_empty())
+                            .map(|(k, v)| {
+                                let m = members(
+                                    &mut v
+                                        .1
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(j, f)| (f.0, format!("f{j}"))),
+                                );
+                                format!("struct {{ {} }} v{k};", m.join(" "))
+                            })
+                            .collect();
+                        if arms.is_empty() {
+                            "int64_t tag;".into()
+                        } else {
+                            format!("int64_t tag; union {{ {} }} u;", arms.join(" "))
+                        }
+                    }
+                };
+                (contained, body)
+            }
+            _ => return,
         };
-        let _ = writeln!(c, "typedef struct {{ {body} }} d_{};", d.name);
+        for u in contained {
+            self.type_def(u, done, c);
+        }
+        let _ = writeln!(c, "typedef struct {{ {body} }} {};", self.c_ty(t));
+    }
+
+    /// Every type that has helpers.
+    fn composites(&self) -> Vec<Ty> {
+        let n = &self.info;
+        (0..n.types.len() as u32)
+            .map(Ty::Named)
+            .chain((0..n.opts.len() as u32).map(Ty::Opt))
+            .chain((0..n.ress.len() as u32).map(Ty::Res))
+            .collect()
     }
 
     /// Prototypes of the helpers of every type.
     fn helper_protos(&self) -> String {
         let mut c = String::new();
-        for d in &self.info.types {
-            let n = &d.name;
-            let _ = writeln!(c, "static inline bool dif_eq_{n}(d_{n} a, d_{n} b);");
-            let _ = writeln!(c, "static inline void dif_put_{n}(dif_buf *b, d_{n} v);");
-            let _ = writeln!(c, "static inline void dif_print_{n}(d_{n} v);");
+        for t in self.composites() {
+            let (n, ct) = (self.sfx(t), self.c_ty(t));
+            let _ = writeln!(c, "static inline bool dif_eq_{n}({ct} a, {ct} b);");
+            let _ = writeln!(c, "static inline void dif_put_{n}(dif_buf *b, {ct} v);");
+            let _ = writeln!(c, "static inline void dif_print_{n}({ct} v);");
         }
         c
     }
@@ -442,7 +634,7 @@ impl<'a> Emitter<'a> {
     fn eq(&self, t: Ty, a: &str, b: &str) -> String {
         match t {
             Ty::Str => format!("dif_eq({a}, {b})"),
-            Ty::Named(id) => format!("dif_eq_{}({a}, {b})", self.tname(id)),
+            t if Self::composite(t) => format!("dif_eq_{}({a}, {b})", self.sfx(t)),
             _ => format!("({a} == {b})"),
         }
     }
@@ -453,7 +645,7 @@ impl<'a> Emitter<'a> {
         match t {
             Ty::Int => format!("dif_put_int({b}, {v});"),
             Ty::Bool => format!("dif_put_bool({b}, {v});"),
-            Ty::Named(id) => format!("dif_put_{}({b}, {v});", self.tname(id)),
+            t if Self::composite(t) => format!("dif_put_{}({b}, {v});", self.sfx(t)),
             _ if quoted => format!("dif_put_quoted({b}, {v});"),
             _ => format!("dif_put_str({b}, {v});"),
         }
@@ -465,69 +657,127 @@ impl<'a> Emitter<'a> {
 
     fn helpers(&self) -> String {
         let mut c = String::new();
-        for d in &self.info.types {
-            let n = &d.name;
-            let _ = writeln!(c, "static inline bool dif_eq_{n}(d_{n} a, d_{n} b) {{");
+        for t in self.composites() {
+            let (n, ct) = (self.sfx(t), self.c_ty(t));
+            let _ = writeln!(c, "static inline bool dif_eq_{n}({ct} a, {ct} b) {{");
             let _ = writeln!(c, "    (void)a;\n    (void)b;");
-            match &d.body {
-                TypeBody::Struct(fs) => {
-                    let all: Vec<String> = fs
-                        .iter()
-                        .map(|(f, t)| self.eq(*t, &format!("a.f_{f}"), &format!("b.f_{f}")))
-                        .collect();
-                    let all = if all.is_empty() {
-                        "true".into()
+            let mut text = String::new();
+            match t {
+                Ty::Opt(i) => {
+                    let v = self.info.opts[i as usize];
+                    let same = self.eq(v, "a.v", "b.v");
+                    let _ = writeln!(c, "    return a.some == b.some && (!a.some || {same});\n}}");
+                    let _ = writeln!(
+                        text,
+                        "    if (!v.some) {{\n        {}",
+                        Self::lit("b", "none")
+                    );
+                    let _ = writeln!(text, "        return;\n    }}");
+                    let _ = writeln!(text, "    {}", Self::lit("b", "some("));
+                    let _ = writeln!(text, "    {}", self.put(v, "b", "v.v", true));
+                    let _ = writeln!(text, "    {}", Self::lit("b", ")"));
+                }
+                Ty::Res(i) => {
+                    let (v, e) = self.info.ress[i as usize];
+                    let err = self.eq(e, "a.e", "b.e");
+                    let same = if v == Ty::Void {
+                        format!("(a.ok || {err})")
                     } else {
-                        all.join(" && ")
+                        format!("(a.ok ? {} : {err})", self.eq(v, "a.v", "b.v"))
                     };
-                    let _ = writeln!(c, "    return {all};\n}}");
-                    let _ = writeln!(c, "static inline void dif_put_{n}(dif_buf *b, d_{n} v) {{");
-                    let _ = writeln!(c, "    (void)v;");
-                    let _ = writeln!(c, "    {}", Self::lit("b", &format!("{n}{{")));
-                    for (k, (f, t)) in fs.iter().enumerate() {
-                        let sep = if k == 0 { "" } else { ", " };
-                        let _ = writeln!(c, "    {}", Self::lit("b", &format!("{sep}{f}: ")));
-                        let _ = writeln!(c, "    {}", self.put(*t, "b", &format!("v.f_{f}"), true));
+                    let _ = writeln!(c, "    return a.ok == b.ok && {same};\n}}");
+                    let _ = writeln!(text, "    if (v.ok) {{");
+                    let _ = writeln!(text, "        {}", Self::lit("b", "ok"));
+                    if v != Ty::Void {
+                        let _ = writeln!(text, "        {}", Self::lit("b", "("));
+                        let _ = writeln!(text, "        {}", self.put(v, "b", "v.v", true));
+                        let _ = writeln!(text, "        {}", Self::lit("b", ")"));
                     }
-                    let _ = writeln!(c, "    {}\n}}", Self::lit("b", "}"));
+                    let _ = writeln!(text, "        return;\n    }}");
+                    let _ = writeln!(text, "    {}", Self::lit("b", "err("));
+                    let _ = writeln!(text, "    {}", self.put(e, "b", "v.e", true));
+                    let _ = writeln!(text, "    {}", Self::lit("b", ")"));
                 }
-                TypeBody::Enum(vs) => {
-                    let _ = writeln!(c, "    if (a.tag != b.tag) return false;");
-                    for (k, v) in vs.iter().enumerate().filter(|(_, v)| !v.1.is_empty()) {
-                        let all: Vec<String> =
-                            v.1.iter()
-                                .enumerate()
-                                .map(|(j, f)| {
-                                    let x = format!("a.u.v{k}.f{j}");
-                                    self.eq(f.0, &x, &format!("b.u.v{k}.f{j}"))
-                                })
+                Ty::Named(id) => {
+                    let d = &self.info.types[id as usize];
+                    match &d.body {
+                        TypeBody::Struct(fs) => {
+                            let all: Vec<String> = fs
+                                .iter()
+                                .map(|(f, t)| self.eq(*t, &format!("a.f_{f}"), &format!("b.f_{f}")))
                                 .collect();
-                        let _ = writeln!(c, "    if (a.tag == {k}) return {};", all.join(" && "));
+                            let all = if all.is_empty() {
+                                "true".into()
+                            } else {
+                                all.join(" && ")
+                            };
+                            let _ = writeln!(c, "    return {all};\n}}");
+                            let _ = writeln!(text, "    {}", Self::lit("b", &format!("{n}{{")));
+                            for (k, (f, t)) in fs.iter().enumerate() {
+                                let sep = if k == 0 { "" } else { ", " };
+                                let _ = writeln!(
+                                    text,
+                                    "    {}",
+                                    Self::lit("b", &format!("{sep}{f}: "))
+                                );
+                                let _ = writeln!(
+                                    text,
+                                    "    {}",
+                                    self.put(*t, "b", &format!("v.f_{f}"), true)
+                                );
+                            }
+                            let _ = writeln!(text, "    {}", Self::lit("b", "}"));
+                        }
+                        TypeBody::Enum(vs) => {
+                            let _ = writeln!(c, "    if (a.tag != b.tag) return false;");
+                            for (k, v) in vs.iter().enumerate().filter(|(_, v)| !v.1.is_empty()) {
+                                let all: Vec<String> =
+                                    v.1.iter()
+                                        .enumerate()
+                                        .map(|(j, f)| {
+                                            let x = format!("a.u.v{k}.f{j}");
+                                            self.eq(f.0, &x, &format!("b.u.v{k}.f{j}"))
+                                        })
+                                        .collect();
+                                let _ = writeln!(
+                                    c,
+                                    "    if (a.tag == {k}) return {};",
+                                    all.join(" && ")
+                                );
+                            }
+                            let _ = writeln!(c, "    return true;\n}}");
+                            for (k, v) in vs.iter().enumerate() {
+                                let _ = writeln!(text, "    if (v.tag == {k}) {{");
+                                let _ = writeln!(
+                                    text,
+                                    "        {}",
+                                    Self::lit("b", &format!("{n}.{}", v.0))
+                                );
+                                if !v.1.is_empty() {
+                                    let _ = writeln!(text, "        {}", Self::lit("b", "("));
+                                }
+                                for (j, f) in v.1.iter().enumerate() {
+                                    let sep = if j == 0 { "" } else { ", " };
+                                    let _ = writeln!(text, "        {}", Self::lit("b", sep));
+                                    let x = format!("v.u.v{k}.f{j}");
+                                    let _ =
+                                        writeln!(text, "        {}", self.put(f.0, "b", &x, true));
+                                }
+                                if !v.1.is_empty() {
+                                    let _ = writeln!(text, "        {}", Self::lit("b", ")"));
+                                }
+                                let _ = writeln!(text, "    }}");
+                            }
+                        }
                     }
-                    let _ = writeln!(c, "    return true;\n}}");
-                    let _ = writeln!(c, "static inline void dif_put_{n}(dif_buf *b, d_{n} v) {{");
-                    let _ = writeln!(c, "    (void)v;");
-                    for (k, v) in vs.iter().enumerate() {
-                        let _ = writeln!(c, "    if (v.tag == {k}) {{");
-                        let _ = writeln!(c, "        {}", Self::lit("b", &format!("{n}.{}", v.0)));
-                        if !v.1.is_empty() {
-                            let _ = writeln!(c, "        {}", Self::lit("b", "("));
-                        }
-                        for (j, f) in v.1.iter().enumerate() {
-                            let sep = if j == 0 { "" } else { ", " };
-                            let _ = writeln!(c, "        {}", Self::lit("b", sep));
-                            let x = format!("v.u.v{k}.f{j}");
-                            let _ = writeln!(c, "        {}", self.put(f.0, "b", &x, true));
-                        }
-                        if !v.1.is_empty() {
-                            let _ = writeln!(c, "        {}", Self::lit("b", ")"));
-                        }
-                        let _ = writeln!(c, "    }}");
-                    }
-                    let _ = writeln!(c, "}}");
                 }
+                _ => {}
             }
-            let _ = writeln!(c, "static inline void dif_print_{n}(d_{n} v) {{");
+            let _ = writeln!(c, "static inline void dif_put_{n}(dif_buf *b, {ct} v) {{");
+            let _ = writeln!(c, "    (void)v;");
+            c.push_str(&text);
+            let _ = writeln!(c, "}}");
+            let _ = writeln!(c, "static inline void dif_print_{n}({ct} v) {{");
             let _ = writeln!(c, "    dif_buf b = dif_buf_new();");
             let _ = writeln!(c, "    dif_put_{n}(&b, v);");
             let _ = writeln!(c, "    dif_print_str(dif_take(&b));\n}}");
@@ -537,7 +787,7 @@ impl<'a> Emitter<'a> {
 
     // ---- module ----
 
-    fn module(&mut self, m: &'a Module) -> String {
+    fn module(&mut self, m: &'a Module, tests: bool) -> String {
         let mut c = format!("static const char *const dif_file = {};\n", self.file);
         c.push_str(RUNTIME);
         for d in &m.decls {
@@ -580,16 +830,20 @@ impl<'a> Emitter<'a> {
             }
         }
         c.push_str(&self.helpers());
+        if tests {
+            c.push_str(TEST_RUNTIME);
+        }
         for d in &m.decls {
             match d {
                 Decl::Const(v) => {
                     // a function, so consts may use each other in any order
                     self.temps.clear();
-                    let value = self.expr(&v.value);
-                    let t = self.c_ty(self.ty_of(&v.ty));
+                    let t = self.ty_of(&v.ty);
+                    let value = self.at(t, &v.value);
                     let _ = writeln!(
                         c,
-                        "static inline {t} d_{}(void) {{\n{}    return {value};\n}}",
+                        "static inline {} d_{}(void) {{\n{}    return {value};\n}}",
+                        self.c_ty(t),
                         v.name,
                         self.temp_decls()
                     );
@@ -598,8 +852,68 @@ impl<'a> Emitter<'a> {
                 _ => {}
             }
         }
-        c.push_str("int main(void) {\n    d_main();\n    return 0;\n}\n");
+        if tests {
+            let mut runs = String::new();
+            for (k, d) in m
+                .decls
+                .iter()
+                .filter_map(|d| match d {
+                    Decl::Test(t) => Some(t),
+                    _ => None,
+                })
+                .enumerate()
+            {
+                c.push_str(&self.test_fn(k, d));
+                let _ = writeln!(runs, "    case {k}: dt_{k}(); break;");
+            }
+            let _ = write!(
+                c,
+                "int main(int argc, char **argv) {{\n    switch (argc > 1 ? atoi(argv[1]) : -1) {{\n{runs}    default: return 4;\n    }}\n    return 0;\n}}\n"
+            );
+            return c;
+        }
+        // `void!E main()`: an error ends the program with `error: <text>` and exit code 1 (R12)
+        let main_ty = self
+            .funcs
+            .get("main")
+            .map_or(Ty::Void, |f| self.ty_of(&f.ret));
+        if let Ty::Res(i) = main_ty {
+            let e = self.info.ress[i as usize].1;
+            let text = self.put(e, "&b", "r.e", false);
+            let _ = write!(
+                c,
+                "int main(void) {{\n    {} r = d_main();\n    if (!r.ok) {{\n        dif_buf b = dif_buf_new();\n        {text}\n        fflush(stdout);\n        fputs(\"error: \", stderr);\n        fwrite(b.p, 1, (size_t)b.n, stderr);\n        fputc('\\n', stderr);\n        return 1;\n    }}\n    return 0;\n}}\n",
+                self.c_ty(main_ty)
+            );
+        } else {
+            c.push_str("int main(void) {\n    d_main();\n    return 0;\n}\n");
+        }
         c
+    }
+
+    /// One `test` block as `static void dt_<k>(void)`.
+    fn test_fn(&mut self, k: usize, t: &'a TestDecl) -> String {
+        self.start_fn(Ty::Void, true);
+        self.block_body(&t.body, 1);
+        let mut c = format!("static void dt_{k}(void) {{\n");
+        c.push_str(&self.temp_decls());
+        c.push_str(&self.out);
+        c.push_str("}\n");
+        c
+    }
+
+    fn start_fn(&mut self, ret: Ty, in_test: bool) {
+        self.temps.clear();
+        self.out.clear();
+        self.derefs.clear();
+        self.lows.clear();
+        self.steady.clear();
+        self.ret = ret;
+        self.in_test = in_test;
+    }
+
+    fn tname(&self, id: u32) -> &'a str {
+        &self.info.types[id as usize].name
     }
 
     fn cname(f: &Func) -> String {
@@ -657,10 +971,8 @@ impl<'a> Emitter<'a> {
     }
 
     fn func(&mut self, f: &'a Func) -> String {
-        self.temps.clear();
-        self.out.clear();
-        self.derefs.clear();
-        self.lows.clear();
+        let ret = self.ty_of(&f.ret);
+        self.start_fn(ret, false);
         self.steady = (f.params.iter())
             .filter(|p| p.mut_pos.is_none() && self.ty_of(&p.ty) == Ty::Int)
             .filter(|p| !changes(&f.body.stmts, &p.name))
@@ -682,7 +994,10 @@ impl<'a> Emitter<'a> {
         let mut c = format!("{} {{\n", self.header(f));
         c.push_str(&self.temp_decls());
         c.push_str(&self.out);
-        if f.ret.name != "void" {
+        if self.void_res(ret) {
+            // a `void!E` function that reaches its end succeeded
+            let _ = writeln!(c, "    return (({}){{.ok = true}});", self.c_ty(ret));
+        } else if ret != Ty::Void {
             c.push_str("    __builtin_unreachable();\n");
         }
         c.push_str("}\n");
@@ -775,8 +1090,9 @@ impl<'a> Emitter<'a> {
         }
         match s {
             Stmt::Var(v) => {
-                let t = self.c_ty(self.ty_of(&v.ty));
-                let value = self.expr(&v.value);
+                let ty = self.ty_of(&v.ty);
+                let value = self.at(ty, &v.value);
+                let t = self.c_ty(ty);
                 self.line(d, &format!("{t} d_{} = {value};", v.name));
                 self.line(d, &format!("(void)d_{};", v.name));
             }
@@ -788,7 +1104,8 @@ impl<'a> Emitter<'a> {
             } => {
                 let target = self.expr(place);
                 let v = if *op == "=" {
-                    self.expr(value)
+                    let t = self.ty(place);
+                    self.at(t, value)
                 } else {
                     let t = self.ty(place);
                     let rhs = self.expr(value);
@@ -828,14 +1145,24 @@ impl<'a> Emitter<'a> {
             } => self.switch(subject, cases, default.as_ref().map(|d| &d.0), d),
             Stmt::Break(_) => self.line(d, "break;"),
             Stmt::Continue(_) => self.line(d, "continue;"),
+            Stmt::Return(None, _) if self.void_res(self.ret) => {
+                let r = self.c_ty(self.ret);
+                self.line(d, &format!("return (({r}){{.ok = true}});"));
+            }
             Stmt::Return(None, _) => self.line(d, "return;"),
             Stmt::Return(Some(e), _) => {
-                let v = self.expr(e);
+                let v = self.at(self.ret, e);
                 self.line(d, &format!("return {v};"));
             }
             Stmt::Call(e) => {
                 let v = self.expr(e);
-                self.line(d, &format!("{v};"));
+                // `try f()` may produce a value that is not used
+                let cast = if matches!(e.kind, ExprKind::Try(..)) {
+                    "(void)"
+                } else {
+                    ""
+                };
+                self.line(d, &format!("{cast}{v};"));
             }
             Stmt::Discard(e, _) => {
                 let v = self.expr(e);
@@ -881,6 +1208,17 @@ impl<'a> Emitter<'a> {
                     }
                 }
             }
+            if let [Pattern::Result {
+                kind,
+                bind: Some(Some(b)),
+                ..
+            }] = case.pats.as_slice()
+            {
+                let member = if *kind == "err" { "e" } else { "v" };
+                let t = self.c_ty(self.ty_of(&b.ty));
+                self.line(d + 2, &format!("{t} d_{} = {s}.{member};", b.name));
+                self.line(d + 2, &format!("(void)d_{};", b.name));
+            }
             self.block_body(&case.body, d + 2);
             self.line(d + 1, "}");
         }
@@ -905,7 +1243,12 @@ impl<'a> Emitter<'a> {
                 let eid = self.enum_named(ty).unwrap_or(0);
                 format!("{s}.tag == {}", self.variant_index(eid, name))
             }
-            Pattern::Result { .. } => "0".into(),
+            Pattern::Result { kind, .. } => match *kind {
+                "ok" => format!("{s}.ok"),
+                "err" => format!("!{s}.ok"),
+                "some" => format!("{s}.some"),
+                _ => format!("!{s}.some"),
+            },
         }
     }
 
@@ -967,10 +1310,13 @@ impl<'a> Emitter<'a> {
                 if *op == "&&" || *op == "||" {
                     return format!("({} {op} {})", self.expr(l), self.expr(r));
                 }
+                if *op == "??" {
+                    return self.coalesce(e, l, r);
+                }
                 if *op == "-" && t == Ty::Int && self.safe_sub(l, r) {
                     return format!("({} - {})", self.expr(l), self.expr(r));
                 }
-                let (pre, vals) = self.ordered(&[Arg::Val(l), Arg::Val(r)]);
+                let (pre, vals) = self.ordered(&[Arg::Val(l, t), Arg::Val(r, self.ty(r))]);
                 let [a, b] = <[String; 2]>::try_from(vals).unwrap_or_default();
                 let v = self.op(op, t, a, b, *opos);
                 if pre.is_empty() {
@@ -991,13 +1337,165 @@ impl<'a> Emitter<'a> {
             ExprKind::IfExpr(branches, last) => self.if_expr(self.ty(e), branches, last),
             ExprKind::Mut(x) => format!("(&{})", self.expr(x)),
             ExprKind::Float(_) | ExprKind::Index(..) | ExprKind::Missing => "0".into(),
-            // part 2b: `emit` stops with #error before any of these is reached
-            ExprKind::NoneVal
-            | ExprKind::SomeVal(_)
-            | ExprKind::ErrVal(_)
-            | ExprKind::OkVal(_)
-            | ExprKind::Try(..) => "0".into(),
+            ExprKind::NoneVal => format!("(({}){{0}})", self.c_ty(self.ty(e))),
+            ExprKind::SomeVal(x) => match self.ty(e) {
+                t @ Ty::Opt(i) => {
+                    let v = self.at(self.info.opts[i as usize], x);
+                    format!("(({}){{.some = true, .v = {v}}})", self.c_ty(t))
+                }
+                _ => "0".into(),
+            },
+            ExprKind::ErrVal(x) => match self.ty(e) {
+                t @ Ty::Res(i) => {
+                    let v = self.at(self.info.ress[i as usize].1, x);
+                    format!("(({}){{.e = {v}}})", self.c_ty(t))
+                }
+                _ => "0".into(),
+            },
+            ExprKind::Try(x, or) => self.try_expr(e, x, or.as_ref().map(|o| &*o.1)),
+            // only a pattern (R12): the checker rejects it as a value
+            ExprKind::OkVal(_) => "0".into(),
         }
+    }
+
+    /// `a ?? b`: `b` only when `a` has no value (R12).
+    fn coalesce(&mut self, e: &'a Expr, l: &'a Expr, r: &'a Expr) -> String {
+        let (lt, t) = (self.ty(l), self.ty(e));
+        let y = format!("y{}", self.uid);
+        self.uid += 1;
+        let has = if matches!(lt, Ty::Res(_)) {
+            "ok"
+        } else {
+            "some"
+        };
+        let (v, alt) = (self.expr(l), self.at(t, r));
+        format!(
+            "({{ {} {y} = {v}; {y}.{has} ? {y}.v : {alt}; }})",
+            self.c_ty(lt)
+        )
+    }
+
+    /// `try x [or alt]`: the value, or an early return of the failure (R12). In a
+    /// test a failure ends the test (R18).
+    fn try_expr(&mut self, e: &'a Expr, x: &'a Expr, or: Option<&'a Expr>) -> String {
+        let xt = self.ty(x);
+        let y = format!("y{}", self.uid);
+        self.uid += 1;
+        let (v, res) = (self.expr(x), matches!(xt, Ty::Res(_)));
+        let (ok, p) = (if res { "ok" } else { "some" }, e.pos);
+        let leave = if self.in_test {
+            let text = match xt {
+                Ty::Res(i) => {
+                    let put =
+                        self.put(self.info.ress[i as usize].1, "&b", &format!("{y}.e"), false);
+                    format!("dif_buf b = dif_buf_new(); {put}")
+                }
+                _ => "dif_buf b = dif_buf_new(); dif_put(&b, \"none\", 4);".to_string(),
+            };
+            format!(
+                "{{ {text} dif_try_fail({}, {}, {}, dif_take(&b)); }}",
+                p.line, p.col, p.offset
+            )
+        } else {
+            let r = self.c_ty(self.ret);
+            match (self.ret, or) {
+                (Ty::Res(i), Some(alt)) => {
+                    let alt = self.at(self.info.ress[i as usize].1, alt);
+                    format!("return (({r}){{.e = {alt}}});")
+                }
+                (Ty::Res(_), None) => format!("return (({r}){{.e = {y}.e}});"),
+                _ => format!("return (({r}){{0}});"),
+            }
+        };
+        let value = if self.ty(e) == Ty::Void {
+            "(void)0;".to_string()
+        } else {
+            format!("{y}.v;")
+        };
+        format!(
+            "({{ {} {y} = {v}; if (!{y}.{ok}) {leave} {value} }})",
+            self.c_ty(xt)
+        )
+    }
+
+    /// `expect(cond)` (R18): the condition is read as a tree; every operand that is not a
+    /// literal is evaluated once and its text recorded, so a failure can show it.
+    fn expect(&mut self, e: &'a Expr, cond: &'a Expr) -> String {
+        let id = self.uid;
+        self.uid += 1;
+        let saved = std::mem::take(&mut self.slots);
+        let c = self.cond_tree(cond, id);
+        let texts = std::mem::replace(&mut self.slots, saved);
+        let n = texts.len() + 1;
+        let list: Vec<String> = texts.iter().map(|t| c_string(t.as_bytes())).collect();
+        let list = if list.is_empty() {
+            "\"\"".into()
+        } else {
+            list.join(", ")
+        };
+        let text = c_string(self.text_of(cond).as_bytes());
+        let p = e.pos;
+        format!(
+            "({{ dif_str xv{id}[{n}]; bool xd{id}[{n}] = {{false}}; const char *const xt{id}[{n}] = {{{list}}}; if (!{c}) dif_expect_fail({}, {}, {}, {text}, {}, xt{id}, xv{id}, xd{id}); }})",
+            p.line,
+            p.col,
+            p.offset,
+            texts.len()
+        )
+    }
+
+    /// Source text of an expression, line breaks as spaces.
+    fn text_of(&self, e: &Expr) -> String {
+        let s = self
+            .src
+            .get(e.pos.offset as usize..e.end as usize)
+            .unwrap_or("");
+        s.replace('\n', " ")
+    }
+
+    /// The boolean skeleton of an `expect` condition: `&&`, `||`, `!`, parentheses and
+    /// comparisons; anything else is a leaf.
+    fn cond_tree(&mut self, e: &'a Expr, id: usize) -> String {
+        match &e.kind {
+            ExprKind::Paren(x) => self.cond_tree(x, id),
+            ExprKind::Unary("!", x) => format!("(!{})", self.cond_tree(x, id)),
+            ExprKind::Binary(op @ ("&&" | "||"), l, r, _) => {
+                format!("({} {op} {})", self.cond_tree(l, id), self.cond_tree(r, id))
+            }
+            ExprKind::Binary(op @ ("==" | "!=" | "<" | "<=" | ">" | ">="), l, r, opos) => {
+                let t = self.ty(l);
+                let (a, b) = (format!("a{}", self.uid), format!("b{}", self.uid));
+                self.uid += 1;
+                let (la, va) = self.operand(l, &a, id);
+                let (lb, vb) = self.operand(r, &b, id);
+                let v = self.op(op, t, va, vb, *opos);
+                format!("({{ {la} {lb} {v}; }})")
+            }
+            _ => {
+                let y = format!("a{}", self.uid);
+                self.uid += 1;
+                let (decl, v) = self.operand(e, &y, id);
+                format!("({{ {decl} {v}; }})")
+            }
+        }
+    }
+
+    /// An operand of a comparison: statements that evaluate it once and record its text,
+    /// and the name of the value. Literals are used as they are.
+    fn operand(&mut self, e: &'a Expr, name: &str, id: usize) -> (String, String) {
+        if is_literal(e) {
+            return (String::new(), self.expr(e));
+        }
+        let t = self.ty(e);
+        let k = self.slots.len();
+        self.slots.push(self.text_of(e));
+        let v = self.expr(e);
+        let put = self.put(t, "&bb", name, true);
+        let decl = format!(
+            "{} {name} = {v}; {{ dif_buf bb = dif_buf_new(); {put} xv{id}[{k}] = dif_take(&bb); }} xd{id}[{k}] = true;",
+            self.c_ty(t)
+        );
+        (decl, name.to_string())
     }
 
     /// `if` as a value: only the chosen branch runs, its statements first.
@@ -1016,20 +1514,20 @@ impl<'a> Emitter<'a> {
             let c = self.expr(c);
             let kw = if k == 0 { "if" } else { "else if" };
             let _ = writeln!(self.out, "{kw} {} {{", paren(&c));
-            self.value_block(vb, &r);
+            self.value_block(vb, &r, t);
         }
         let _ = writeln!(self.out, "else {{");
-        self.value_block(last, &r);
+        self.value_block(last, &r, t);
         let _ = write!(self.out, "{r}; }})");
         self.nested -= 1;
         std::mem::replace(&mut self.out, saved)
     }
 
-    fn value_block(&mut self, vb: &'a ValueBlock, r: &str) {
+    fn value_block(&mut self, vb: &'a ValueBlock, r: &str, t: Ty) {
         for s in &vb.stmts {
             self.stmt(s, 1);
         }
-        let v = self.expr(&vb.value);
+        let v = self.at(t, &vb.value);
         let _ = writeln!(self.out, "{r} = {v};\n}}");
     }
 
@@ -1040,13 +1538,13 @@ impl<'a> Emitter<'a> {
         self.uid += 1;
         let mut c = format!("({{ d_{name} {s} = {{0}}; ");
         for i in inits {
-            let v = self.expr(&i.value);
+            let v = self.at(self.field_ty(name, &i.name), &i.value);
             let _ = write!(c, "{s}.f_{} = {v}; ", i.name);
         }
         if let Some(decl) = self.structs.get(name) {
             for f in &decl.fields {
                 if let (Some(d), false) = (&f.default, inits.iter().any(|i| i.name == f.name)) {
-                    let v = self.expr(d);
+                    let v = self.at(self.field_ty(name, &f.name), d);
                     let _ = write!(c, "{s}.f_{} = {v}; ", f.name);
                 }
             }
@@ -1065,8 +1563,9 @@ impl<'a> Emitter<'a> {
         let s = format!("l{}", self.uid);
         self.uid += 1;
         let mut c = format!("({{ {t} {s} = {{0}}; {s}.tag = {k}; ");
+        let fields = self.variant_fields(eid, k);
         for (j, a) in args.iter().enumerate() {
-            let v = self.expr(a);
+            let v = self.at(fields[j], a);
             let _ = write!(c, "{s}.u.v{k}.f{j} = {v}; ");
         }
         let _ = write!(c, "{s}; }})");
@@ -1078,18 +1577,20 @@ impl<'a> Emitter<'a> {
     fn ordered(&mut self, items: &[Arg<'a>]) -> (String, Vec<String>) {
         let calls = items
             .iter()
-            .any(|a| matches!(a, Arg::Val(e) if has_call(e)));
+            .any(|a| matches!(a, Arg::Val(e, _) if has_call(e)));
         let mut pre = String::new();
         let mut vals = Vec::new();
         for a in items {
             match *a {
                 Arg::Addr(e) => vals.push(format!("(&{})", self.expr(e))),
-                Arg::Val(e) => {
-                    let v = self.expr(e);
-                    let plain = matches!(e.kind, ExprKind::Int(_) | ExprKind::Bool(_))
-                        || self.info.folded.contains_key(&(e.pos.offset, e.end));
+                Arg::Val(e, want) => {
+                    let v = self.at(want, e);
+                    let plain = matches!(
+                        e.kind,
+                        ExprKind::Int(_) | ExprKind::Bool(_) | ExprKind::NoneVal
+                    ) || self.info.folded.contains_key(&(e.pos.offset, e.end));
                     if calls && items.len() >= 2 && !plain {
-                        let t = self.temp(self.c_ty(self.ty(e)), "t");
+                        let t = self.temp(self.c_ty(want), "t");
                         let _ = write!(pre, "{t} = {v}, ");
                         vals.push(t);
                     } else {
@@ -1105,8 +1606,10 @@ impl<'a> Emitter<'a> {
         let at = format!("{}, {}", p.line, p.col);
         match (op, t) {
             ("+", Ty::Str) => format!("dif_cat({a}, {b})"),
-            ("==", Ty::Str | Ty::Named(_)) => self.eq(t, &a, &b),
-            ("!=", Ty::Str | Ty::Named(_)) => format!("(!{})", self.eq(t, &a, &b)),
+            ("==", Ty::Str) => self.eq(t, &a, &b),
+            ("!=", Ty::Str) => format!("(!{})", self.eq(t, &a, &b)),
+            ("==", t) if Self::composite(t) => self.eq(t, &a, &b),
+            ("!=", t) if Self::composite(t) => format!("(!{})", self.eq(t, &a, &b)),
             ("<" | "<=" | ">" | ">=", Ty::Str) => format!("(dif_cmp({a}, {b}) {op} 0)"),
             ("+", _) => format!("dif_add({a}, {b}, {at})"),
             ("-", _) => format!("dif_sub({a}, {b}, {at})"),
@@ -1139,15 +1642,16 @@ impl<'a> Emitter<'a> {
                 match t {
                     Ty::Int => format!("dif_print_int({v})"),
                     Ty::Bool => format!("dif_print_bool({v})"),
-                    Ty::Named(id) => format!("dif_print_{}({v})", self.tname(id)),
+                    t if Self::composite(t) => format!("dif_print_{}({v})", self.sfx(t)),
                     _ => format!("dif_print_str({v})"),
                 }
             }
+            ExprKind::Ident(name) if name == "expect" && self.in_test => self.expect(e, &args[0]),
             ExprKind::Ident(name) => {
                 let Some(&func) = self.funcs.get(name.as_str()) else {
                     return "0".into();
                 };
-                let items = Self::args_of(func, args, None);
+                let items = self.args_of(func, args, None);
                 self.apply(&Self::cname(func), &items)
             }
             _ => "0".into(),
@@ -1164,19 +1668,19 @@ impl<'a> Emitter<'a> {
         let recv = if self.changes_self(func) {
             Arg::Addr(base)
         } else {
-            Arg::Val(base)
+            Arg::Val(base, self.ty(base))
         };
-        let items = Self::args_of(func, args, Some(recv));
+        let items = self.args_of(func, args, Some(recv));
         self.apply(&Self::cname(func), &items)
     }
 
     /// The operands of a call: `mut` parameters take the place after `mut`.
-    fn args_of(func: &Func, args: &'a [Expr], recv: Option<Arg<'a>>) -> Vec<Arg<'a>> {
+    fn args_of(&self, func: &Func, args: &'a [Expr], recv: Option<Arg<'a>>) -> Vec<Arg<'a>> {
         let mut items: Vec<Arg<'a>> = recv.into_iter().collect();
         for (p, a) in func.params.iter().zip(args) {
             items.push(match (&a.kind, p.mut_pos) {
                 (ExprKind::Mut(x), Some(_)) => Arg::Addr(x),
-                _ => Arg::Val(a),
+                _ => Arg::Val(a, self.ty_of(&p.ty)),
             });
         }
         items

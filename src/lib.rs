@@ -38,7 +38,7 @@ pub fn compile(file: &str, bytes: &[u8]) -> Result<String, Vec<Diag>> {
         if let Some(d) = checker::main_diag(&module) {
             return Err(vec![d]);
         }
-        Ok(emit_c::emit(file, &module, &info))
+        Ok(emit_c::emit(file, src, &module, &info))
     })
 }
 
@@ -67,5 +67,40 @@ fn on_big_stack<T: Send>(f: impl FnOnce() -> T + Send) -> T {
             .expect("cannot start the compiler thread")
             .join()
             .unwrap_or_else(|e| std::panic::resume_unwind(e))
+    })
+}
+
+/// One `test` block of a module, in the order of the C test binary (R18).
+pub struct TestMeta {
+    pub name: String,
+    /// Line of the word `test`.
+    pub line: u32,
+    pub panics: Option<String>,
+}
+
+/// C source of the test binary of a module and its tests. Unlike `compile` it does not
+/// need `void main()`; a `main` that is there must still be well formed (R1).
+pub fn compile_tests(file: &str, bytes: &[u8]) -> Result<(String, Vec<TestMeta>), Vec<Diag>> {
+    let src = lexer::decode(bytes).map_err(|d| vec![d])?;
+    on_big_stack(|| {
+        let (module, info) = front(file, src)?;
+        let has_main = module
+            .decls
+            .iter()
+            .any(|d| matches!(d, ast::Decl::Func(f) if f.name == "main" && f.recv.is_none()));
+        if let Some(d) = checker::main_diag(&module).filter(|_| has_main) {
+            return Err(vec![d]);
+        }
+        let tests = (module.decls.iter())
+            .filter_map(|d| match d {
+                ast::Decl::Test(t) => Some(TestMeta {
+                    name: t.name.clone(),
+                    line: t.pos.line as u32,
+                    panics: t.panics.as_ref().map(|p| p.0.clone()),
+                }),
+                _ => None,
+            })
+            .collect();
+        Ok((emit_c::emit_tests(file, src, &module, &info), tests))
     })
 }
