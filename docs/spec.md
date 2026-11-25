@@ -1,8 +1,8 @@
 # difficulty — Spezifikation
 
-Stand: 2026-11-23 · Version: v0, Teil 1 („Hallo, nativ“) und Teil 2a (Daten) · Begründungen und Fahrplan: [PLAN.md](../PLAN.md)
+Stand: 2026-11-23 · Version: v0, Teil 1 („Hallo, nativ“), Teil 2a (Daten) und Teil 2b (Fehler und Tests) · Begründungen und Fahrplan: [PLAN.md](../PLAN.md)
 
-Diese Spezifikation ist nach den Regeln R1–R31 gegliedert. Ausgearbeitet sind R1–R11, R13–R15, R28 (teilweise) und R29. Alle übrigen stehen mit ihrem vollständigen Wortlaut da und werden mit den nächsten Teilen ausgearbeitet.
+Diese Spezifikation ist nach den Regeln R1–R31 gegliedert. Ausgearbeitet sind R1–R15, R18, R28 (teilweise) und R29. Alle übrigen stehen mit ihrem vollständigen Wortlaut da und werden mit den nächsten Teilen ausgearbeitet.
 
 ## 0. Wie diese Spezifikation zu lesen ist
 
@@ -48,12 +48,14 @@ fib.dif:6:5: error[R13]: result of `fib(3)` is never used
 
 ### 0.2 Beispiele
 
-Beispiele gibt es in vier Arten, die `dif test` als Doc-Tests ausführt:
+Beispiele gibt es in sechs Arten, die `dif test` als Doc-Tests ausführt:
 
 - ` ```dif ` — ein vollständiges, gültiges Modul.
 - ` ```dif snippet ` — Anweisungen, die in `void main() { … }` eingebettet werden: Zeile 1 des Ausschnitts ist Zeile 2 der Datei, um 4 Leerzeichen eingerückt. Positionen in Meldungen beziehen sich auf die Datei `main.dif`.
 - ` ```dif error R4 ` — ein Modul, das genau diese Diagnose liefern muss (und keine andere). Geprüft wird wie mit `dif check`; ein fehlendes `main` zählt dort nicht.
 - ` ```dif panic "message" ` — ein Ausschnitt wie bei `snippet`, der mit genau dieser Meldung abbrechen muss.
+- ` ```dif fails "text" ` — ein Modul, dessen `void!E main()` mit einem Fehler endet, dessen Textform (R28) genau `text` ist: Exit-Code 1, stderr `error: text`.
+- ` ```dif test ` — ein Modul mit `test`-Blöcken (R18); `dif test main.dif` muss genau die Ausgabe des folgenden einfachen Blocks liefern.
 
 ### 0.3 Abbruch
 
@@ -63,7 +65,7 @@ Programmierfehler (R14) beenden das Programm sofort mit
 panic: <message> (<file>:<line>:<column>)
 ```
 
-auf stderr und Exit-Code 2. Ein Fehler, der aus `void!E main()` herauskommt, endet mit Exit-Code 1.
+auf stderr und Exit-Code 2. Ein Fehler, der aus `void!E main()` herauskommt, endet mit Exit-Code 1 (Format in R12).
 
 ---
 
@@ -170,17 +172,18 @@ Drei Korrekturen gegenüber C, jeweils ein Fehler mit Hinweis statt stiller Bede
 - **Keine Vergleichsketten:** `a < b < c` ist `S2`, Hinweis `write a < b && b < c`.
 - **`&&` und `||` nie gemischt ohne Klammern:** `a && b || c` ist `S3`, Hinweis `add parentheses: (a && b) || c`.
 
-`or` gehört zu einem vorangehenden `try` (`try x or E.V(…)`, Teil 2). Klammern um einen Ausdruck sind immer erlaubt; `dif fmt` entfernt sie um Bedingungen.
+`or` gehört zu einem vorangehenden `try` (`try x or E.V(…)`, R12). Klammern um einen Ausdruck sind immer erlaubt; `dif fmt` entfernt sie um Bedingungen.
 
 ```ebnf
 expr     = binary ;
 binary   = unary { binop unary } ;          (* geordnet nach der Tabelle *)
-unary    = { "-" | "!" | "~" | "try" } postfix ;
+unary    = { "-" | "!" | "~" } ( try_expr | postfix ) ;
+try_expr = "try" postfix [ "or" postfix ] ;          (* R12 *)
 postfix  = primary { "(" [ args ] ")" | "[" expr "]" | "." IDENT } ;
 args     = arg { "," arg } [ "," ] ;
 arg      = [ "mut" ] expr ;                          (* nach mut steht ein Ort (place, R3); R6 *)
 primary  = INT | FLOAT | STRING | "true" | "false" | IDENT | "self" | "(" expr ")"
-         | struct_lit | variant_val | if_expr ;      (* R5, R7, R15 *)
+         | struct_lit | variant_val | if_expr | "none" | err_val ;   (* R5, R7, R15, R12 *)
 ```
 
 Ausdrücke und Argumente werden **von links nach rechts** ausgewertet (R29).
@@ -195,7 +198,7 @@ Ausdrücke und Argumente werden **von links nach rechts** ausgewertet (R29).
 
 ```ebnf
 module   = { NL } [ decl { NL { NL } decl } { NL } ] ;
-decl     = const_decl | func_decl | struct_decl | enum_decl | method_decl ;   (* test, use, extern folgen *)
+decl     = const_decl | func_decl | struct_decl | enum_decl | method_decl | test_decl ;   (* use, extern folgen *)
 ```
 
 - Eine Anweisung auf oberster Ebene ist `R1`, Hinweis `move it into a function, e.g. void main() { … }`.
@@ -222,14 +225,15 @@ main.dif:1:1: error[R1]: statement outside a function
 **Regel.** Jede Deklaration nennt ihren Typ vorn: Variablen, Parameter, Felder, Schleifen- und `case`-Variablen.
 
 ```ebnf
-type       = "int" | "bool" | "str" | "void" | IDENT ;   (* IDENT: struct oder enum des Moduls; weitere Typen folgen *)
+type       = [ "?" ] base_type [ "!" IDENT ] ;         (* ?T und T!E: R12 *)
+base_type  = "int" | "bool" | "str" | "void" | IDENT ;   (* IDENT: struct oder enum des Moduls; weitere Typen folgen *)
 func_decl  = type IDENT "(" [ params ] ")" block ;
 params     = param { "," param } [ "," ] ;
 param      = [ "mut" ] type IDENT ;                   (* mut: R6 *)
 var_decl   = [ "const" ] type IDENT "=" expr ;
 ```
 
-- `void` steht nur als Rückgabetyp.
+- `void` und `void!E` stehen nur als Rückgabetyp.
 - Eine Variable wird bei der Deklaration immer initialisiert; `int n` ohne `=` ist `R2`, Hinweis `give it a value: int n = 0`.
 - Schreibweisen aus anderen Sprachen: `var x = 1`, `let x = 1`, `auto x = 1` sind `R2`, Hinweis mit dem abgeleiteten Typ (`int x = 1`, per `dif fix`). `def`, `fn`, `function`, `func` vor einer Funktion sind `R2`, Hinweis `the return type comes first: int add(int a, int b)`.
 - `name: T` in einer Parameterliste und `-> T` nach ihr sind `R2`, Hinweis mit der ganzen Kopfzeile in Typ-vorn-Schreibweise (`int add(int a, int b) {`). `void main(void)` ist `S1`, Hinweis `void main() {`.
@@ -272,7 +276,7 @@ assign      = place assign_op expr ;
 assign_op   = "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
 place       = ( IDENT | "self" ) { "." IDENT | "[" expr "]" } ;   (* self: R7 *)
 return_stmt = "return" [ expr ] ;
-call_stmt   = postfix ;                      (* muss mit einem Aufruf enden *)
+call_stmt   = try_expr | postfix ;         (* postfix muss mit einem Aufruf enden; try_expr: R12 *)
 discard     = "_" "=" expr ;
 ```
 
@@ -709,13 +713,15 @@ main.dif:3:11: error[R9]: condition is int, not bool
 switch_stmt = "switch" expr "{" NL { NL } { case } [ default ] "}" ;
 case        = "case" pattern { "," pattern } ":" NL { stmt NL { NL } } ;
 default     = "default" ":" NL { stmt NL { NL } } ;
-pattern     = [ "-" ] INT | STRING | IDENT | IDENT "." IDENT [ "(" binding { "," binding } ")" ] ;
+pattern     = [ "-" ] INT | STRING | IDENT | IDENT "." IDENT [ "(" binding { "," binding } ")" ]
+            | result_pat ;
+result_pat  = "ok" [ "(" binding ")" ] | "err" [ "(" binding ")" ] | "some" [ "(" binding ")" ] | "none" ;
 binding     = type IDENT | "_" ;
 ```
 
 Teil 2a legt fest:
 
-- `switch` geht über `int`, `str` und `enum`. Über einem anderen Typ ist es `R10`, Meldung `` cannot switch over bool `` (bzw. den Typ), für `bool` mit Hinweis `use if`.
+- `switch` geht über `int`, `str`, `enum` und (Teil 2b) `T!E` und `?T`. Über einem anderen Typ ist es `R10`, Meldung `` cannot switch over bool `` (bzw. den Typ), für `bool` mit Hinweis `use if`.
 - Nach `{` und nach jedem `case …:` und `default:` folgt ein Zeilenumbruch. Eine Anweisung in derselben Zeile (`case 0: return 1`, `switch s { … }` in einer Zeile) ist `R3`, Meldung `the statements of a case start on the next line`.
 - Ein `case` nennt einen oder mehrere Werte. Seine Anweisungen stehen in den folgenden Zeilen bis zum nächsten `case`, `default` oder `}`; sie bilden einen eigenen Block. Es gibt kein Durchfallen; ein `case` ohne Anweisungen tut nichts.
 - **Werte über `int` und `str`:** Literale oder `const`-Namen dieses Typs. Ein Wert anderen Typs ist `R8`, ein unbekannter Name `R4`.
@@ -725,6 +731,12 @@ Teil 2a legt fest:
 - `default` steht als letzter Zweig. Ein Wert, der schon in einem früheren `case` steht, ist `R10` mit der Position des ersten.
 - `break` steht nie direkt in einem `switch` (R11); `continue` und `return` dürfen dort stehen.
 - Endet jeder Zweig eines vollständigen `switch` mit `return`, endet auch der `switch` dort (für „`return` auf jedem Weg“).
+
+Teil 2b ergänzt `switch` über `T!E` und `?T` (Beispiele bei R12):
+
+- `switch` geht auch über `T!E` (Muster `ok`, `err`) und `?T` (Muster `some`, `none`). Ein Muster der falschen Art (`case some:` über `T!E`, `case ok:` über `int`) ist `R8`, Meldung `` `some` needs a switch over ?T, found int!AgeErr ``.
+- Mit Klammern bindet das Muster den Wert: `case ok(int n):`, `case err(AgeErr e):`, `case some(int x):`; Typ und Name wie bei Varianten, `_` überspringt. Ohne Klammern passt es auf jeden Wert (`case err:`). Ein falscher Typ ist `R8`, Meldung `` `ok` holds an int `` (bzw. `err` holds an AgeErr, `some` holds an int), Hinweis mit dem richtigen Muster (`case ok(int s):`), an dem Typ im Muster. `ok` bei `void!E` hat keinen Wert, `none` nie: Klammern dort sind `R10`, Meldung `` `ok` has no value in void!E `` (bzw. `` `none` has no value ``), Hinweis `case ok:` (bzw. `case none:`).
+- Vollständig ist ein `switch` über `T!E`, wenn `ok` und `err` behandelt sind, über `?T`, wenn `some` und `none` behandelt sind, sonst steht ein `default`. Sonst `R10` am `switch`, Meldung `switch does not handle none` (bzw. `err`; fehlen beide: `ok, err` bzw. `some, none`), Hinweis `add case none: …, or default:`. Doppelte Muster und ein überflüssiges `default` sind `R10` wie bei `enum`.
 
 ```dif
 enum Shape {
@@ -825,7 +837,257 @@ main.dif:2:5: error[R11]: C-style for loop
 
 **Regel.** Kann eine Funktion scheitern, steht es im Rückgabetyp: `T!E` heißt Wert oder `err(e)`, `?T` heißt Wert oder `none`. Erfolg gibt man einfach zurück. `try x` reicht einen Fehler gleichen Typs weiter; `try x or E.V(…)` übersetzt ihn vorher in einen eigenen.
 
-*Ausarbeitung in Teil 2 (M2).*
+```ebnf
+err_val = "err" "(" expr ")" ;
+```
+
+**Grammatik:** `type` (R2), `try_expr`, `none` und `??` (§2), `err_val` hier, die Muster `ok`, `err`, `some`, `none` in R10.
+
+Teil 2b legt fest:
+
+- **Typen.** `?T` ist ein `T` oder `none`; `T!E` ist ein `T` oder ein Fehler `E`; `void!E` ist „nichts oder ein Fehler“. `E` ist immer ein `enum`; sonst `R12` am `E`, Meldung `` the error type must be an enum, found `int` `` (bzw. `` found struct `Point` ``), Hinweis `declare an enum for the errors, e.g. enum ParseErr { … }`. In Typen bindet `!E` am schwächsten: `?int!E` ist `(?int)!E`. Weiter verschachtelt (`??int`, `int!A!B`) ist `S1`, Hinweis `a type has at most one ? and one !E`. `?void` ist `R12`, Meldung `?void has no value that could be missing`, Hinweis `use void!E`. `void!E` steht wie `void` nur als Rückgabetyp; sonst darf `?T` und `T!E` überall stehen, wo ein Typ steht (Variablen, Parameter, Felder).
+- **Erfolg.** Ein `T` passt dort, wo `?T` oder `T!E` erwartet wird (R31): bei `return`, Initialisierung, Zuweisung, Argument und als Operand von `==`. Eine `void!E`-Funktion endet mit `return` oder am Ende ihres Rumpfs und ist damit erfolgreich; jede andere braucht auf jedem Weg ein `return` mit Wert (R8).
+- **`none`** ist der leere Wert von `?T`, **`err(e)`** der Fehlerwert von `T!E`; `e` hat den Typ `E` (sonst `R8`). Beide nehmen ihren Typ von ihrer Stelle (R8). Ohne passende Stelle ist es `R12`, Meldung `` `none` needs a place of type ?T, found int `` bzw. `` `err(…)` needs a place of type T!E, found int `` (der gefundene Typ steht dort), bei einer Deklaration mit Hinweis `declare it as ?int n = none` (bzw. `int!E`). `ok(x)` und `some(x)` gibt es nur als Muster in `switch`; als Ausdruck sind sie `R12`, Meldung `` `ok` is only a pattern in switch `` (bzw. `some`), Hinweis `return the value directly: return 1`.
+- **`try x`** hat den Typ `T`, wenn `x` ein `T!E` oder `?T` ist, und gilt nur in Funktionen und `test`-Blöcken (R18). Ist `x` ein Fehler oder `none`, kehrt die Funktion sofort mit genau diesem Fehler bzw. `none` zurück; sonst rechnet der Ausdruck mit dem Wert weiter. `try` bindet wie ein Vorzeichen (§2): `try f(a) + try f(b)` ist `(try f(a)) + (try f(b))`. Als Anweisung steht `try f()` für den Aufruf `f()` (R3); der Wert `T` zählt für R13 wie das Ergebnis eines Aufrufs.
+
+  | `x` | Funktion gibt | `try x` | `try x or e` |
+  |---|---|---|---|
+  | `T!E` | `U!E` | gibt `E` weiter | `e` hat Typ `E` |
+  | `T!E` | `U!F` | `R12` | `e` hat Typ `F` |
+  | `?T` | `?U` | gibt `none` weiter | `R12` |
+  | `?T` | `U!F` | `R12` | `e` hat Typ `F` |
+  | `T!E`, `?T` | `?U` bei `T!E`, sonst ohne Fehler (`int`, `void`, …) | `R12` | `R12` |
+
+- Die Meldungen von `try`, jeweils an `try` bzw. `or`:
+  - Funktion kann nicht scheitern: `` `try` needs a function that returns T!E or ?T ``, Hinweis `change the return type to int!E, or use ?? or switch` (mit dem `T` der Funktion, `?int` bei `?T`; ohne Hinweis außerhalb einer Funktion).
+  - falsche Form oder falscher Fehlertyp: `` `try` gives AgeErr, but the function returns int!FormErr `` (statt `AgeErr` steht `none` bei `?T`), Hinweis `translate it with try … or FormErr.V(…)`; bei einer Funktion `?U` stattdessen `handle the error with ?? or switch`.
+  - `x` kann nicht scheitern: `` `try` needs a result of type T!E or ?T, found int ``, Hinweis `remove try`.
+  - `or` in einer Funktion, die kein `U!F` liefert: `` `or` needs a function that returns U!F ``, Hinweis `remove the or part, or return int!F`.
+  - `or` ohne `try` ist `S1`, Meldung `` unexpected `or` ``, Hinweis `or belongs to try: try f() or E.V(…)`.
+- **`try x or e`:** `e` wird nur ausgewertet, wenn `x` scheitert; es ersetzt den ursprünglichen Fehler (er ist danach nicht mehr erreichbar). Für `?T` ersetzt es `none`. `or` gehört zum unmittelbar davorstehenden `try` und umfasst genau einen `postfix`-Ausdruck: `try f() or E.V(1) + 2` ist `(try f() or E.V(1)) + 2`.
+- **`a ?? b`** ist `a`, wenn `a` einen Wert hat, sonst `b`; `a` ist ein `?T` oder `T!E`, `b` und das Ergebnis sind `T`. `b` wird nur ausgewertet, wenn es gebraucht wird. `??` bindet am schwächsten und ist rechtsassoziativ: `a ?? b ?? c` ist `a ?? (b ?? c)`. Ist `a` weder `?T` noch `T!E`, ist es `R12` am `??`, Meldung `` `??` needs a ?T or T!E on the left, found int ``, Hinweis `remove the ?? and its default`. Ein `b` anderen Typs ist `R8`.
+- **`void!E main()`** ist neben `void main()` erlaubt; jede andere Form von `main` ist `R1`, Meldung `` `main` must return void or void!E ``. Kommt ein Fehler aus `main` heraus, schreibt das Programm eine Zeile `error: ` und die Textform des Fehlers (R28) auf stderr und endet mit Exit-Code 1; was vorher auf stdout stand, bleibt erhalten. Einen Fehler gibt `main` an die Umgebung, ein Panic (R14) endet mit Exit-Code 2.
+- `switch` über `T!E` und `?T` steht in R10, Verwendungspflicht in R13, Gleichheit und Textform in R28.
+
+```dif
+enum AgeErr {
+    Negative
+    TooOld(int n)
+}
+
+enum FormErr {
+    BadAge(int n)
+}
+
+int!AgeErr check_age(int n) {
+    if n < 0 {
+        return err(AgeErr.Negative)
+    }
+    if n > 150 {
+        return err(AgeErr.TooOld(n))
+    }
+    return n
+}
+
+?int half(int n) {
+    if n % 2 != 0 {
+        return none
+    }
+    return n / 2
+}
+
+int!AgeErr double_age(int n) {
+    return try check_age(n) * 2
+}
+
+int!FormErr form_age(int n) {
+    int a = try check_age(n) or FormErr.BadAge(n)
+    return a
+}
+
+void main() {
+    print(check_age(30) ?? 0)
+    print(check_age(-1) ?? 0)
+    print(half(7) ?? half(8) ?? -1)
+    print(half(8))
+    print(half(7))
+    print(check_age(-1))
+    switch double_age(200) {
+    case ok(int n):
+        print("ok {n}")
+    case err(AgeErr e):
+        print("error {e}")
+    }
+    switch form_age(200) {
+    case ok(int a):
+        print("age {a}")
+    case err(FormErr e):
+        print("form error {e}")
+    }
+}
+```
+
+Ausgabe: `30`, `0`, `4`, `some(4)`, `none`, `err(AgeErr.Negative)`, `error AgeErr.TooOld(200)`, `form error FormErr.BadAge(200)`.
+
+Ein Fehler aus `main`:
+
+```dif fails "HallErr.NoSeat(7)"
+enum HallErr {
+    NoSeat(int n)
+}
+
+void!HallErr book(int n) {
+    if n > 5 {
+        return err(HallErr.NoSeat(n))
+    }
+    print("booked {n}")
+}
+
+void!HallErr main() {
+    try book(3)
+    try book(7)
+    print("not reached")
+}
+```
+
+Ausgabe: `booked 3` auf stdout; auf stderr `error: HallErr.NoSeat(7)`; Exit-Code 1.
+
+```dif error R12
+enum E { Bad }
+
+int!E parse(int n) {
+    return n
+}
+
+int twice(int n) {
+    return try parse(n) * 2
+}
+```
+
+```
+main.dif:8:12: error[R12]: `try` needs a function that returns T!E or ?T
+  hint: change the return type to int!E, or use ?? or switch
+```
+
+```dif error R12
+enum AgeErr { Negative }
+enum FormErr { BadAge }
+
+int!AgeErr check(int n) {
+    return n
+}
+
+int!FormErr form(int n) {
+    return try check(n)
+}
+```
+
+```
+main.dif:9:12: error[R12]: `try` gives AgeErr, but the function returns int!FormErr
+  hint: translate it with try … or FormErr.V(…)
+```
+
+```dif error R12
+void main() {
+    int n = 3
+    print(n ?? 0)
+}
+```
+
+```
+main.dif:3:13: error[R12]: `??` needs a ?T or T!E on the left, found int
+  hint: remove the ?? and its default
+```
+
+```dif error R12
+void main() {
+    int n = none
+    print(n)
+}
+```
+
+```
+main.dif:2:13: error[R12]: `none` needs a place of type ?T, found int
+  hint: declare it as ?int n = none
+```
+
+```dif error R12
+enum E { Bad }
+
+int!E get() {
+    return ok(1)
+}
+```
+
+```
+main.dif:4:12: error[R12]: `ok` is only a pattern in switch
+  hint: return the value directly: return 1
+```
+
+Beispiele zu R10 und R13 in Teil 2b:
+
+```dif error R10
+?int half(int n) {
+    if n % 2 != 0 {
+        return none
+    }
+    return n / 2
+}
+
+void main() {
+    switch half(8) {
+    case some(int h):
+        print(h)
+    }
+}
+```
+
+```
+main.dif:9:5: error[R10]: switch does not handle none
+  hint: add case none: …, or default:
+```
+
+```dif error R8
+enum E { Bad }
+
+int!E get() {
+    return 1
+}
+
+void main() {
+    switch get() {
+    case ok(str s):
+        print(s)
+    case err(E e):
+        print(e)
+    }
+}
+```
+
+```
+main.dif:9:13: error[R8]: `ok` holds an int
+  hint: case ok(int s):
+```
+
+```dif error R13
+enum HallErr { Full }
+
+void!HallErr book(int n) {
+    if n > 5 {
+        return err(HallErr.Full)
+    }
+    print("booked {n}")
+}
+
+void main() {
+    book(3)
+}
+```
+
+```
+main.dif:11:5: error[R13]: result of `book(3)` is never used
+  hint: use it with try, ?? or switch, or discard it explicitly with `_ = book(3)`
+```
 
 ### R13 — Jeder Aufruf hat eine Wirkung
 
@@ -839,6 +1101,12 @@ Teil 1 und Teil 2a legen fest:
 - **Wirkung (Teil 2a).** Eine Funktion oder Methode hat eine Wirkung, wenn sie einen `mut`-Parameter oder `self` ändert, `print` aufruft oder eine Funktion mit Wirkung aufruft; der Compiler leitet das über alle Aufrufe hinweg ab (auch rekursiv). Ein Aufruf mit Wirkung darf als Anweisung stehen, auch wenn er einen Wert liefert. Ergebnisse vom Typ `T!E` und `?T` werden trotzdem immer verwendet (Teil 2b).
 - `_ = f()` verwirft ein Ergebnis bewusst.
 - Ein Aufruf einer `void`-Funktion als Anweisung ist erlaubt.
+
+Teil 2b legt fest:
+
+- Ein Aufruf als Anweisung, dessen Ergebnis ein `T!E` oder `?T` ist (auch `void!E`), ist immer `R13`, gleich ob die Funktion eine Wirkung hat. Meldung `` result of `book(3)` is never used ``, Hinweis `` use it with try, ?? or switch, or discard it explicitly with `_ = book(3)` ``. Verwendet ist es durch `try`, `??`, `switch`, `_ =`, aber auch als Argument, Rückgabewert oder Initialwert einer Variablen.
+- `try f()` als Anweisung ist der Aufruf `f()` mit entpacktem Ergebnis: ist es nicht `void`, gilt dafür die Regel von oben (R13 bei einer Funktion ohne Wirkung).
+- `_ = f()` verwirft auch ein `T!E` und `?T` bewusst; der Fehler geht dabei verloren.
 
 ```dif
 int square(int n) {
@@ -962,7 +1230,116 @@ main.dif:3:13: error[R15]: if as a value needs else
 
 **Regel.** Tests stehen neben dem Code: `test "name" { }`, geprüft mit `expect(cond)`. `dif test` führt sie aus, auch die Codebeispiele in `///`-Kommentaren.
 
-*Ausarbeitung in Teil 2 (M2).*
+```ebnf
+test_decl = "test" STRING [ "panics" STRING ] block ;
+```
+
+Teil 2b legt fest:
+
+- **`test`-Blöcke** stehen nur auf oberster Ebene (R1); in einer Funktion ist `test` `R18`, Meldung `tests are declared at the top level`, Hinweis `move it out of the function`. Ein Test hat keinen Parameter und keinen Rückgabewert; `return` ohne Wert beendet ihn erfolgreich. Alle Deklarationen des Moduls sind darin sichtbar. `dif build` und `dif run` übergehen Tests, `dif check` prüft sie.
+- **Der Name** ist ein einfacher String ohne `{ }` und nicht leer; sonst `R18`, Meldung `a test needs a name` bzw. `a test name is plain text`, Hinweis `remove the { }`. Zwei Tests desselben Moduls mit gleichem Namen sind `R18` am zweiten Namen, Meldung `` test "sum" is declared twice ``, Hinweis `first declared at main.dif:1:6`.
+- **`expect(cond)`** ist eine eingebaute Funktion (§4) mit einer `bool`-Bedingung (R9). Sie steht nur direkt in einem `test`-Block, auch in `if`, `while`, `for` und `switch` darin; sonst `R18`, Meldung `` `expect` is only for tests ``, Hinweis `use assert(n > 0) in functions` (mit der Bedingung). Ist die Bedingung `false`, scheitert der Test an dieser Stelle; die übrigen Anweisungen laufen nicht mehr.
+- **Teilausdrücke.** Die Bedingung wird als Baum gelesen: `&&`, `||`, `!` und Klammern bilden das Gerüst, jeder Vergleich (`==`, `!=`, `<`, `<=`, `>`, `>=`) hat zwei Operanden, jeder andere Ausdruck am Blatt zählt für sich. Zu jedem Operanden und Blatt, das kein Literal und weder `true` noch `false` ist, zeigt der Fehlschlag die Zeile `<Quelltext> = <Wert>`; Werte stehen in der Textform von R28, ein `str` in Anführungszeichen. Jeder Quelltext erscheint einmal, in der Reihenfolge des Quelltexts; was wegen `&&`/`||` nicht ausgewertet wurde, fehlt. Jeder Teilausdruck wird nur einmal ausgewertet.
+- **`try` im Test** gilt für jedes `T!E` und `?T`, ohne dass der Test einen Fehlertyp hat (R12). Scheitert es, scheitert der Test an der Stelle des `try` mit `try failed: ` und der Textform des Fehlers bzw. `none`.
+- **`test "…" panics "text" { }`** besteht nur, wenn der Test mit einem Panic (R14) abbricht und dessen Meldung (ohne `panic: ` und ohne Position) `text` enthält; nie wird gegen den Quelltext verglichen. Ein leerer Text ist `R18`, Meldung `` panics needs a message text ``, Hinweis `give the part of the panic message to look for`. Ein `expect`, das scheitert, ist kein Panic, sondern ein Fehlschlag des Tests.
+- **`dif test [pfad] [filter] [--json]`** übersetzt alle `.dif`-Dateien unter `pfad` (eine Datei oder ein Ordner, rekursiv; Standard `.`) und führt die Tests aus, deren Name `filter` enthält (Groß- und Kleinschreibung zählt; ohne `filter` alle). Der Filter braucht also einen Pfad: `dif test . addition`. **Jeder Test läuft in einem eigenen Prozess**; ein Panic, ein Absturz in C-Code oder eine Zeitüberschreitung (10 Sekunden) trifft nur diesen Test. Die Tests laufen parallel, die Ausgabe steht in der Reihenfolge der Dateien (nach Pfad) und darin der Deklaration. Was ein Test mit `print` ausgibt, wird aufgefangen und nur bei einem Fehlschlag gezeigt. Doc-Tests, `--coverage` und `--sanitize` folgen mit v0.2.
+- **Text.** Je Test eine Zeile `ok   <datei>:<zeile> test "<name>"` bzw. `FAIL <datei>:<zeile> test "<name>"` (`<zeile>` ist die des Worts `test`, der Pfad so, wie ihn `dif test` gefunden hat). Nach einer `FAIL`-Zeile stehen, um 4 Leerzeichen eingerückt: der Grund `<datei>:<zeile>:<spalte>: <Meldung>` (ohne Position nur die Meldung), darunter um 8 eingerückt die Zeilen der Teilausdrücke, und, wenn der Test etwas ausgegeben hat, die Zeile `    output:` mit den Zeilen der Ausgabe, um 8 eingerückt. Zuletzt `test result: <n> passed, <m> failed`. Alles geht auf stdout.
+- **Gründe** (Meldung, Position):
+  - `expect failed: <Bedingung>`, an `expect`; die Bedingung wie im Quelltext, Zeilenumbrüche durch ein Leerzeichen ersetzt.
+  - `try failed: <Fehler>`, an `try`; `none` bei `?T`.
+  - `panic: <Meldung>`, an der Position des Panics (R14).
+  - `` expected a panic containing "text", but the test finished `` bzw. `` expected a panic containing "text", got "<Meldung>" ``, ohne Position.
+  - `killed by signal <n>` und `timed out after 10 s`, ohne Position.
+- **Exit-Code von `dif test`:** 0, wenn alle gewählten Tests bestehen; 1, wenn einer scheitert oder keiner gewählt ist (Meldung `error: no tests found` bzw. `` error: no test matches "text" `` auf stderr); 2, wenn die Dateien nicht übersetzbar sind (die Diagnosen wie bei `dif check`, kein Test läuft) oder der Aufruf falsch ist.
+- **`--json`** schreibt statt des Texts genau ein JSON-Objekt in einer Zeile auf stdout (Meldungen auf stderr und Exit-Codes bleiben). Es hat `"tests"` (Liste in Textreihenfolge), `"passed"` und `"failed"`. Jeder Test hat `"file"`, `"line"`, `"name"` und `"status"` (`"ok"` oder `"fail"`); ein gescheiterter außerdem `"failure"` mit `"kind"` (`expect`, `try`, `panic`, `panics`, `crash`, `timeout`), `"line"`, `"column"` und `"offset"` (Byte-Offset ab 0; ohne Position `null`), `"message"` (wie im Text, ohne Position), `"values"` (Liste von `{"expr", "value"}`, bei `expect`, sonst leer) und `"output"` (aufgefangenes stdout).
+
+Der Pfad und die Zeilen- und Spaltenangaben stehen in den Beispielen für die Datei `main.dif`; `dif test main.dif` gibt zu diesem Modul aus:
+
+```dif test
+int add(int a, int b) {
+    return a + b
+}
+
+enum ParseErr {
+    Empty
+}
+
+int!ParseErr first(int n) {
+    if n == 0 {
+        return err(ParseErr.Empty)
+    }
+    return n
+}
+
+test "addition" {
+    expect(add(2, 3) == 5)
+    expect(add(-1, 1) == 0)
+}
+
+test "first of zero" {
+    int n = try first(7)
+    expect(n == 7)
+    int m = try first(0)
+    expect(m == 0)
+}
+
+test "overflow" panics "integer overflow" {
+    int big = 9223372036854775807
+    print(big + 1)
+}
+
+test "wrong sum" {
+    int a = 2
+    print("checking")
+    expect(a + 2 == 5 || a == 0)
+}
+```
+
+```
+ok   main.dif:16 test "addition"
+FAIL main.dif:21 test "first of zero"
+    main.dif:24:13: try failed: ParseErr.Empty
+ok   main.dif:28 test "overflow"
+FAIL main.dif:33 test "wrong sum"
+    main.dif:36:5: expect failed: a + 2 == 5 || a == 0
+        a + 2 = 4
+        a = 2
+    output:
+        checking
+test result: 2 passed, 2 failed
+```
+
+Mit `--json` (eine Zeile, Exit-Code 1):
+
+```
+{"tests":[{"file":"main.dif","line":16,"name":"addition","status":"ok"},{"file":"main.dif","line":21,"name":"first of zero","status":"fail","failure":{"kind":"try","line":24,"column":13,"offset":341,"message":"try failed: ParseErr.Empty","values":[],"output":""}},{"file":"main.dif","line":28,"name":"overflow","status":"ok"},{"file":"main.dif","line":33,"name":"wrong sum","status":"fail","failure":{"kind":"expect","line":36,"column":5,"offset":527,"message":"expect failed: a + 2 == 5 || a == 0","values":[{"expr":"a + 2","value":"4"},{"expr":"a","value":"2"}],"output":"checking\n"}}],"passed":2,"failed":2}
+```
+
+```dif error R18
+void check(int n) {
+    expect(n > 0)
+}
+```
+
+```
+main.dif:2:5: error[R18]: `expect` is only for tests
+  hint: use assert(n > 0) in functions
+```
+
+```dif error R18
+test "sum" {
+    expect(1 + 1 == 2)
+}
+
+test "sum" {
+    expect(2 + 2 == 4)
+}
+```
+
+```
+main.dif:5:6: error[R18]: test "sum" is declared twice
+  hint: first declared at main.dif:1:6
+```
 
 ### R19 — Tasks *(nach v0)*
 
@@ -1066,6 +1443,11 @@ panic: shift by 64 out of range 0..63 (main.dif:3:13)
 
 *Ausarbeitung in Teil 2 (M2).*
 
+Teil 2b ergänzt `?T` und `T!E`:
+
+- Sie sind `equal` und `text`, wenn `T` (und `E`) es sind. `==` vergleicht: zwei `none` sind gleich, zwei Werte, wenn ihre Werte gleich sind; bei `T!E` sind zwei Fehler gleich, wenn ihre Fehler gleich sind, ein Wert und ein Fehler nie. Ein `T` passt als Operand (R31): `x == 3` mit `x` vom Typ `?int` vergleicht mit dem Wert `3`. `<` gibt es nicht (`R8`).
+- Die Textform nennt die Form wie ein Muster (R10): `some(4)`, `none`, `ok(30)`, `err(AgeErr.Negative)`; bei `void!E` `ok` ohne Klammern. Ein `str` darin steht in Anführungszeichen (`some("a")`).
+
 ### R31 — Erlaubte Umwandlungen
 
 **Regel.** Ein Wert vom Typ `T` passt dort, wo `?T` oder `T!E` erwartet wird; `ok` und `some` gibt es nur in Mustern. Ein `str` passt dort, wo C `c.str` erwartet, eine benannte Funktion an einen C-Funktionszeiger. Sonst wird nie umgewandelt (R8).
@@ -1080,5 +1462,6 @@ panic: shift by 64 out of range 0..63 (main.dif:3:13)
 |---|---|
 | `void print(text T x)` | schreibt `"{x}"` und einen Zeilenumbruch auf stdout |
 | `range(int n)`, `range(int a, int b)` | Ganzzahlen `0 … n-1` bzw. `a … b-1`; in Teil 1 nur als Quelle einer `for`-Schleife |
+| `void expect(bool cond)` | prüft in einem `test`-Block `cond` (R18) |
 
-`print` ist ein Aufruf mit Ein-/Ausgabe und erfüllt damit R13. `repeat`, `expect` und `assert` folgen in Teil 2.
+`print` ist ein Aufruf mit Ein-/Ausgabe und erfüllt damit R13. `expect` gilt nur in `test`-Blöcken und ist dort eine Wirkung. `repeat` und `assert` folgen in Teil 2.

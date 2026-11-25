@@ -99,6 +99,10 @@ fn llms_txt() {
 /// a section is listed here only while its backend is missing.
 const CHECK_ONLY: &[&str] = &[];
 
+/// Sections whose examples need the compiler of part 2b and are skipped entirely
+/// until it exists; the compiler change removes them here.
+const PENDING: &[&str] = &["### R12 ", "### R18 "];
+
 /// Every ```dif block of a document, by kind: valid module, snippet (inside
 /// `void main()`), `error Rn` (exactly that diagnostic), `panic "message"`.
 /// Returns the number of examples checked.
@@ -137,6 +141,9 @@ fn doc_examples(doc: &str, tag: &str) -> usize {
                 }
                 lines[from..to].join("\n")
             });
+        if PENDING.iter().any(|p| section.starts_with(p)) {
+            continue;
+        }
         let check_only = CHECK_ONLY.iter().any(|p| section.starts_with(p));
         n += 1;
         let kind = kind.trim();
