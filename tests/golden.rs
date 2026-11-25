@@ -109,6 +109,7 @@ const PENDING_2C: &[&str] = &[
     "### 1.4 ",
     "### R5, Teil 2c",
     "### R8, Teil 2c",
+    "### R11, Teil 2c",
     "### R29, Teil 2c",
     "### R30 ",
     "### R31 ",

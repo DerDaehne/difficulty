@@ -265,7 +265,7 @@ named_type = IDENT [ "." IDENT ] ;                      (* struct oder enum; mit
 list_type  = "[" "]" elem_type ;                        (* R5 *)
 array_type = "[" ( INT | IDENT ) "]" elem_type ;        (* R5; IDENT: eine const int *)
 map_type   = "map" "[" elem_type "]" elem_type ;        (* R30 *)
-elem_type  = [ "?" ] base_type ;                        (* []?int: Liste von ?int; ?[]int: ?Liste *)
+elem_type  = [ "?" ] base_type | "(" type ")" ;         (* []?int: Liste von ?int; ?[]int: ?Liste; [](int!E): Liste von Ergebnissen *)
 func_decl  = type IDENT "(" [ params ] ")" block ;
 params     = param { "," param } [ "," ] ;
 param      = [ "mut" ] type IDENT ;                   (* mut: R6 *)
@@ -1082,10 +1082,12 @@ Teil 1 legt fest:
 
 Teil 2c legt fest:
 
-- **Quellen.** `for T x in xs` läuft über die Elemente einer Liste oder eines Arrays in Reihenfolge; `for int i, T x in xs` liefert zusätzlich den Index `i` ab 0 (sein Typ ist `int`); `for K k, V v in m` läuft über die Einträge einer Map in der Reihenfolge der Einfügung (R30); `for str line in try io.lines()` über die Zeilen von stdin; `io.lines()` liefert `str!io.IoErr`, ohne `try` steht die Schleifenvariable `str!io.IoErr` (§4.6). Eine Quelle anderen Typs ist `R11` an der Quelle, Meldung `` cannot loop over int ``, Hinweis bei `int`: `for int i in range(n)`, bei `str`: `for rune r in s.runes()`, sonst keiner. Ein `str` ist keine Quelle.
+- **Quellen.** `for T x in xs` läuft über die Elemente einer Liste oder eines Arrays in Reihenfolge; `for int i, T x in xs` liefert zusätzlich den Index `i` ab 0 (sein Typ ist `int`); `for K k, V v in m` läuft über die Einträge einer Map in der Reihenfolge der Einfügung (R30); `for str line in try io.lines()` über die Zeilen von stdin, eine Folge von `str!io.IoErr` (§4.6, „Folgen von Ergebnissen“ unten). Eine Quelle anderen Typs ist `R11` an der Quelle, Meldung `` cannot loop over int ``, Hinweis bei `int`: `for int i in range(n)`, bei `str`: `for rune r in s.runes()`, sonst keiner. Ein `str` ist keine Quelle.
 - **Variablen.** Die Typen der Schleifenvariablen sind die der Elemente (bei `m` Schlüssel und Wert); ein anderer ist `R8`, Meldung `` expected str, found int `` an der Variablen. Die Form passt zur Quelle: eine Map mit einer Variablen ist `R11`, Meldung `` a loop over a map needs key and value ``, Hinweis `for str k, int v in counts` (mit den Typen und dem Namen der Quelle); `for int i, T x in m` ist `R8` wie oben. Die Variablen sind Kopien (R5); ihre Änderung wirkt nur bis zum nächsten Durchlauf.
 - **Schnappschuss.** Die Quelle wird einmal vor der Schleife ausgewertet und als Wert festgehalten (R5, Teil 2c). Schreibt der Rumpf in `xs` oder `m`, sieht diese Schleife davon nichts; `for int x in xs { xs.push(x) }` endet.
 - `io.lines()` und `range` stehen nur als Quelle einer `for`-Schleife. Beispiele bei R30.
+- **Folgen von Ergebnissen.** Hat eine Quelle Elemente vom Typ `T!E` oder `?T` (eine Liste oder ein Array `[](int!E)`, `io.lines()`, später weitere), entpackt `for T x in try xs` jedes Element wie `try` (R12): `x` ist das `T`; ist ein Element ein Fehler, kehrt die Funktion sofort mit ihm zurück. `try` steht in der Schleifenform wie überall in `expr`, die Grammatik `for_stmt` bleibt; `or` ist erlaubt (`for int n in try rs or E.V(…)`). Ohne `try` ist die Schleifenvariable ein `T!E` (`for int!E r in rs`); `for int n in rs` mit solchen Elementen ist `R8`, Meldung `` expected int, found int!ParseErr `` an der Variablen, Hinweis `for int n in try rs`. Beispiele und Fehler in „R11, Teil 2c“ unten, Regeln für den Fehlertyp in R12.
+
 
 ```dif snippet
 for int i in range(1, 4) {
@@ -1107,6 +1109,56 @@ void main() {
 ```
 main.dif:2:5: error[R11]: C-style for loop
   hint: for int i in range(3)
+```
+
+### R11, Teil 2c — Schleifen über Ergebnisse
+
+```dif
+enum ParseErr { Bad(str s) }
+
+int!ParseErr parse(str s) {
+    switch s.parse_int() {
+    case some(int n):
+        return n
+    case none:
+        return err(ParseErr.Bad(s))
+    }
+}
+
+int!ParseErr total([]str parts) {
+    [](int!ParseErr) rs = []
+    for str p in parts {
+        rs.push(parse(p))
+    }
+    int sum = 0
+    for int n in try rs {
+        sum += n
+    }
+    return sum
+}
+
+void main() {
+    print(total(["1", "2", "3"]))
+    print(total(["1", "x", "3"]))
+}
+```
+
+Ausgabe: `ok(6)`, `err(ParseErr.Bad("x"))`.
+
+```dif error R8
+enum ParseErr { Bad }
+
+void main() {
+    [](int!ParseErr) rs = []
+    for int n in rs {
+        print(n)
+    }
+}
+```
+
+```
+main.dif:5:13: error[R8]: expected int, found int!ParseErr
+  hint: for int n in try rs
 ```
 
 ### R12 — Scheitern steht im Typ
@@ -1147,6 +1199,7 @@ Teil 2b legt fest:
   - `or` ohne `try` ist `S1`, Meldung `` unexpected `or` ``, Hinweis `or belongs to try: try f() or E.V(…)`.
 - **`try x or e`:** `e` wird nur ausgewertet, wenn `x` scheitert; es ersetzt den ursprünglichen Fehler (er ist danach nicht mehr erreichbar). Für `?T` ersetzt es `none`. Hat `e` nicht den Fehlertyp der Funktion, ist es `R8`. `or` gehört zum unmittelbar davorstehenden `try` und umfasst genau einen `postfix`-Ausdruck: `try f() or E.V(1) + 2` ist `(try f() or E.V(1)) + 2`.
 - **`a ?? b`** ist `a`, wenn `a` einen Wert hat, sonst `b`; `a` ist ein `?T` oder `T!E`, `b` und das Ergebnis sind `T`. `b` wird nur ausgewertet, wenn es gebraucht wird. `??` bindet am schwächsten und ist rechtsassoziativ: `a ?? b ?? c` ist `a ?? (b ?? c)`. Ist `a` weder `?T` noch `T!E`, ist es `R12` am `??`, Meldung `` `??` needs a ?T or T!E on the left, found int ``, Hinweis `remove the ?? and its default`. Ein `b` anderen Typs ist `R8`.
+- **`try` an einer Schleife.** `for T x in try xs` (R11) wendet `try` auf jedes Element einer Folge von Ergebnissen an (Liste oder Array `[](T!E)` oder `[](?T)`, `io.lines()`): `x` hat den Typ `T`, ein Element, das ein Fehler oder `none` ist, beendet die Schleife und kehrt aus der Funktion zurück, genau wie `try` an einem Einzelwert. Für Fehlertyp der Funktion, `or` und die Tabelle oben gilt jeweils das Element als `x`; alle Meldungen von `try` stehen unverändert an dem `try` vor der Quelle. Eine Quelle, die keine Folge von `T!E` oder `?T` ist, ist `R12`, Meldung `` `try` needs a list of T!E or ?T, found []int ``, Hinweis `remove try`. Eine Schleife mit `try` darf nur in einer Funktion oder einem `test`-Block stehen (wie `try`).
 - **`void!E main()`** ist neben `void main()` erlaubt; `E` ist jeder Typ; jede andere Form von `main` ist `R1`, Meldung `` `main` must return void or void!E ``. Kommt ein Fehler aus `main` heraus, schreibt das Programm eine Zeile `error: ` und die Textform des Fehlers (R28; ein `str` unverändert, wie bei `print`) auf stderr und endet mit Exit-Code 1; was vorher auf stdout stand, bleibt erhalten. Einen Fehler gibt `main` an die Umgebung, ein Panic (R14) endet mit Exit-Code 2.
 - `switch` über `T!E` und `?T` steht in R10, Verwendungspflicht in R13, Gleichheit und Textform in R28.
 
@@ -2232,7 +2285,7 @@ enum IoErr {
 
 | Signatur | Verhalten | Wirkung |
 |---|---|---|
-| `io.lines()` | Quelle einer `for`-Schleife (R11) mit Elementen vom Typ `str!io.IoErr`: die Zeilen von stdin ohne `\n` (ein `\r` davor entfällt), bis zum Ende der Eingabe; eine letzte Zeile ohne Zeilenumbruch zählt; leere Eingabe gibt keine Durchläufe; eine Zeile mit ungültigem UTF-8 ist `err(IoErr.InvalidUtf8("<stdin>"))` und das letzte Element, danach endet die Schleife. `for str line in try io.lines()` entpackt jedes Element wie `try` (R12): der Fehler beendet die Funktion, die dafür `U!io.IoErr` liefern muss (auch `void!io.IoErr main()`). Ohne `try` ist die Schleifenvariable ein `str!io.IoErr` (`for str!io.IoErr r in io.lines()`), die man mit `switch` oder `??` behandelt; `for str line in io.lines()` ist `R8`, Meldung `` expected str, found str!IoErr ``, Hinweis `for str line in try io.lines()` | |
+| `io.lines()` | Quelle einer `for`-Schleife (R11) mit Elementen vom Typ `str!io.IoErr`: die Zeilen von stdin ohne `\n` (ein `\r` davor entfällt), bis zum Ende der Eingabe; eine letzte Zeile ohne Zeilenumbruch zählt; leere Eingabe gibt keine Durchläufe; eine Zeile mit ungültigem UTF-8 ist `err(IoErr.InvalidUtf8("<stdin>"))` und das letzte Element, danach endet die Schleife. Die Schleifenform steht in R11 („Folgen von Ergebnissen“): `for str line in try io.lines()` entpackt jedes Element, die Funktion muss `U!io.IoErr` liefern (auch `void!io.IoErr main()`); ohne `try` ist die Variable ein `str!io.IoErr` | |
 | `?str!io.IoErr io.read_line()` | die nächste Zeile von stdin wie bei `lines()`; `ok(none)` am Ende der Eingabe, `err(IoErr.InvalidUtf8("<stdin>"))` bei ungültigem UTF-8 | ändert die Eingabe |
 | `str!io.IoErr io.read_file(str path)` | der ganze Inhalt der Datei | |
 | `void!io.IoErr io.write_file(str path, str text)` | legt die Datei an oder überschreibt sie mit den Bytes von `text` | ändert die Datei |
