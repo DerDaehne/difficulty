@@ -1444,13 +1444,28 @@ impl<'a> Emitter<'a> {
         )
     }
 
-    /// Source text of an expression, line breaks as spaces.
+    /// Source text of an expression; a line break with its indentation is one space.
     fn text_of(&self, e: &Expr) -> String {
         let s = self
             .src
             .get(e.pos.offset as usize..e.end as usize)
             .unwrap_or("");
-        s.replace('\n', " ")
+        let mut out = String::new();
+        let mut gap = String::new();
+        for c in s.chars() {
+            if c.is_whitespace() {
+                gap.push(c);
+                continue;
+            }
+            out.push_str(&if gap.contains('\n') {
+                " ".into()
+            } else {
+                std::mem::take(&mut gap)
+            });
+            gap.clear();
+            out.push(c);
+        }
+        out
     }
 
     /// The boolean skeleton of an `expect` condition: `&&`, `||`, `!`, parentheses and

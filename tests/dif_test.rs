@@ -211,7 +211,7 @@ test \"no panic\" panics \"zzz\" {
     );
     let (out, _, code) = d.dif(&["test", "v.dif"]);
     let want = "FAIL v.dif:10 test \"shown\"
-    v.dif:12:5: expect failed: p.x == 1 && p.s == \"a\"         && none_of() != none
+    v.dif:12:5: expect failed: p.x == 1 && p.s == \"a\" && none_of() != none
         p.x = 1
         p.s = \"a\\nb\"
 FAIL v.dif:16 test \"try none\"
