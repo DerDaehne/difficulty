@@ -13,6 +13,7 @@ Verbindliche Sprachbeschreibung: [docs/spec.md](docs/spec.md).
 nix develop          # rustc, cargo, clippy, rustfmt, gcc
 cargo test
 cargo run -- run examples/fib.dif
+cargo run -- test examples/ledger.dif
 ```
 
 ## Editoren

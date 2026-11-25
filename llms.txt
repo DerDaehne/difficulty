@@ -2,7 +2,7 @@
 
 > A compiled language for AI agents and humans: C-like syntax, Python-like simplicity,
 > one way to write each thing, no silent fallbacks, diagnostics that say how to fix them.
-> This file covers parts 1 ("Hallo, nativ") and 2a (values, methods). The binding description
+> This file covers parts 1 ("Hallo, nativ"), 2a (values, methods) and 2b (errors, tests). The binding description
 > is docs/spec.md; error codes are rule numbers (R1–R31) or lexical/syntax codes (L, S).
 
 ## Tools
@@ -11,9 +11,10 @@
 dif check [--json] main.dif    # syntax, names, types; one JSON object per line with --json
 dif run main.dif               # compile via C11 and run
 dif build main.dif -o prog     # native program (needs cc, gcc or clang; or set CC)
+dif test [path] [filter] [--json]   # run the `test` blocks, see part 2b
 ```
 
-Exit codes: 0 ok, 1 diagnostics, 2 usage error or a panic of the program.
+Exit codes: 0 ok, 1 diagnostics (or an error from `void!E main`), 2 usage error or a panic of the program.
 A diagnostic: `main.dif:3:11: error[R9]: condition is int, not bool` plus `hint: …`.
 Columns count characters. Each mistake gives exactly one diagnostic; fix the first, rerun.
 
@@ -217,6 +218,140 @@ void main() {
 }
 ```
 
+## Part 2b: failure in the type, `try`, tests
+
+```dif
+enum AgeErr {
+    Negative
+    TooOld(int n)
+}
+
+?int half(int n) {
+    if n % 2 != 0 {
+        return none
+    }
+    return n / 2
+}
+
+int!AgeErr check_age(int n) {
+    if n < 0 {
+        return err(AgeErr.Negative)
+    }
+    return n
+}
+
+int!AgeErr double_age(int n) {
+    return try check_age(n) * 2
+}
+
+void main() {
+    print(half(8))
+    print(half(7) ?? -1)
+    print(double_age(-1))
+    switch double_age(4) {
+    case ok(int n):
+        print("ok {n}")
+    case err(AgeErr e):
+        print("error {e}")
+    }
+}
+```
+
+Output: `some(4)`, `-1`, `err(AgeErr.Negative)`, `ok 8`
+
+- **Types (R12).** `?T` is a `T` or `none`; `T!E` is a `T` or an error `E` (any type:
+  `enum`, `struct`, `str`); `void!E` is nothing or an error. Success is returned plainly:
+  `return n`; failure is `return none` or `return err(AgeErr.Negative)`. `none` and
+  `err(e)` take their type from the place they stand in (declaration, assignment,
+  argument, `return`, the other side of `==`); alone (`print(none)`) it is R12. `some(x)`
+  builds a `?T` for comparing: `x == some(3)`; `x == 3` is R8. `ok(x)` exists only as a
+  pattern.
+- **`try x`** (functions and tests only): the value of `x`, or the function returns at
+  once with the same error (`T!E` in a `U!E` function) or `none` (`?T` in a `?U`
+  function). `try x or E.V(…)` turns the error into the function's own error type;
+  `or` runs only on failure. A different error type without `or` is R12. `try` binds like a
+  sign: `try f(a) + try f(b)` is `(try f(a)) + (try f(b))`; left to right, the first failure
+  returns. As a statement `try f()` is the call.
+- **`a ?? b`**: `a` if it has a value, else `b` (evaluated only then); `a` is `?T` or `T!E`.
+- **`switch` (R10)** over `T!E`: `case ok(int n):` and `case err(E e):`; over `?T`:
+  `case some(int n):` and `case none:`; `ok` without parentheses for `void!E`; `_` skips the
+  value; both forms or a `default` are needed.
+- **Use (R13).** A `T!E` or `?T` result is always used: `try`, `??`, `switch`, argument,
+  `return`, or discarded with `_ = f()`; a bare `f()` statement is R13.
+- **Equality and text (R28).** `==` compares `?T` with `?T` and `T!E` with `T!E`;
+  text is `some(4)`, `none`, `ok(30)`, `err(AgeErr.Negative)`, `ok` for `void!E`.
+- **`void!E main()`** is allowed. An error ends the program with `error: <text>` on stderr
+  (a `str` unchanged) and exit code 1; a panic is still exit code 2.
+
+```dif fails "HallErr.NoSeat(7)"
+enum HallErr {
+    NoSeat(int n)
+}
+
+void!HallErr book(int n) {
+    if n > 5 {
+        return err(HallErr.NoSeat(n))
+    }
+    print("booked {n}")
+}
+
+void!HallErr main() {
+    try book(3)
+    try book(7)
+    print("not reached")
+}
+```
+
+**Tests (R18).** `test "name" { … }` at the top level, checked with `expect(cond)`;
+`dif run` and `dif build` skip them. `test "name" panics "text" { … }` passes only with a
+panic whose message contains `text`. `try` in a test fails the test with `try failed: …`.
+
+```
+dif test [path] [filter] [--json]   # every test in its own process; filter needs a path
+```
+
+`path` is a file or a directory (all `.dif` files below it, default `.`); `filter` selects
+tests whose name contains it. Per test one line `ok`/`FAIL` with `file:line`; a failure
+shows the reason, the value of every non-literal operand of the condition, and what the
+test printed; last line `test result: 1 passed, 1 failed`. Exit code 0 all passed,
+1 a test failed or none was selected, 2 files do not compile or wrong call. `--json` gives
+one JSON object on one line (docs/spec.md R18).
+
+```dif test
+int add(int a, int b) {
+    return a + b
+}
+
+test "addition" {
+    expect(add(2, 3) == 5)
+}
+
+test "wrong sum" {
+    int a = 2
+    expect(a + 2 == 5)
+}
+```
+
+```
+ok   main.dif:5 test "addition"
+FAIL main.dif:9 test "wrong sum"
+    main.dif:11:5: expect failed: a + 2 == 5
+        a + 2 = 4
+test result: 1 passed, 1 failed
+```
+
+```dif error R12
+enum E { Bad }
+
+int!E parse(int n) {
+    return n
+}
+
+int twice(int n) {
+    return try parse(n) * 2
+}
+```
+
 ## Habits from other languages and their fixes
 
 | written | code | write instead |
@@ -267,6 +402,5 @@ a chain of more than 256 `const` using each other is R4. Split the code.
 
 ## Not yet
 
-Floating point and other number types, lists, maps, `T!E`, `?T`, `try`, `??`, modules,
-tests, C import, handles and sharing. They follow in later parts (see PLAN.md); using
-them gives an error that says so.
+Floating point and other number types, lists, maps, modules, C import, handles and
+sharing. They follow in later parts (see PLAN.md); using them gives an error that says so.
