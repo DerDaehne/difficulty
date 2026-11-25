@@ -8,7 +8,7 @@ Diese Spezifikation ist nach den Regeln R1–R31 gegliedert. Ausgearbeitet sind 
 
 **Grammatik** steht in EBNF: `a b` Folge, `a | b` Auswahl, `[ a ]` optional, `{ a }` beliebig oft, `"x"` wörtlich, `NL` Zeilenende (siehe §1.3). Jede Produktion steht genau einmal; andere Abschnitte verweisen darauf.
 
-**Kanonische Form.** Wo der Compiler mehrere Schreibweisen annimmt (Feldreihenfolge im Struct-Literal, abschließendes Komma in mehrzeiligen Listen, Trenner der `enum`-Varianten, `x` statt `some(x)` an einer `?T`-Stelle), legt `dif fmt` die eine kanonische Form fest; der Compiler meldet dafür keinen Fehler.
+**Kanonische Form.** Wo der Compiler mehrere Schreibweisen annimmt (Feldreihenfolge im Struct-Literal, abschließendes Komma in mehrzeiligen Listen, Trenner der `enum`-Varianten, `x` statt `some(x)` an einer `?T`-Stelle, die ein Ziel ist, R12), legt `dif fmt` die eine kanonische Form fest; der Compiler meldet dafür keinen Fehler.
 
 ### 0.1 Diagnosen
 
@@ -194,7 +194,7 @@ Ausdrücke und Argumente werden **von links nach rechts** ausgewertet (R29).
 
 ### R1 — Programm
 
-**Regel.** Ein Programm besteht nur aus Deklarationen: `const`, `struct`, `enum`, Funktionen, `test`, `use`, `extern`. Es startet in `void main()` oder `void!E main()`.
+**Regel.** Ein Programm besteht nur aus Deklarationen: `const`, `struct`, `enum`, Funktionen, `test`, `use`, `extern`. Es startet in `main`, die `void main()` oder `void!E main()` heißt (R12; `E` ist jeder Typ).
 
 ```ebnf
 module   = { NL } [ decl { NL { NL } decl } { NL } ] ;
@@ -202,7 +202,7 @@ decl     = const_decl | func_decl | struct_decl | enum_decl | method_decl | test
 ```
 
 - Eine Anweisung auf oberster Ebene ist `R1`, Hinweis `move it into a function, e.g. void main() { … }`.
-- Ein ausführbares Programm hat genau eine Funktion `void main()` ohne Parameter; fehlt sie, ist das `R1` (bei `dif run`/`dif build`, nicht bei `dif check` einer Bibliothek).
+- Ein ausführbares Programm hat genau eine Funktion `main` ohne Parameter, `void main()` oder `void!E main()`; fehlt sie, ist das `R1` (bei `dif run`/`dif build`, nicht bei `dif check` einer Bibliothek).
 - Die Reihenfolge der Deklarationen spielt keine Rolle: eine Funktion darf eine weiter unten deklarierte aufrufen.
 
 ```dif
@@ -848,7 +848,11 @@ Teil 2b legt fest:
 
 - **Typen.** `?T` ist ein `T` oder `none`; `T!E` ist ein `T` oder ein Fehler `E`; `void!E` ist „nichts oder ein Fehler“. `E` ist ein beliebiger Typ (`enum`, `struct`, `str`, …) ohne Sonderregel; ausgegeben wird er in der Textform von R28. In Typen bindet `!E` am schwächsten: `?int!E` ist `(?int)!E`. Weiter verschachtelt (`??int`, `int!A!B`) ist `S1`, Hinweis `a type has at most one ? and one !E`. `?void` ist `R12`, Meldung `?void has no value that could be missing`, Hinweis `use void!E`. `void!E` steht wie `void` nur als Rückgabetyp; sonst darf `?T` und `T!E` überall stehen, wo ein Typ steht (Variablen, Parameter, Felder).
 - **Erfolg.** Ein `T` passt dort, wo `?T` oder `T!E` erwartet wird (R31): bei `return`, Initialisierung, Zuweisung und Argument; als Operand von `==` nicht (R28). Eine `void!E`-Funktion endet mit `return` oder am Ende ihres Rumpfs und ist damit erfolgreich; jede andere braucht auf jedem Weg ein `return` mit Wert (R8).
-- **`none`** ist der leere Wert von `?T`, **`some(x)`** ein `?T` mit dem Wert `x` (das `T` ist der Typ von `x`), **`err(e)`** der Fehlerwert von `T!E`; `e` hat den Typ `E` (sonst `R8`). `none` und `err(e)` nehmen ihren Typ von ihrer Stelle (R8). An einer `?T`-Stelle darf statt `some(x)` einfach `x` stehen (R31); kanonisch ist dort `x`, `dif fmt` schreibt `some(x)` so um, der Compiler meldet nichts. Wo kein `?T` steht (`int n = some(3)`), ist es `R8`. Ohne passende Stelle ist es `R12`, Meldung `` `none` needs a place of type ?T, found int `` bzw. `` `err(…)` needs a place of type T!E, found int `` (der gefundene Typ steht dort), bei einer Deklaration mit Hinweis `declare it as ?int n = none` (bzw. `int!E`). `ok(x)` gibt es nur als Muster in `switch`; als Ausdruck ist es `R12`, Meldung `` `ok` is only a pattern in switch ``, Hinweis `return the value directly: return 1`.
+- **`none`** ist der leere Wert von `?T`, **`some(x)`** ein `?T` mit dem Wert `x`, **`err(e)`** der Fehlerwert von `T!E`; `e` hat den Typ `E` (sonst `R8`). `some(x)` hat den Typ `?T`, wobei `T` der Typ von `x` ist; `x` selbst ist kein `?U` (`some(x)` mit `x` vom Typ `?int` ist `R12`, Meldung `` `some` needs a plain value, found ?int ``, Hinweis `use x directly`). `none` und `err(e)` nehmen ihren Typ von ihrer **Stelle** (R8; bei `==` und `!=` ist der andere Operand die Stelle, `r == err(E.X)` und `x == none` sind also gültig).
+- **Falsche Stelle.** Ein Wert, der an seiner Stelle nicht passt, ist `R8` wie jeder andere: `int n = none` mit der Meldung `` expected int, found none `` (bei `err(…)` ebenso `found err(…)`, bei `some(3)` `` found ?int ``), Hinweis bei einer Deklaration `declare it as ?int n` (bei `err(e)` `int!AgeErr n`, mit dem Typ von `e`). Nur wenn gar keine Stelle da ist (`none == none`, `print(none)`), ist es `R12`, Meldung `` `none` needs a place of type ?T `` bzw. `` `err(…)` needs a place of type T!E ``, ohne Hinweis.
+- **Kanonisch** ist an einer `?T`-Stelle `x` statt `some(x)` (R31). `dif fmt` macht `some(x)` zu `x`, wenn die Stelle ein Ziel ist: Deklaration, Zuweisung, Argument, `return`. Nie als Operand von `==` und `!=`: dort bleibt `x == some(3)` stehen (`x == 3` wäre `R8`). Der Compiler meldet `some(x)` an einem Ziel nicht.
+- **`ok(x)`** gibt es nur als Muster in `switch`; als Ausdruck ist es `R12`, Meldung `` `ok` is only a pattern in switch ``, Hinweis `return the value directly: return 1`.
+- `void` steht auch in `int!void` nur als Rückgabetyp (R2); `?T!E` mit `?T` als Wert ist erlaubt.
 - **`try x`** hat den Typ `T`, wenn `x` ein `T!E` oder `?T` ist, und gilt nur in Funktionen und `test`-Blöcken (R18). Ist `x` ein Fehler oder `none`, kehrt die Funktion sofort mit genau diesem Fehler bzw. `none` zurück; sonst rechnet der Ausdruck mit dem Wert weiter. `try` bindet wie ein Vorzeichen (§2): `try f(a) + try f(b)` ist `(try f(a)) + (try f(b))`. Als Anweisung steht `try f()` für den Aufruf `f()` (R3); der Wert `T` zählt für R13 wie das Ergebnis eines Aufrufs.
 
   | `x` | Funktion gibt | `try x` | `try x or e` |
@@ -865,9 +869,9 @@ Teil 2b legt fest:
   - `x` kann nicht scheitern: `` `try` needs a result of type T!E or ?T, found int ``, Hinweis `remove try`.
   - `or` in einer Funktion, die kein `U!F` liefert: `` `or` needs a function that returns U!F ``, Hinweis `remove the or part, or return int!F`.
   - `or` ohne `try` ist `S1`, Meldung `` unexpected `or` ``, Hinweis `or belongs to try: try f() or E.V(…)`.
-- **`try x or e`:** `e` wird nur ausgewertet, wenn `x` scheitert; es ersetzt den ursprünglichen Fehler (er ist danach nicht mehr erreichbar). Für `?T` ersetzt es `none`. `or` gehört zum unmittelbar davorstehenden `try` und umfasst genau einen `postfix`-Ausdruck: `try f() or E.V(1) + 2` ist `(try f() or E.V(1)) + 2`.
+- **`try x or e`:** `e` wird nur ausgewertet, wenn `x` scheitert; es ersetzt den ursprünglichen Fehler (er ist danach nicht mehr erreichbar). Für `?T` ersetzt es `none`. Hat `e` nicht den Fehlertyp der Funktion, ist es `R8`. `or` gehört zum unmittelbar davorstehenden `try` und umfasst genau einen `postfix`-Ausdruck: `try f() or E.V(1) + 2` ist `(try f() or E.V(1)) + 2`.
 - **`a ?? b`** ist `a`, wenn `a` einen Wert hat, sonst `b`; `a` ist ein `?T` oder `T!E`, `b` und das Ergebnis sind `T`. `b` wird nur ausgewertet, wenn es gebraucht wird. `??` bindet am schwächsten und ist rechtsassoziativ: `a ?? b ?? c` ist `a ?? (b ?? c)`. Ist `a` weder `?T` noch `T!E`, ist es `R12` am `??`, Meldung `` `??` needs a ?T or T!E on the left, found int ``, Hinweis `remove the ?? and its default`. Ein `b` anderen Typs ist `R8`.
-- **`void!E main()`** ist neben `void main()` erlaubt; jede andere Form von `main` ist `R1`, Meldung `` `main` must return void or void!E ``. Kommt ein Fehler aus `main` heraus, schreibt das Programm eine Zeile `error: ` und die Textform des Fehlers (R28) auf stderr und endet mit Exit-Code 1; was vorher auf stdout stand, bleibt erhalten. Einen Fehler gibt `main` an die Umgebung, ein Panic (R14) endet mit Exit-Code 2.
+- **`void!E main()`** ist neben `void main()` erlaubt; `E` ist jeder Typ; jede andere Form von `main` ist `R1`, Meldung `` `main` must return void or void!E ``. Kommt ein Fehler aus `main` heraus, schreibt das Programm eine Zeile `error: ` und die Textform des Fehlers (R28; ein `str` unverändert, wie bei `print`) auf stderr und endet mit Exit-Code 1; was vorher auf stdout stand, bleibt erhalten. Einen Fehler gibt `main` an die Umgebung, ein Panic (R14) endet mit Exit-Code 2.
 - `switch` über `T!E` und `?T` steht in R10, Verwendungspflicht in R13, Gleichheit und Textform in R28.
 
 ```dif
@@ -1000,7 +1004,7 @@ main.dif:3:13: error[R12]: `??` needs a ?T or T!E on the left, found int
   hint: remove the ?? and its default
 ```
 
-```dif error R12
+```dif error R8
 void main() {
     int n = none
     print(n)
@@ -1008,8 +1012,8 @@ void main() {
 ```
 
 ```
-main.dif:2:13: error[R12]: `none` needs a place of type ?T, found int
-  hint: declare it as ?int n = none
+main.dif:2:13: error[R8]: expected int, found none
+  hint: declare it as ?int n
 ```
 
 ```dif error R12
@@ -1243,7 +1247,7 @@ main.dif:3:13: error[R15]: if as a value needs else
 
 ### R18 — Tests
 
-**Regel.** Tests stehen neben dem Code: `test "name" { }`, geprüft mit `expect(cond)`. `dif test` führt sie aus, auch die Codebeispiele in `///`-Kommentaren.
+**Regel.** Tests stehen neben dem Code: `test "name" { }`, geprüft mit `expect(cond)`. `dif test` führt sie aus, ab v0.2 auch die Codebeispiele in `///`-Kommentaren.
 
 ```ebnf
 test_decl = "test" STRING [ "panics" STRING ] block ;
@@ -1327,7 +1331,7 @@ test result: 2 passed, 2 failed
 Mit `--json` (eine Zeile, Exit-Code 1):
 
 ```
-{"tests":[{"file":"main.dif","line":16,"name":"addition","status":"ok"},{"file":"main.dif","line":21,"name":"first of zero","status":"fail","failure":{"kind":"try","line":24,"column":13,"offset":341,"message":"try failed: ParseErr.Empty","values":[],"output":""}},{"file":"main.dif","line":28,"name":"overflow","status":"ok"},{"file":"main.dif","line":33,"name":"wrong sum","status":"fail","failure":{"kind":"expect","line":36,"column":5,"offset":527,"message":"expect failed: a + 2 == 5 || a == 0","values":[{"expr":"a + 2","value":"4"},{"expr":"a","value":"2"}],"output":"checking\n"}}],"passed":2,"failed":2}
+{"tests":[{"file":"main.dif","line":16,"name":"addition","status":"ok"},{"file":"main.dif","line":21,"name":"first of zero","status":"fail","failure":{"kind":"try","line":24,"column":13,"offset":329,"message":"try failed: ParseErr.Empty","values":[],"output":""}},{"file":"main.dif","line":28,"name":"overflow","status":"ok"},{"file":"main.dif","line":33,"name":"wrong sum","status":"fail","failure":{"kind":"expect","line":36,"column":5,"offset":523,"message":"expect failed: a + 2 == 5 || a == 0","values":[{"expr":"a + 2","value":"4"},{"expr":"a","value":"2"}],"output":"checking\n"}}],"passed":2,"failed":2}
 ```
 
 ```dif error R18
@@ -1421,6 +1425,11 @@ Teil 2a ergänzt:
 - Ein `struct` ist `equal`, wenn alle Felder es sind; `==` vergleicht Feld für Feld. Ein `enum` vergleicht Variante und Werte. `<` gibt es für beide nicht (`R8`).
 - Die Textform sieht aus wie das Literal: `Point{x: 1, y: 2}` (Felder in Deklarationsreihenfolge), `Seat.Taken`, `BookErr.NoSuchSeat(3, 5)`. Ein `str` darin steht in Anführungszeichen mit Escapes (`Person{name: "Ada"}`); allein ausgegeben bleibt ein `str` unverändert.
 
+Teil 2b ergänzt `?T` und `T!E`:
+
+- Sie sind `equal` und `text`, wenn `T` (und `E`) es sind. `==` vergleicht: zwei `none` sind gleich, zwei Werte, wenn ihre Werte gleich sind; bei `T!E` sind zwei Fehler gleich, wenn ihre Fehler gleich sind, ein Wert und ein Fehler nie. `==` und `!=` verlangen gleiche Typen (R8). `x == 3` mit `x` vom Typ `?int` ist `R8`, Meldung `` cannot apply `==` to ?int and int ``, Hinweis `x == some(3)`; `r == 3` mit `r` vom Typ `int!E` ebenso (`` cannot apply `==` to int!E and int ``), Hinweis `use switch to look at the value`. `none` und `err(e)` nehmen den Typ des anderen Operanden an. `<` gibt es nicht (`R8`).
+- Die Textform nennt die Form wie ein Muster (R10): `some(4)`, `none`, `ok(30)`, `err(AgeErr.Negative)`; bei `void!E` `ok` ohne Klammern. Ein `str` darin steht in Anführungszeichen (`some("a")`).
+
 ### R29 — Zahlen
 
 **Regel.** Zahlen: Ganzzahl-`/` rundet Richtung 0, `%` hat das Vorzeichen des Dividenden; Floats folgen IEEE 754 (`inf`, `NaN`, `NaN == NaN` ist false); Ganzzahl-Division durch 0, `INT_MIN / -1` und Shifts ab der Bitbreite brechen ab. Ausdrücke und Argumente werden von links nach rechts ausgewertet.
@@ -1457,11 +1466,6 @@ panic: shift by 64 out of range 0..63 (main.dif:3:13)
 **Regel.** `map[K]V` schreibt man `{k: v, …}`; `m[k]` liefert `?V`, `m[k] = v` setzt, die Reihenfolge ist die der Einfügung.
 
 *Ausarbeitung in Teil 2 (M2).*
-
-Teil 2b ergänzt `?T` und `T!E`:
-
-- Sie sind `equal` und `text`, wenn `T` (und `E`) es sind. `==` vergleicht: zwei `none` sind gleich, zwei Werte, wenn ihre Werte gleich sind; bei `T!E` sind zwei Fehler gleich, wenn ihre Fehler gleich sind, ein Wert und ein Fehler nie. `==` verlangt gleiche Typen (R8): `x == 3` mit `x` vom Typ `?int` ist `R8`, Meldung `` cannot apply `==` to ?int and int ``, Hinweis `x == some(3)`; nur `none` nimmt den Typ des anderen Operanden an. `<` gibt es nicht (`R8`).
-- Die Textform nennt die Form wie ein Muster (R10): `some(4)`, `none`, `ok(30)`, `err(AgeErr.Negative)`; bei `void!E` `ok` ohne Klammern. Ein `str` darin steht in Anführungszeichen (`some("a")`).
 
 ### R31 — Erlaubte Umwandlungen
 
