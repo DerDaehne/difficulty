@@ -868,7 +868,7 @@ impl<'a> Emitter<'a> {
             }
             let _ = write!(
                 c,
-                "int main(int argc, char **argv) {{\n    switch (argc > 1 ? atoi(argv[1]) : -1) {{\n{runs}    default: return 4;\n    }}\n    return 0;\n}}\n"
+                "int main(int argc, char **argv) {{\n    setvbuf(stdout, NULL, _IOLBF, 0); // a crash keeps the lines printed so far\n    switch (argc > 1 ? atoi(argv[1]) : -1) {{\n{runs}    default: return 4;\n    }}\n    return 0;\n}}\n"
             );
             return c;
         }

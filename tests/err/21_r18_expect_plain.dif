@@ -1,0 +1,4 @@
+// expect: error[R18] 3:5
+void check(int n) {
+    expect(n > 0)
+}

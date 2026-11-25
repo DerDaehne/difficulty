@@ -1,0 +1,44 @@
+enum Err {
+    Neg(int n)
+}
+
+int!Err pos(int n) {
+    print("pos {n}")
+    if n < 0 {
+        return err(Err.Neg(n))
+    }
+    return n
+}
+
+int loud(int n) {
+    print("loud {n}")
+    return n
+}
+
+int!Err sum(int a, int b) {
+    return try pos(a) + try pos(b)
+}
+
+int!Err mixed(int a, int b) {
+    return loud(a) + try pos(b)
+}
+
+void!Err show() {
+    print(try pos(1) + loud(2))
+    print(try pos(-3) + loud(4))
+    print("not reached")
+}
+
+void main() {
+    print(sum(-1, -2))
+    print(sum(1, 2))
+    print(mixed(1, -5))
+    print(some(loud(1)) == some(loud(2)))
+    print(pos(7) == err(Err.Neg(loud(8))))
+    switch show() {
+    case ok:
+        print("ok")
+    case err(Err e):
+        print("stopped {e}")
+    }
+}

@@ -1,0 +1,10 @@
+// expect: error[R12] 9:12
+enum E { Bad }
+
+int!E parse(int n) {
+    return n
+}
+
+int twice(int n) {
+    return try parse(n) * 2
+}

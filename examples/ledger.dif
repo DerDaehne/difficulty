@@ -1,0 +1,83 @@
+// Ledger: errors in the type (T!E, ?T), try, ??, void!E main, and tests.
+// `dif run` ends with `error: TxErr.Insufficient(380)` and exit code 1 on purpose;
+// `dif test examples/ledger.dif` runs the tests.
+enum TxErr {
+    Empty
+    Insufficient(int missing)
+    Frozen
+}
+
+struct Account {
+    str owner
+    int balance
+    bool frozen = false
+}
+
+?Account find(str name) {
+    if name == "ada" {
+        return Account{owner: "ada", balance: 120}
+    }
+    if name == "bob" {
+        return Account{owner: "bob", balance: 5, frozen: true}
+    }
+    return none
+}
+
+int!TxErr withdraw(Account a, int amount) {
+    if a.frozen {
+        return err(TxErr.Frozen)
+    }
+    if amount > a.balance {
+        return err(TxErr.Insufficient(amount - a.balance))
+    }
+    return a.balance - amount
+}
+
+int!TxErr left_after(str name, int amount) {
+    Account a = find(name) ?? Account{owner: "", balance: 0}
+    if a.owner == "" {
+        return err(TxErr.Empty)
+    }
+    return try withdraw(a, amount)
+}
+
+void!TxErr main() {
+    print(try left_after("ada", 20))
+    print(left_after("bob", 1))
+    print(left_after("eve", 1))
+    print(find("eve") ?? Account{owner: "nobody", balance: 0})
+    print(try left_after("ada", 500))
+    print("not reached")
+}
+
+test "withdraw leaves the rest" {
+    expect((left_after("ada", 20) ?? -1) == 100)
+}
+
+test "unknown owner" {
+    expect(left_after("eve", 1) == err(TxErr.Empty))
+    expect(find("eve") == none)
+}
+
+test "overdraw reports the missing amount" {
+    switch left_after("ada", 150) {
+    case ok(int n):
+        expect(n < 0)
+    case err(TxErr e):
+        expect(e == TxErr.Insufficient(30))
+    }
+}
+
+test "frozen accounts" {
+    expect(left_after("bob", 1) == err(TxErr.Frozen))
+}
+
+test "try gives the value" {
+    int n = try left_after("ada", 20)
+    expect(n == 100)
+}
+
+test "division by zero" panics "division by zero" {
+    int zero = 0
+    print(1 / zero)
+}

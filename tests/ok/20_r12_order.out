@@ -1,0 +1,19 @@
+pos -1
+err(Err.Neg(-1))
+pos 1
+pos 2
+ok(3)
+loud 1
+pos -5
+err(Err.Neg(-5))
+loud 1
+loud 2
+false
+pos 7
+loud 8
+false
+pos 1
+loud 2
+3
+pos -3
+stopped Err.Neg(-3)

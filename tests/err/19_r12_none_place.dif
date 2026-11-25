@@ -1,0 +1,5 @@
+// expect: error[R8] 3:13
+void main() {
+    int n = none
+    print(n)
+}

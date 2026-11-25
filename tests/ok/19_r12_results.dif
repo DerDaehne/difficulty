@@ -1,0 +1,174 @@
+struct Point {
+    int x
+    int y
+}
+
+struct Cfg {
+    ?int limit = none
+    str name
+    int!str parsed = ok_dummy()
+}
+
+int!str ok_dummy() {
+    return 1
+}
+
+enum Err {
+    Bad
+    Worse(int n)
+}
+
+?str name_of(int n) {
+    if n == 1 {
+        return "one"
+    }
+    return none
+}
+
+int!Err pos(int n) {
+    if n < 0 {
+        return err(Err.Worse(n))
+    }
+    return n
+}
+
+void!Err check(int n) {
+    if n > 10 {
+        return err(Err.Bad)
+    }
+    print("checked {n}")
+}
+
+?int!Err both(int n) {
+    if n == 0 {
+        return err(Err.Bad)
+    }
+    ?int v = n
+    if n == 1 {
+        v = none
+    }
+    return v
+}
+
+int!Err chain(int a, int b) {
+    int x = try pos(a)
+    int y = try pos(b)
+    return x + y
+}
+
+int!str strs(int n) {
+    if n == 0 {
+        return err("zero \"quoted\"")
+    }
+    return n
+}
+
+int!Err tr(int n) {
+    return try strs(n) or Err.Worse(n)
+}
+
+?int opt_chain(int n) {
+    int v = try half(n)
+    return v + 1
+}
+
+?int half(int n) {
+    if n % 2 != 0 {
+        return none
+    }
+    return n / 2
+}
+
+void bump(mut ?int x) {
+    x = 5
+}
+
+int noisy(int v) {
+    print("noisy {v}")
+    return v
+}
+
+?int noisy_opt(int v) {
+    print("noisy_opt {v}")
+    return v
+}
+
+int!Err two(int a, int b) {
+    return try pos(a) + try pos(b)
+}
+
+void main() {
+    print(name_of(1))
+    print(name_of(2))
+    ?int o = none
+    print(o == none)
+    print(o != none)
+    o = 3
+    print(o == some(3))
+    print(o == some(4))
+    print(o == none)
+    bump(mut o)
+    print(o)
+    print(pos(3) == pos(3))
+    print(pos(-1) == err(Err.Worse(-1)))
+    print(pos(-1) == pos(1))
+    print(check(3))
+    print(check(30))
+    print(both(0))
+    print(both(1))
+    print(both(2))
+    print(chain(1, 2))
+    print(chain(-1, -2))
+    print(chain(1, -2))
+    print(strs(0))
+    print(tr(0))
+    print(tr(4))
+    print(opt_chain(4) ?? -1)
+    print(opt_chain(3) ?? -1)
+    print(noisy(1) + noisy(2))
+    print(half(4) ?? noisy(99))
+    print(half(3) ?? noisy(99))
+    print(two(-1, -2))
+    print(two(1, 2))
+    Cfg c = Cfg{name: "a"}
+    print(c)
+    print(Cfg{name: "b", limit: 7})
+    str s = "x: {name_of(1)} {pos(2)}"
+    print(s)
+    ?Point p = Point{x: 1, y: 2}
+    print(p)
+    print(p ?? Point{x: 0, y: 0})
+    switch pos(-4) {
+    case ok(int n):
+        print("ok {n}")
+    case err(Err e):
+        print("err {e}")
+    }
+    switch both(1) {
+    case ok(?int v):
+        switch v {
+        case some(int w):
+            print("some {w}")
+        case none:
+            print("none inside")
+        }
+    case err(_):
+        print("err")
+    }
+    switch check(1) {
+    case ok:
+        print("fine")
+    case err(Err e):
+        print("{e}")
+    }
+    switch name_of(5) {
+    case some(str t):
+        print(t)
+    default:
+        print("default")
+    }
+    print(if o == none { 1 } else { 2 })
+    int!Err r = pos(3)
+    int!Err r2 = 7
+    print("{r} {r2}")
+}

@@ -1,0 +1,45 @@
+some("one")
+none
+true
+false
+true
+false
+false
+some(5)
+true
+true
+false
+checked 3
+ok
+err(Err.Bad)
+err(Err.Bad)
+ok(none)
+ok(some(2))
+ok(3)
+err(Err.Worse(-1))
+err(Err.Worse(-2))
+err("zero \"quoted\"")
+err(Err.Worse(0))
+ok(4)
+3
+-1
+noisy 1
+noisy 2
+3
+2
+noisy 99
+99
+err(Err.Worse(-1))
+ok(3)
+Cfg{limit: none, name: "a", parsed: ok(1)}
+Cfg{limit: some(7), name: "b", parsed: ok(1)}
+x: some("one") ok(2)
+some(Point{x: 1, y: 2})
+Point{x: 1, y: 2}
+err Err.Worse(-4)
+none inside
+checked 1
+fine
+default
+2
+ok(3) ok(7)
