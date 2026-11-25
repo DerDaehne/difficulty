@@ -1649,7 +1649,11 @@ impl<'a> Checker<'a> {
         };
         let tn = self.tn(t);
         let (msg, hint) = match ctx {
-            "if" | "else if" | "while" | "expect" => (
+            "expect" => (
+                format!("condition is {tn}, not bool"),
+                cmp.map(|c| format!("compare explicitly: expect({c})")),
+            ),
+            "if" | "else if" | "while" => (
                 format!("condition is {tn}, not bool"),
                 cmp.map(|c| format!("compare explicitly: {ctx} {c}")),
             ),
@@ -2189,6 +2193,7 @@ impl<'a> Checker<'a> {
                 if args.len() != 1 {
                     let msg = format!("`print` takes 1 argument, found {}", args.len());
                     self.err("R8", e.pos, msg, None);
+                    return (Ty::Void, Val::Runtime);
                 }
                 for a in args {
                     let (t, _) = self.rvalue(a);
@@ -2219,6 +2224,7 @@ impl<'a> Checker<'a> {
                 if args.len() != 1 {
                     let msg = format!("`expect` takes 1 argument, found {}", args.len());
                     self.err("R8", e.pos, msg, None);
+                    return (Ty::Void, Val::Runtime);
                 }
                 for a in args {
                     self.cond(a, "expect");

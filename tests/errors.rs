@@ -509,7 +509,7 @@ fn tests_r18() {
         "R9",
         "2:12",
         "condition is int, not bool",
-        "compare explicitly: expect 1 != 0",
+        "compare explicitly: expect(1 != 0)",
     );
     bad(
         "test \"x\" {\n    return 1\n}\n",
@@ -519,7 +519,7 @@ fn tests_r18() {
         "",
     );
     bad(
-        "test \"x\" {\n    expect(true, false)\n}\n",
+        "test \"x\" {\n    expect(1, 2)\n}\n",
         "R8",
         "2:5",
         "`expect` takes 1 argument, found 2",

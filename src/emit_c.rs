@@ -229,7 +229,13 @@ fn changes(stmts: &[Stmt], n: &str) -> bool {
 fn sets(e: &Expr, n: &str) -> bool {
     match &e.kind {
         ExprKind::Mut(x) => matches!(&x.kind, ExprKind::Ident(p) if p == n) || sets(x, n),
-        ExprKind::Unary(_, x) | ExprKind::Paren(x) | ExprKind::Field(x, _) => sets(x, n),
+        ExprKind::Unary(_, x)
+        | ExprKind::Paren(x)
+        | ExprKind::Field(x, _)
+        | ExprKind::SomeVal(x)
+        | ExprKind::ErrVal(x)
+        | ExprKind::OkVal(Some(x)) => sets(x, n),
+        ExprKind::Try(x, or) => sets(x, n) || or.as_ref().is_some_and(|(_, e)| sets(e, n)),
         ExprKind::Binary(_, l, r, _) | ExprKind::Index(l, r) => sets(l, n) || sets(r, n),
         ExprKind::Call(f, args) => sets(f, n) || args.iter().any(|a| sets(a, n)),
         ExprKind::StructLit(_, inits) => inits.iter().any(|i| sets(&i.value, n)),
@@ -246,6 +252,8 @@ fn sets(e: &Expr, n: &str) -> bool {
         | ExprKind::Bool(_)
         | ExprKind::Ident(_)
         | ExprKind::SelfRef
+        | ExprKind::NoneVal
+        | ExprKind::OkVal(None)
         | ExprKind::Missing => false,
     }
 }
