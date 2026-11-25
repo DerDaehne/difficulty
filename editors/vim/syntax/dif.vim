@@ -17,8 +17,8 @@ syn match difTypeOp "[?!]\ze\s*\h"
 
 " Numbers (spec 1.4)
 syn match difNumber "\<\d[0-9_]*\>"
-syn match difNumber "\<0[xX]\x[0-9a-fA-F_]*\>"
-syn match difNumber "\<0[bB][01][01_]*\>"
+syn match difNumber "\<0x\x[0-9a-fA-F_]*\>"
+syn match difNumber "\<0b[01][01_]*\>"
 syn match difFloat "\<\d[0-9_]*\.\d[0-9_]*\%([eE][+-]\=\d\+\)\=\>"
 syn match difFloat "\<\d[0-9_]*[eE][+-]\=\d\+\>"
 

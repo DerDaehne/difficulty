@@ -29,8 +29,8 @@
     ;; ?T and T!E
     ("[?!]\\(?:[ \t]*\\)\\([A-Za-z_][A-Za-z0-9_]*\\)" 1 font-lock-type-face)
     ;; numbers
-    ("\\_<0[xX][0-9a-fA-F_]+\\_>" . font-lock-constant-face)
-    ("\\_<0[bB][01_]+\\_>" . font-lock-constant-face)
+    ("\\_<0x[0-9a-fA-F][0-9a-fA-F_]*\\_>" . font-lock-constant-face)
+    ("\\_<0b[01][01_]*\\_>" . font-lock-constant-face)
     ("\\_<[0-9][0-9_]*\\(?:\\.[0-9][0-9_]*\\)?\\(?:[eE][+-]?[0-9]+\\)?\\_>"
      . font-lock-constant-face)
     ;; escapes and {interpolation} inside strings
