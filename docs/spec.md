@@ -225,7 +225,7 @@ main.dif:1:1: error[R1]: statement outside a function
 **Regel.** Jede Deklaration nennt ihren Typ vorn: Variablen, Parameter, Felder, Schleifen- und `case`-Variablen.
 
 ```ebnf
-type       = [ "?" ] base_type [ "!" IDENT ] ;         (* ?T und T!E: R12 *)
+type       = [ "?" ] base_type [ "!" base_type ] ;         (* ?T und T!E: R12 *)
 base_type  = "int" | "bool" | "str" | "void" | IDENT ;   (* IDENT: struct oder enum des Moduls; weitere Typen folgen *)
 func_decl  = type IDENT "(" [ params ] ")" block ;
 params     = param { "," param } [ "," ] ;
@@ -845,8 +845,8 @@ err_val = "err" "(" expr ")" ;
 
 Teil 2b legt fest:
 
-- **Typen.** `?T` ist ein `T` oder `none`; `T!E` ist ein `T` oder ein Fehler `E`; `void!E` ist „nichts oder ein Fehler“. `E` ist immer ein `enum`; sonst `R12` am `E`, Meldung `` the error type must be an enum, found `int` `` (bzw. `` found struct `Point` ``), Hinweis `declare an enum for the errors, e.g. enum ParseErr { … }`. In Typen bindet `!E` am schwächsten: `?int!E` ist `(?int)!E`. Weiter verschachtelt (`??int`, `int!A!B`) ist `S1`, Hinweis `a type has at most one ? and one !E`. `?void` ist `R12`, Meldung `?void has no value that could be missing`, Hinweis `use void!E`. `void!E` steht wie `void` nur als Rückgabetyp; sonst darf `?T` und `T!E` überall stehen, wo ein Typ steht (Variablen, Parameter, Felder).
-- **Erfolg.** Ein `T` passt dort, wo `?T` oder `T!E` erwartet wird (R31): bei `return`, Initialisierung, Zuweisung, Argument und als Operand von `==`. Eine `void!E`-Funktion endet mit `return` oder am Ende ihres Rumpfs und ist damit erfolgreich; jede andere braucht auf jedem Weg ein `return` mit Wert (R8).
+- **Typen.** `?T` ist ein `T` oder `none`; `T!E` ist ein `T` oder ein Fehler `E`; `void!E` ist „nichts oder ein Fehler“. `E` ist ein beliebiger Typ (`enum`, `struct`, `str`, …) ohne Sonderregel; ausgegeben wird er in der Textform von R28. In Typen bindet `!E` am schwächsten: `?int!E` ist `(?int)!E`. Weiter verschachtelt (`??int`, `int!A!B`) ist `S1`, Hinweis `a type has at most one ? and one !E`. `?void` ist `R12`, Meldung `?void has no value that could be missing`, Hinweis `use void!E`. `void!E` steht wie `void` nur als Rückgabetyp; sonst darf `?T` und `T!E` überall stehen, wo ein Typ steht (Variablen, Parameter, Felder).
+- **Erfolg.** Ein `T` passt dort, wo `?T` oder `T!E` erwartet wird (R31): bei `return`, Initialisierung, Zuweisung und Argument; als Operand von `==` nicht (R28). Eine `void!E`-Funktion endet mit `return` oder am Ende ihres Rumpfs und ist damit erfolgreich; jede andere braucht auf jedem Weg ein `return` mit Wert (R8).
 - **`none`** ist der leere Wert von `?T`, **`err(e)`** der Fehlerwert von `T!E`; `e` hat den Typ `E` (sonst `R8`). Beide nehmen ihren Typ von ihrer Stelle (R8). Ohne passende Stelle ist es `R12`, Meldung `` `none` needs a place of type ?T, found int `` bzw. `` `err(…)` needs a place of type T!E, found int `` (der gefundene Typ steht dort), bei einer Deklaration mit Hinweis `declare it as ?int n = none` (bzw. `int!E`). `ok(x)` und `some(x)` gibt es nur als Muster in `switch`; als Ausdruck sind sie `R12`, Meldung `` `ok` is only a pattern in switch `` (bzw. `some`), Hinweis `return the value directly: return 1`.
 - **`try x`** hat den Typ `T`, wenn `x` ein `T!E` oder `?T` ist, und gilt nur in Funktionen und `test`-Blöcken (R18). Ist `x` ein Fehler oder `none`, kehrt die Funktion sofort mit genau diesem Fehler bzw. `none` zurück; sonst rechnet der Ausdruck mit dem Wert weiter. `try` bindet wie ein Vorzeichen (§2): `try f(a) + try f(b)` ist `(try f(a)) + (try f(b))`. Als Anweisung steht `try f()` für den Aufruf `f()` (R3); der Wert `T` zählt für R13 wie das Ergebnis eines Aufrufs.
 
@@ -1024,7 +1024,21 @@ main.dif:4:12: error[R12]: `ok` is only a pattern in switch
   hint: return the value directly: return 1
 ```
 
-Beispiele zu R10 und R13 in Teil 2b:
+Beispiele zu R8, R10 und R13 in Teil 2b:
+
+```dif error R8
+void main() {
+    ?int x = 4
+    print(x == 3)
+}
+```
+
+```
+main.dif:3:13: error[R8]: cannot apply `==` to ?int and int
+  hint: unwrap it first: (x ?? 0) == 3
+```
+
+Weitere Beispiele:
 
 ```dif error R10
 ?int half(int n) {
@@ -1445,7 +1459,7 @@ panic: shift by 64 out of range 0..63 (main.dif:3:13)
 
 Teil 2b ergänzt `?T` und `T!E`:
 
-- Sie sind `equal` und `text`, wenn `T` (und `E`) es sind. `==` vergleicht: zwei `none` sind gleich, zwei Werte, wenn ihre Werte gleich sind; bei `T!E` sind zwei Fehler gleich, wenn ihre Fehler gleich sind, ein Wert und ein Fehler nie. Ein `T` passt als Operand (R31): `x == 3` mit `x` vom Typ `?int` vergleicht mit dem Wert `3`. `<` gibt es nicht (`R8`).
+- Sie sind `equal` und `text`, wenn `T` (und `E`) es sind. `==` vergleicht: zwei `none` sind gleich, zwei Werte, wenn ihre Werte gleich sind; bei `T!E` sind zwei Fehler gleich, wenn ihre Fehler gleich sind, ein Wert und ein Fehler nie. `==` verlangt gleiche Typen (R8): `x == 3` mit `x` vom Typ `?int` ist `R8`, Meldung `` cannot apply `==` to ?int and int ``, Hinweis `unwrap it first: (x ?? 0) == 3`; nur `none` nimmt den Typ des anderen Operanden an. `<` gibt es nicht (`R8`).
 - Die Textform nennt die Form wie ein Muster (R10): `some(4)`, `none`, `ok(30)`, `err(AgeErr.Negative)`; bei `void!E` `ok` ohne Klammern. Ein `str` darin steht in Anführungszeichen (`some("a")`).
 
 ### R31 — Erlaubte Umwandlungen
