@@ -783,6 +783,10 @@ impl<'a> Parser<'a> {
             return;
         }
         self.unclosed = true;
+        // a statement cut off by the end of the file was already reported there
+        if *self.peek() == Tok::Eof && self.out.last().is_some_and(|d| d.pos == self.pos()) {
+            return;
+        }
         let hint = match self.peek() {
             Tok::Eof => "add `}`".to_string(),
             _ => format!("add `}}` before line {}", self.pos().line),

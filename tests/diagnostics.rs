@@ -284,3 +284,14 @@ fn deep_nesting_is_an_error_not_a_crash() {
     assert_eq!(ds.len(), 1);
     assert!(ds[0].msg.contains("nesting is deeper than 256 levels"));
 }
+
+#[test]
+fn declaration_cut_off_by_end_of_file_is_one_message() {
+    for src in [
+        "int x =",
+        "void main() {\n    int x =",
+        "void main() {\n    int x =\n",
+    ] {
+        assert_eq!(one(src).code, "S1", "{src:?}");
+    }
+}

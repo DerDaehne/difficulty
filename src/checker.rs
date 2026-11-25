@@ -1901,7 +1901,11 @@ impl<'a> Checker<'a> {
         let (bt, _) = self.expr(base);
         let Ty::Named(tid) = bt else {
             if bt != Ty::Err {
-                let msg = format!("{} has no method `{m}`", self.tn(bt));
+                let msg = if bt == Ty::Void {
+                    format!("`{m}` needs a value, but the call before it returns nothing")
+                } else {
+                    format!("{} has no method `{m}`", self.tn(bt))
+                };
                 self.err("R8", e.pos, msg, None);
             }
             return (Ty::Err, Val::Runtime);

@@ -200,3 +200,10 @@ fn declarations() {
         ("R7", "`C.twice` changes self and needs a variable")
     );
 }
+
+#[test]
+fn method_on_void_call_says_no_value() {
+    let (code, msg) = one(&prog("Point p = Point{x: 1, y: 2}\np.move(1).move(2)"));
+    assert_eq!(code, "R8");
+    assert!(msg.contains("returns nothing"), "{msg}");
+}
