@@ -15,4 +15,21 @@ cargo test
 cargo run -- run examples/fib.dif
 ```
 
+## Editoren
+
+Syntax-Hervorhebung, Einrückung (4 Leerzeichen) und `//`-Kommentare für `.dif`-Dateien.
+
+Vim/Neovim: `editors/vim` in den Runtimepath legen, zum Beispiel
+
+```sh
+mkdir -p ~/.vim && cp -r editors/vim/* ~/.vim/        # Neovim: ~/.config/nvim/
+```
+
+Emacs: in der Konfiguration
+
+```elisp
+(add-to-list (quote load-path) "/pfad/zu/difficulty/editors/emacs")
+(require (quote dif-mode))
+```
+
 Lizenz: [MIT](LICENSE).
