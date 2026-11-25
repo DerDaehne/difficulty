@@ -1,0 +1,54 @@
+struct Point {
+    int x
+    int y
+}
+
+struct Scene {
+    Point player
+    int score
+}
+
+void shift(mut Point p, int dx) {
+    p.x += dx
+}
+
+void swap_x(mut Point a, mut Point b) {
+    int t = a.x
+    a.x = b.x
+    b.x = t
+}
+
+int bump(mut int n) {
+    n += 1
+    return n
+}
+
+void shift_twice(mut Point p) {
+    shift(mut p, 1)
+    shift(mut p, 10)
+}
+
+int snap(mut Point p, Point before, int dx) {
+    p.x += dx
+    return before.x
+}
+
+void main() {
+    Point b = Point{x: 1, y: 2}
+    shift(mut b, 5)
+    print(b)
+    Point c = Point{x: 7, y: 8}
+    swap_x(mut b, mut c)
+    print("{b} {c}")
+    Scene s = Scene{player: Point{x: 0, y: 0}, score: 0}
+    shift(mut s.player, 3)
+    shift_twice(mut s.player)
+    int r = bump(mut s.score)
+    print("{s} {r}")
+    Point p = Point{x: 1, y: 1}
+    int seen = snap(mut p, p, 50)
+    print("{seen} {p}")
+    int total = 0
+    int both = bump(mut total) + bump(mut total)
+    print("{total} {both}")
+}

@@ -1,0 +1,73 @@
+enum Shape {
+    Square(int side)
+    Rect(int w, int h)
+    Named(str label, int n)
+    Dot
+}
+
+const int LIMIT = 10
+
+int area(Shape s) {
+    switch s {
+    case Shape.Square(int side):
+        return side * side
+    case Shape.Rect(int w, int h):
+        return w * h
+    case Shape.Named(_, int n):
+        return n
+    case Shape.Dot:
+        return 0
+    }
+}
+
+str classify(int n) {
+    switch n {
+    case 0:
+        return "null"
+    case 1, 2, 3, 4, 5, 6, 7, 8, 9:
+        return "einstellig"
+    case LIMIT:
+        return "zehn"
+    case -1:
+        return "minus eins"
+    default:
+        return if n < 0 { "negativ" } else { "groß" }
+    }
+}
+
+int word(str s) {
+    switch s {
+    case "one":
+        return 1
+    case "two", "zwei":
+        return 2
+    default:
+        return 0
+    }
+}
+
+void main() {
+    print(area(Shape.Rect(3, 4)))
+    print(area(Shape.Named("x", 9)))
+    print(classify(7))
+    print(classify(10))
+    print(classify(-1))
+    print(classify(-5))
+    print(classify(50))
+    print(word("zwei"))
+    print(word("three"))
+    print(Shape.Square(2))
+    print(Shape.Named("a\"b", 1))
+    int sum = 0
+    for int i in range(6) {
+        switch i {
+        case 1, 3:
+            continue
+        case 5:
+        default:
+            sum += i
+        }
+        sum += 100
+    }
+    print(sum)
+}

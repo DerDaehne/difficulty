@@ -1,0 +1,62 @@
+// Shapes: struct, enum, switch, methods and mut.
+struct Point {
+    int x
+    int y
+}
+
+enum Shape {
+    Square(Point at, int side)
+    Rect(Point at, int w, int h)
+    Dot(Point at)
+}
+
+struct Canvas {
+    Shape last
+    int drawn
+}
+
+int Shape.area() {
+    switch self {
+    case Shape.Square(_, int side):
+        return side * side
+    case Shape.Rect(_, int w, int h):
+        return w * h
+    case Shape.Dot:
+        return 0
+    }
+}
+
+str Shape.kind() {
+    return if self == Shape.Dot(Point{x: 0, y: 0}) { "origin" } else {
+        str k = "shape"
+        k
+    }
+}
+
+void Canvas.draw(Shape s) {
+    self.last = s
+    self.drawn += 1
+}
+
+void grow(mut Shape s) {
+    switch s {
+    case Shape.Square(Point at, int side):
+        s = Shape.Square(at, side + 1)
+    case Shape.Rect(Point at, int w, int h):
+        s = Shape.Rect(at, w + 1, h + 1)
+    default:
+    }
+}
+
+void main() {
+    Canvas c = Canvas{last: Shape.Dot(Point{x: 0, y: 0}), drawn: 0}
+    Shape sq = Shape.Square(Point{x: 1, y: 1}, 3)
+    c.draw(sq)
+    grow(mut sq)
+    c.draw(sq)
+    c.draw(Shape.Rect(Point{x: 2, y: 5}, 4, 6))
+    print(c)
+    print("area {sq.area()} {c.last.area()}")
+    print(c.last.kind())
+    print(Shape.Dot(Point{x: 0, y: 0}).kind())
+}

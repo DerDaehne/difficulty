@@ -1,0 +1,9 @@
+// expect: error[R10] 5:5
+enum Seat { Free, Taken }
+
+str symbol(Seat s) {
+    switch s {
+    case Seat.Free:
+        return "."
+    }
+}

@@ -1,0 +1,6 @@
+// expect: error[R15] 4:13
+void main() {
+    int n = 3
+    str s = if n > 0 { "positiv" }
+    print(s)
+}

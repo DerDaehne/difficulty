@@ -1,0 +1,16 @@
+// expect: error[R7] 15:5
+struct Counter {
+    int n
+}
+
+void Counter.inc() {
+    self.n += 1
+}
+
+Counter fresh() {
+    return Counter{n: 0}
+}
+
+void main() {
+    fresh().inc()
+}

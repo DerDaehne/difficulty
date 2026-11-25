@@ -34,22 +34,22 @@ pub fn check_bytes(file: &str, bytes: &[u8]) -> Vec<Diag> {
 pub fn compile(file: &str, bytes: &[u8]) -> Result<String, Vec<Diag>> {
     let src = lexer::decode(bytes).map_err(|d| vec![d])?;
     on_big_stack(|| {
-        let (module, folded) = front(file, src)?;
+        let (module, info) = front(file, src)?;
         if let Some(d) = checker::main_diag(&module) {
             return Err(vec![d]);
         }
-        Ok(emit_c::emit(file, &module, &folded))
+        Ok(emit_c::emit(file, &module, &info))
     })
 }
 
-fn front(file: &str, src: &str) -> Result<(ast::Module, checker::Folded), Vec<Diag>> {
+fn front(file: &str, src: &str) -> Result<(ast::Module, checker::Info), Vec<Diag>> {
     let (toks, mut diags) = lexer::lex(src);
     let (module, pdiags) = parser::parse(src, &toks, &diags);
     diags.extend(pdiags);
     if diags.is_empty() {
-        let (cdiags, folded) = checker::check(file, src, &module);
+        let (cdiags, info) = checker::check(file, src, &module);
         if cdiags.is_empty() {
-            return Ok((module, folded));
+            return Ok((module, info));
         }
         diags = cdiags;
     }

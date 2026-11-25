@@ -1,0 +1,33 @@
+int traced(int n) {
+    print("eval {n}")
+    return n
+}
+
+int pick(int n) {
+    return if n < 0 {
+        int m = -n
+        m
+    } else if n == 0 {
+        0
+    } else {
+        traced(n)
+    }
+}
+
+void main() {
+    int n = -3
+    str sign = if n < 0 { "negativ" } else if n == 0 { "null" } else { "positiv" }
+    int abs = if n < 0 {
+        int m = -n
+        m
+    } else {
+        n
+    }
+    print("{sign} {abs}")
+    print(pick(-4))
+    print(pick(0))
+    print(pick(6))
+    print(if n < 0 { 1 } else { 2 } + 3)
+    int k = if true { 1 } else { traced(99) }
+    print(k)
+}

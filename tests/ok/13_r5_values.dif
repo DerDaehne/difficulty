@@ -1,0 +1,42 @@
+struct Point {
+    int x
+    int y = 0
+}
+
+struct Line {
+    Point a
+    Point b = Point{x: 5, y: seven()}
+    str name = "line"
+}
+
+enum Seat { Free, Taken }
+
+int seven() {
+    return 7
+}
+
+int say(int n) {
+    print(n)
+    return n
+}
+
+Point grow(Point p) {
+    p.x += 100
+    return p
+}
+
+void main() {
+    Point a = Point{x: 1}
+    Point b = a
+    b.x = 10
+    Seat s = Seat.Taken
+    print("{a} {b} {a == b} {s}")
+    Point c = grow(a)
+    print("{a} {c}")
+    Line l = Line{a: Point{x: say(1), y: say(2)}, name: "n{say(3)}"}
+    print(l)
+    print(l.b.y)
+    print(Point{y: say(4), x: say(5)})
+    print(Point{x: 1, y: 2} != Point{x: 1, y: 2})
+    print(Point{x: 1} == Point{x: 1, y: 0})
+}

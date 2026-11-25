@@ -1,0 +1,10 @@
+// expect: error[R5] 8:15
+struct Point {
+    int x
+    int y
+}
+
+void main() {
+    Point p = Point{x: 1}
+    print(p)
+}

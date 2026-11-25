@@ -1,0 +1,57 @@
+struct Point {
+    int x
+    int y
+}
+
+struct Body {
+    Point pos
+    int hits
+}
+
+Point Point.moved(int dx) {
+    Point q = self
+    q.x += dx
+    return q
+}
+
+void Point.scale(int k) {
+    self.x *= k
+    self.y *= k
+}
+
+int Point.sum() {
+    return self.x + self.y
+}
+
+void Body.hit() {
+    self.hits += 1
+    self.pos.scale(2)
+}
+
+Point fresh() {
+    return Point{x: 3, y: 4}
+}
+
+enum Light { Red, Green }
+
+str Light.name() {
+    switch self {
+    case Light.Red:
+        return "red"
+    case Light.Green:
+        return "green"
+    }
+}
+
+void main() {
+    Point a = Point{x: 1, y: 2}
+    a.scale(3)
+    print(a)
+    print(a.moved(1).moved(2))
+    print(fresh().sum())
+    Body b = Body{pos: Point{x: 1, y: 1}, hits: 0}
+    b.hit()
+    b.hit()
+    print(b)
+    print(Light.Green.name())
+}

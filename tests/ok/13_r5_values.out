@@ -1,0 +1,12 @@
+Point{x: 1, y: 0} Point{x: 10, y: 0} false Seat.Taken
+Point{x: 1, y: 0} Point{x: 101, y: 0}
+1
+2
+3
+Line{a: Point{x: 1, y: 2}, b: Point{x: 5, y: 7}, name: "n3"}
+7
+4
+5
+Point{x: 5, y: 4}
+false
+true

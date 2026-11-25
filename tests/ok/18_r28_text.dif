@@ -1,0 +1,30 @@
+struct Person {
+    str name
+    int age
+}
+
+enum BookErr {
+    NoSuchSeat(int row, int seat)
+    Taken(Person who)
+    Closed
+}
+
+struct Event {
+    BookErr why
+    bool fine
+}
+
+void main() {
+    Person p = Person{name: "Ada \"L\"\n\{x\}", age: 36}
+    print(p)
+    print("{p}")
+    print("Ada")
+    print(BookErr.NoSuchSeat(3, 5))
+    print(BookErr.Taken(p))
+    print(Event{why: BookErr.Closed, fine: true})
+    print(BookErr.NoSuchSeat(3, 5) == BookErr.NoSuchSeat(3, 5))
+    print(BookErr.NoSuchSeat(3, 5) == BookErr.NoSuchSeat(3, 6))
+    print(BookErr.Closed != BookErr.NoSuchSeat(3, 5))
+    print(Person{name: "a", age: 1} == Person{name: "a", age: 1})
+    print(Person{name: "a", age: 1} == Person{name: "b", age: 1})
+}

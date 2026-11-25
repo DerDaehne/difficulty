@@ -2,7 +2,7 @@
 
 > A compiled language for AI agents and humans: C-like syntax, Python-like simplicity,
 > one way to write each thing, no silent fallbacks, diagnostics that say how to fix them.
-> This file covers the first language part ("Hallo, nativ"). The binding description
+> This file covers parts 1 ("Hallo, nativ") and 2a (values, methods). The binding description
 > is docs/spec.md; error codes are rule numbers (R1–R31) or lexical/syntax codes (L, S).
 
 ## Tools
@@ -119,6 +119,104 @@ int z = 0
 print(10 / z)
 ```
 
+## Part 2a: values, methods, `mut`, `switch`
+
+```dif
+struct Point {
+    int x
+    int y = 0
+}
+
+enum Shape {
+    Square(int side)
+    Rect(int w, int h)
+    Dot
+}
+
+Point Point.moved(int dx) {
+    Point q = self
+    q.x += dx
+    return q
+}
+
+void Point.scale(int k) {
+    self.x *= k
+    self.y *= k
+}
+
+void shift(mut Point p, int dx) {
+    p.x += dx
+}
+
+int area(Shape s) {
+    switch s {
+    case Shape.Square(int side):
+        return side * side
+    case Shape.Rect(int w, _):
+        return w
+    case Shape.Dot:
+        return 0
+    }
+}
+
+void main() {
+    Point a = Point{x: 1, y: 2}
+    Point b = a
+    shift(mut b, 5)
+    b.scale(2)
+    int n = if b.x > 10 { area(Shape.Square(3)) } else { 0 }
+    print("{a} {b} {b.moved(1)} {n} {Shape.Rect(3, 4)}")
+}
+```
+
+Output: `Point{x: 1, y: 2} Point{x: 12, y: 4} Point{x: 13, y: 4} 9 Shape.Rect(3, 4)`
+
+- **`struct` (R5).** One field per line, optional default (`int y = 0`, constants and
+  effect-free calls only, evaluated at every literal that omits the field). A literal
+  names every field without default, in any order, evaluated left to right:
+  `Point{x: 1}`. Assignment, parameters and return copy the value. A type cannot
+  contain itself.
+- **`enum` (R5).** `enum Seat { Free, Taken }`; variants may carry values
+  (`NoSuchSeat(int row, int seat)`). Always written with the type: `Seat.Free`,
+  `BookErr.NoSuchSeat(3, 5)`. Values are read only through `switch`.
+- **`mut` (R6).** A function that changes an argument takes it as `mut T p` and the
+  caller writes `mut`: `shift(mut b, 5)`. `mut` takes variables, fields (`mut s.player`).
+  A `mut` parameter that is never changed, a change that is never read afterwards (also
+  to a copy: a parameter without `mut`) and one place passed changeable twice in a call
+  are R6. An argument without `mut` that reads the same place sees the value from
+  before the call.
+- **Methods (R7).** `R Type.name(params)`; `self` is the place before the dot and may
+  be changed. `a.scale(2)` needs a variable or field when the method changes `self`;
+  methods that only read work on any expression: `fresh().total()`. No `mut` at the call.
+- **`switch` (R10).** Over `int`, `str` or `enum`; values are literals, `const` names or
+  `E.V`; `case 1, 2:` lists values; bindings `case E.V(int w, _):` (one value per
+  entry, `_` skips). No fall-through; `continue` and `return` work inside, `break` is not
+  used directly in a `switch`. Every variant is handled or there is a `default`; over
+  `int`/`str` `default` is required. Statements of a case start on the next line.
+- **`if` as a value (R15).** `str s = if n < 0 { "neg" } else { "pos" }`; `else` is
+  required, each branch ends with an expression (statements may come before it), only the
+  chosen branch runs, all branches have one type.
+- **Equality and text (R28).** `==` compares structs field by field and enums by variant
+  and values; text looks like the literal, `str` inside is quoted:
+  `Person{name: "Ada", age: 36}`, `BookErr.NoSuchSeat(3, 5)`. `<` does not exist for them.
+
+```dif error R6
+struct Point {
+    int x
+    int y
+}
+
+void shift(mut Point p, int dx) {
+    p.x += dx
+}
+
+void main() {
+    Point b = Point{x: 1, y: 2}
+    shift(b, 5)
+    print(b)
+}
+```
+
 ## Habits from other languages and their fixes
 
 | written | code | write instead |
@@ -140,6 +238,8 @@ print(10 / z)
 | `"n = " + n` | R8 | `"n = {n}"` |
 | `f(x)` result unused | R13 | `int y = f(x)` or `_ = f(x)` |
 | `int n` without value | R2 | `int n = 0` |
+| `shift(b, 5)` when `shift` takes `mut` | R6 | `shift(mut b, 5)` |
+| `case Free:` in a `switch` over an enum | R10 | `case Seat.Free:` |
 | assignment to an undeclared name | R2 | declare it: `int x = …` |
 | `void main(void)` | S1 | `void main()` |
 
@@ -165,8 +265,8 @@ void main() {
 Nesting deeper than 256 levels or more than 1024 operators in one expression is S1;
 a chain of more than 256 `const` using each other is R4. Split the code.
 
-## Not yet in part 1
+## Not yet
 
-Floating point and other number types, structs, enums, `switch`, lists, maps,
-`T!E`, `?T`, `try`, `??`, `mut`, methods, modules, tests, C import. They follow in
-later parts (see PLAN.md); using them gives an error that says so.
+Floating point and other number types, lists, maps, `T!E`, `?T`, `try`, `??`, modules,
+tests, C import, handles and sharing. They follow in later parts (see PLAN.md); using
+them gives an error that says so.

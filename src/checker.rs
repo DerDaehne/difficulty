@@ -45,13 +45,70 @@ const MAX_CONST_DEPTH: u32 = 256;
 /// Constant `int` values by expression span (byte offsets), for the C emitter.
 pub type Folded = HashMap<(u32, u32), i64>;
 
-pub fn check(file: &str, src: &str, m: &Module) -> (Vec<Diag>, Folded) {
+/// The body of a `struct` or `enum` type, with resolved types.
+pub enum TypeBody {
+    Struct(Vec<(String, Ty)>),
+    Enum(Vec<(String, Vec<(Ty, String)>)>),
+}
+
+pub struct TypeDef {
+    pub name: String,
+    pub body: TypeBody,
+}
+
+/// What the C emitter takes from the checker, so it never derives types again.
+pub struct Info {
+    pub folded: Folded,
+    /// Type of every checked expression, by span (byte offsets).
+    pub exprs: HashMap<(u32, u32), Ty>,
+    /// `Ty::Named(i)` is `types[i]`.
+    pub types: Vec<TypeDef>,
+    /// Methods (type name, method name) that change `self`; they take it by pointer.
+    pub self_changes: HashSet<(String, String)>,
+}
+
+pub fn check(file: &str, src: &str, m: &Module) -> (Vec<Diag>, Info) {
     let mut first = Checker::new(file, src, m, None);
     first.module();
     let derived = derive(&first.fns, &first.facts);
     let mut c = Checker::new(file, src, m, Some(derived));
     c.module();
-    (c.diags, c.folded)
+    let types = c
+        .types
+        .iter()
+        .map(|t| TypeDef {
+            name: t.name.to_string(),
+            body: match &t.kind {
+                Kind::Struct(fs) => {
+                    TypeBody::Struct(fs.iter().map(|f| (f.name.to_string(), f.ty)).collect())
+                }
+                Kind::Enum(vs) => TypeBody::Enum(
+                    vs.iter()
+                        .map(|v| {
+                            let fs = v.fields.iter().map(|(t, n)| (*t, n.to_string()));
+                            (v.name.to_string(), fs.collect())
+                        })
+                        .collect(),
+                ),
+            },
+        })
+        .collect();
+    let mut self_changes = HashSet::new();
+    if let Some(d) = &c.derived {
+        for (i, f) in c.fns.iter().enumerate() {
+            if let (Some(t), true) = (f.recv, d[i].changes_self) {
+                let tname = c.types[t as usize].name.to_string();
+                self_changes.insert((tname, f.decl.name.clone()));
+            }
+        }
+    }
+    let info = Info {
+        folded: c.folded,
+        exprs: c.exprs,
+        types,
+        self_changes,
+    };
+    (c.diags, info)
 }
 
 /// `void main()` for `dif run`/`dif build` (R1); `dif check` of a library does not need it.
@@ -230,6 +287,7 @@ struct Checker<'a> {
     fn_locals: HashSet<String>,
     diags: Vec<Diag>,
     folded: Folded,
+    exprs: HashMap<(u32, u32), Ty>,
 }
 
 impl<'a> Checker<'a> {
@@ -258,6 +316,7 @@ impl<'a> Checker<'a> {
             fn_locals: HashSet::new(),
             diags: Vec::new(),
             folded: HashMap::new(),
+            exprs: HashMap::new(),
         }
     }
 
@@ -1389,6 +1448,12 @@ impl<'a> Checker<'a> {
     }
 
     fn expr(&mut self, e: &'a Expr) -> (Ty, Val) {
+        let r = self.expr_kind(e);
+        self.exprs.insert((e.pos.offset, e.end), r.0);
+        r
+    }
+
+    fn expr_kind(&mut self, e: &'a Expr) -> (Ty, Val) {
         match &e.kind {
             ExprKind::Missing => (Ty::Err, Val::Runtime),
             ExprKind::Int(v) => (Ty::Int, Val::Int(*v as i128)),

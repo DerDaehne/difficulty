@@ -1,0 +1,5 @@
+Point{x: 6, y: 2}
+Point{x: 7, y: 2} Point{x: 6, y: 8}
+Scene{player: Point{x: 14, y: 0}, score: 1} 1
+1 Point{x: 51, y: 1}
+2 3

@@ -1,0 +1,5 @@
+Point{x: 3, y: 6}
+Point{x: 6, y: 6}
+7
+Body{pos: Point{x: 4, y: 4}, hits: 2}
+green

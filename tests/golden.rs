@@ -95,9 +95,9 @@ fn llms_txt() {
     assert!(doc_examples("llms.txt", "llms") >= 2);
 }
 
-/// Sections of the spec whose examples are checked but not yet built and run,
-/// because the C backend for them follows; the backend change removes them here.
-const CHECK_ONLY: &[&str] = &["### R5 ", "### R6 ", "### R7 ", "### R10 ", "### R15 "];
+/// Sections of the spec whose examples are checked but not built and run (none now);
+/// a section is listed here only while its backend is missing.
+const CHECK_ONLY: &[&str] = &[];
 
 /// Every ```dif block of a document, by kind: valid module, snippet (inside
 /// `void main()`), `error Rn` (exactly that diagnostic), `panic "message"`.
@@ -169,8 +169,16 @@ fn doc_examples(doc: &str, tag: &str) -> usize {
         } else if kind.is_empty() || kind.starts_with("snippet") {
             // valid examples also build and run (modules without main only check)
             if src.contains("void main()") {
-                let (_, err, code) = run(&format!("{tag}{n}"), &src);
+                let (out, err, code) = run(&format!("{tag}{n}"), &src);
                 assert_eq!((err.as_str(), code), ("", 0), "{doc} example {n}");
+                // `Ausgabe: `a`, `b`.` (or `Output: …`) after the example: one printed line per item
+                if let Some(l) = lines
+                    .get(k)
+                    .and_then(|l| l.strip_prefix("Ausgabe: ").or(l.strip_prefix("Output: ")))
+                {
+                    let items: Vec<&str> = l.split('`').skip(1).step_by(2).collect();
+                    assert_eq!(out, items.join("\n") + "\n", "{doc} example {n}");
+                }
             }
         }
     }

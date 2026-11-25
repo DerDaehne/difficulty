@@ -182,3 +182,76 @@ fn driver() {
     assert!(String::from_utf8_lossy(&r.stderr).contains("error[R1]: no `main` function"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn shapes_example_runs() {
+    let (out, err, code) = run("shapes", &example("shapes.dif"));
+    assert_eq!((err.as_str(), code), ("", 0));
+    assert!(out.starts_with("Canvas{last: Shape.Rect(Point{x: 2, y: 5}, 4, 6), drawn: 3}\n"));
+    assert!(out.ends_with("area 16 24\nshape\norigin\n"), "{out}");
+}
+
+#[test]
+fn values_places_and_order() {
+    let src = r#"
+struct Box {
+    int n
+    int m = 5
+}
+
+int log(int n) {
+    print("log {n}")
+    return n
+}
+
+void add(mut Box b, int k) {
+    b.n += k
+}
+
+int bump(mut Box b) {
+    b.n += 10
+    return b.n
+}
+
+void Box.twice() {
+    self.n *= 2
+}
+
+int read(mut Box b, int seen, int later) {
+    b.n += 1
+    return seen * 1000 + later
+}
+
+void main() {
+    Box a = Box{n: 1}
+    Box copy = a
+    add(mut a, 4)
+    print("{a.n} {copy.n}")
+    // the argument that reads `a` sees the value from before the call
+    int r = read(mut a, a.n, bump(mut a))
+    print("{r} {a.n}")
+    // fields left to right, then the defaults
+    Box b = Box{m: log(2), n: log(1)}
+    print(b)
+    a.twice()
+    print(a.n)
+    // only the chosen branch runs
+    int v = if a.n > 0 { log(7) } else { log(8) }
+    print(v)
+    for int i in range(4) {
+        switch i {
+        case 1:
+            continue
+        default:
+            print(i)
+        }
+    }
+}
+"#;
+    let (out, err, code) = run("values", src);
+    assert_eq!((err.as_str(), code), ("", 0));
+    assert_eq!(
+        out,
+        "5 1\n5015 16\nlog 2\nlog 1\nBox{n: 1, m: 2}\n32\nlog 7\n7\n0\n2\n3\n"
+    );
+}

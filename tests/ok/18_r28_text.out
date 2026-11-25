@@ -1,0 +1,11 @@
+Person{name: "Ada \"L\"\n\{x\}", age: 36}
+Person{name: "Ada \"L\"\n\{x\}", age: 36}
+Ada
+BookErr.NoSuchSeat(3, 5)
+BookErr.Taken(Person{name: "Ada \"L\"\n\{x\}", age: 36})
+Event{why: BookErr.Closed, fine: true}
+true
+false
+true
+true
+false

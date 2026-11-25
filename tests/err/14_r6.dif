@@ -1,0 +1,15 @@
+// expect: error[R6] 13:11
+struct Point {
+    int x
+    int y
+}
+
+void shift(mut Point p, int dx) {
+    p.x += dx
+}
+
+void main() {
+    Point b = Point{x: 1, y: 2}
+    shift(b, 5)
+    print(b)
+}
