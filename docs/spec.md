@@ -8,7 +8,7 @@ Diese Spezifikation ist nach den Regeln R1–R31 gegliedert. Ausgearbeitet sind 
 
 **Grammatik** steht in EBNF: `a b` Folge, `a | b` Auswahl, `[ a ]` optional, `{ a }` beliebig oft, `"x"` wörtlich, `NL` Zeilenende (siehe §1.3). Jede Produktion steht genau einmal; andere Abschnitte verweisen darauf.
 
-**Kanonische Form.** Wo der Compiler mehrere Schreibweisen annimmt (Feldreihenfolge im Struct-Literal, abschließendes Komma in mehrzeiligen Listen, Trenner der `enum`-Varianten, `x` statt `some(x)` an einer `?T`-Stelle, die ein Ziel ist, R12), legt `dif fmt` die eine kanonische Form fest; der Compiler meldet dafür keinen Fehler.
+**Kanonische Form.** Wo der Compiler mehrere Schreibweisen annimmt (Feldreihenfolge im Struct-Literal, überflüssige Klammern um einen Elementtyp wie in `[](?int)`, abschließendes Komma in mehrzeiligen Listen, Trenner der `enum`-Varianten, `x` statt `some(x)` an einer `?T`-Stelle, die ein Ziel ist, R12), legt `dif fmt` die eine kanonische Form fest; der Compiler meldet dafür keinen Fehler.
 
 ### 0.1 Diagnosen
 
@@ -236,7 +236,7 @@ decl     = use_decl | const_decl | func_decl | struct_decl | enum_decl | method_
 
 - Eine Anweisung auf oberster Ebene ist `R1`, Hinweis `move it into a function, e.g. void main() { … }`.
 - Ein ausführbares Programm hat genau eine Funktion `main` ohne Parameter, `void main()` oder `void!E main()`; fehlt sie, ist das `R1` (bei `dif run`/`dif build`, nicht bei `dif check` einer Bibliothek).
-- Die Reihenfolge der Deklarationen spielt keine Rolle: eine Funktion darf eine weiter unten deklarierte aufrufen.
+- Die Reihenfolge der Deklarationen spielt keine Rolle, eine Funktion darf eine weiter unten deklarierte aufrufen; ausgenommen sind die `use`-Zeilen: sie stehen am Anfang der Datei vor allen anderen Deklarationen (R16: ein späteres `use` ist `R16`).
 
 ```dif
 void main() {
@@ -266,6 +266,7 @@ list_type  = "[" "]" elem_type ;                        (* R5 *)
 array_type = "[" ( INT | IDENT ) "]" elem_type ;        (* R5; IDENT: eine const int *)
 map_type   = "map" "[" elem_type "]" elem_type ;        (* R30 *)
 elem_type  = [ "?" ] base_type | "(" type ")" ;         (* []?int: Liste von ?int; ?[]int: ?Liste; [](int!E): Liste von Ergebnissen *)
+                                                        (* Klammern sind nur nötig, wenn der Elementtyp ein `!E` enthält; sonst sind sie überflüssig (§0) *)
 func_decl  = type IDENT "(" [ params ] ")" block ;
 params     = param { "," param } [ "," ] ;
 param      = [ "mut" ] type IDENT ;                   (* mut: R6 *)
@@ -475,7 +476,7 @@ list_lit = "[" [ expr { "," expr } [ "," ] ] "]" ;
 - **Werte.** `str`, `[]T`, `[N]T` und `map[K]V` sind Werte wie `int`: eine Zuweisung, ein Argument ohne `mut`, ein Rückgabewert und ein Feld in einem Struct-Literal sind unabhängige Kopien, auch tief (Liste von Listen, Struct mit einer Liste im Feld). Ein Schreiben in die Kopie ändert nie das Original und umgekehrt: nach `ys = xs; xs[0] = 1` hat `ys` den alten Wert, nach `Hall b = a; b.seats.push(x)` hat `a.seats` den alten Inhalt. Ein Text ist unveränderlich; `s += "x"` und `s = s + "x"` bauen einen neuen Wert.
 - **Intern geteilt.** `str`, Listen und Maps sind referenzgezählt mit Copy-on-Write: eine Kopie teilt den Speicher mit dem Original, bis eine der beiden geschrieben wird. Ein Schreiben an einem Wert, den nichts teilt, geschieht an Ort und Stelle, `push` ist amortisiert O(1); an einem geteilten Wert kopiert die erste Änderung vorher den Speicher, O(n). Zuweisung, Argument und Rückgabe kosten O(1), außer bei `[N]T` und Structs, die inline liegen und kopiert werden. Kein Programm kann sehen, ob ein Wert geteilt ist; der Speicher wird frei, sobald der letzte Wert verschwindet, und weil es im sicheren Code keine Referenzen gibt, gibt es keine Zyklen. Ist der Speicher erschöpft, bricht das Programm ab (R14).
 - **Griffe** (Kanal, Task, `shared`, Datei, C-Objekt) sind Werte, die auf etwas außerhalb zeigen: kopiert wird der Griff, nicht das Ding. Das Copy-on-Write gilt für sie nicht, und `==` vergleicht ihre Identität (R28). Eine Liste von Griffen kopiert die Griffe. Die Standardbibliothek von Teil 2c (§4) hat keinen Griff; sie kommen mit ihren Modulen.
-- **Listen `[]T`** wachsen und schrumpfen. Das Literal `[1, 2, 3]` hat den Elementtyp seiner Stelle (R8): `[]u8 b = [1, 2]` ist eine Liste von `u8`; ohne Stelle ist der Elementtyp der des ersten Elements (`print([1, 2])`, ohne Stelle `int`). Ein späteres Element anderen Typs ist `R8`, Meldung `` expected int, found str ``, am Element. Die leere Liste `[]` hat keinen Typ von sich aus: ohne Stelle (`print([])`, `_ = []`) ist sie `R8`, Meldung `` `[]` needs a place of type []T ``, ohne Hinweis. Mit Stelle (`[]int xs = []`, Argument, Feldvorgabe, `return []`) gilt der Typ der Stelle. `==` vergleicht Länge und Elemente (R28).
+- **Listen `[]T`** wachsen und schrumpfen. Das Literal `[1, 2, 3]` hat den Elementtyp seiner Stelle (R8): `[]u8 b = [1, 2]` ist eine Liste von `u8`; ohne Stelle ist es der Typ des ersten Elements, das kein Literal ist, sonst der des ersten Elements (`[x, 1]` und `[1, x]` mit `x` vom Typ `u8` sind beide `[]u8`; `print([1, 2])` ist `[]int`, `[1, 2.5]` ist `R8` am zweiten Element). Ein späteres Element anderen Typs ist `R8`, Meldung `` expected int, found str ``, am Element. Die leere Liste `[]` hat keinen Typ von sich aus: ohne Stelle (`print([])`, `_ = []`) ist sie `R8`, Meldung `` `[]` needs a place of type []T ``, ohne Hinweis. Mit Stelle (`[]int xs = []`, Argument, Feldvorgabe, `return []`) gilt der Typ der Stelle. `==` vergleicht Länge und Elemente (R28).
 - **Arrays `[N]T`** haben genau `N` Elemente und liegen inline; `N` ist ein Ganzzahl-Literal oder eine `const int` mit Wert ab 1, sonst `R5`, Meldung `` the length of an array is a constant of at least 1 ``. Das Literal `[a, b, c]` an der Stelle eines `[3]int` muss genau `N` Elemente haben, sonst `R8`, Meldung `` [3]int needs 3 elements, found 2 ``, Hinweis `use []int for a list that can have any length`, am `[`. Eine Liste wird nie von selbst zum Array (R31); `xs.slice(0, 3)` ist wieder eine Liste. Arrays verschachteln (`[3][3]int`).
 - **Index.** `x[i]` liest ein Element einer Liste oder eines Arrays; `i` ist ein `int`, sonst `R8`, Meldung `` expected int, found u8 ``, Hinweis `int(i)`. Das Ergebnis ist eine Kopie. `x[i] = v`, `x[i] += v` und `x[i].f = v` schreiben in das Element (Ort, R6); das Element muss existieren, `xs[xs.len()] = v` hängt nicht an (`push`). Der Index ist immer geprüft: außerhalb von `0 … len-1` bricht das Programm ab (R14) an der `[`. Bei einem Array mit konstantem Index steht der Abbruch schon beim Kompilieren fest und ist `error[R14]`. Ein `str` hat keinen Index: `s[0]` ist `R8`, Meldung `` cannot index str ``, Hinweis `use s.slice(a, b) or s.runes()`.
 - **Schleife über einen Schnappschuss.** `for T x in xs` läuft über den Wert, den `xs` beim Eintritt hatte (R11); Änderungen an `xs` im Rumpf sind sicher, wirken aber nicht auf diese Schleife. Das kostet nichts, bis der Rumpf `xs` schreibt: dann kopiert dieses erste Schreiben einmal.
@@ -899,7 +900,8 @@ Ein *Ganzzahltyp* ist `int`, `i8 … u64`; *Zahlentyp* ist ein Ganzzahltyp oder 
 
 - **Typ eines Literals.** Ein Literal nimmt den Typ seiner Stelle (Teil 1). Bei einem binären Operator ist die Stelle des einen Operanden der Typ des anderen: `u8 y = x + 100` rechnet mit `100` als `u8`. Ohne Stelle ist ein Ganzzahl-Literal `int`, ein Float-Literal `f64`.
 - **Art.** Ein Ganzzahl-Literal passt an die Stelle eines jeden Zahlentyps (`f64 x = 3`, `u8 b = 255`); ein Float-Literal nur an die eines `f64`, auch wenn sein Wert ganz ist (`int n = 2.0` ist `R8`, Meldung `` expected int, found f64 ``, Hinweis `int(2.0)` bzw. die Zahl ohne Punkt). `rune` hat nur `RUNE`-Literale; `rune r = 97` ist `R8`, Hinweis `rune(97)` bzw. `'a'`.
-- **Passt der Wert?** Ein Literal oder ein Ausdruck aus Literalen und `const`, dessen Ergebnis nicht in den Typ der Stelle passt, ist `R8` am Ausdruck, Meldung `` expected u8, found 256 ``, Hinweis `the value does not fit in u8`. Das gilt auch für negative Werte an unsigned-Stellen (`u8 x = -1`) und für einen `f64`, dessen Wert größer als der größte `f64` ist (`1e400`; Hinweis `the value does not fit in f64`). Ein Wert zwischen 0 und dem kleinsten `f64` wird 0. Ausdrücke aus Ganzzahl-Literalen rechnet der Compiler exakt (Teil 1), die aus `f64` Operation für Operation in IEEE 754 mit den auf den nächsten `f64` gerundeten Literalen; das Ergebnis ist genau das der Laufzeit (`0.1 + 0.2` ist `0.30000000000000004`).
+- **Passt der Wert?** Ein Ganzzahl-Ausdruck aus Literalen und `const`, dessen Ergebnis nicht in den Typ der Stelle passt, ist `R8` am Ausdruck, Meldung `` expected u8, found 256 ``, Hinweis `the value does not fit in u8`. Das gilt auch für negative Werte an unsigned-Stellen (`u8 x = -1`). Ausdrücke aus Ganzzahl-Literalen rechnet der Compiler exakt (Teil 1).
+- **`f64`-Literale** werden einzeln auf den nächsten `f64` gerundet. Ein Literal, das sich nicht darstellen lässt, ist `R8` am Literal, Meldung `` expected f64, found 1e400 ``, Hinweis `the value does not fit in f64`: das gilt, wenn es dabei `inf` würde (`1e400`) und wenn ein Literal ungleich 0 dabei 0 würde (`1e-400`, `0.0` ist erlaubt); es gibt keinen stillen Überlauf und keinen stillen Unterlauf. **Ausdrücke** aus `f64`-Werten rechnen dagegen Operation für Operation in IEEE 754, auch beim Kompilieren, und liefern genau das Ergebnis der Laufzeit: `0.1 + 0.2` ist `0.30000000000000004`, `1.0 / 0.0` ist `inf` und `1e300 * 1e300` ist `inf`, kein Fehler (R29).
 - **Keine Mischung.** Zwei verschiedene Zahlentypen an einem Operator sind `R8` am Operator, Meldung `` cannot apply `+` to int and i32 ``, Hinweis: der rechte Operand in den Typ des linken umgewandelt (`a + int(b)`). Ebenso eine Zahl an der Stelle eines anderen Zahlentyps (`f64 x = n`, Argument, `return`): `` expected f64, found int ``, Hinweis `f64(n)`. Es gibt keine Erweiterung `u8` → `int` und keine von `int` → `f64`.
 - **Nicht erlaubt.** `-x` an `u8 … u64` ist `R8`, Meldung `` cannot apply `-` to u8 ``, Hinweis `use 0 -% x for wrapping, or a signed type`. `& | ^ << >> ~ +% -% *%` an `f64` sind `R8` mit derselben Meldung; Hinweis `use ints for bit operations`. `< <= > >=` an `bool`, Structs und Listen sind `R8`.
 - **`rune`** hat keine Arithmetik und keine Verknüpfung mit Zahlen: `r + 1` ist `R8`, Meldung `` cannot apply `+` to rune and int ``, Hinweis `rune(int(r) + 1)`; `str + rune` ebenso, Hinweis `build text with interpolation: "{s}{r}"`. `==`, `!=` und `<` … vergleichen Codepoints. Umwandlungen R31, Methoden §4.2.
@@ -1084,7 +1086,7 @@ Teil 2c legt fest:
 
 - **Quellen.** `for T x in xs` läuft über die Elemente einer Liste oder eines Arrays in Reihenfolge; `for int i, T x in xs` liefert zusätzlich den Index `i` ab 0 (sein Typ ist `int`); `for K k, V v in m` läuft über die Einträge einer Map in der Reihenfolge der Einfügung (R30); `for str line in try io.lines()` über die Zeilen von stdin, eine Folge von `str!io.IoErr` (§4.6, „Folgen von Ergebnissen“ unten). Eine Quelle anderen Typs ist `R11` an der Quelle, Meldung `` cannot loop over int ``, Hinweis bei `int`: `for int i in range(n)`, bei `str`: `for rune r in s.runes()`, sonst keiner. Ein `str` ist keine Quelle.
 - **Variablen.** Die Typen der Schleifenvariablen sind die der Elemente (bei `m` Schlüssel und Wert); ein anderer ist `R8`, Meldung `` expected str, found int `` an der Variablen. Die Form passt zur Quelle: eine Map mit einer Variablen ist `R11`, Meldung `` a loop over a map needs key and value ``, Hinweis `for str k, int v in counts` (mit den Typen und dem Namen der Quelle); `for int i, T x in m` ist `R8` wie oben. Die Variablen sind Kopien (R5); ihre Änderung wirkt nur bis zum nächsten Durchlauf.
-- **Schnappschuss.** Die Quelle wird einmal vor der Schleife ausgewertet und als Wert festgehalten (R5, Teil 2c). Schreibt der Rumpf in `xs` oder `m`, sieht diese Schleife davon nichts; `for int x in xs { xs.push(x) }` endet.
+- **Schnappschuss.** Die Quelle wird einmal vor der Schleife ausgewertet und als Wert festgehalten (R5, Teil 2c). Schreibt der Rumpf in `xs` oder `m`, sieht diese Schleife davon nichts; `for int x in xs { xs.push(x) }` endet. **Ausgenommen ist `io.lines()`:** stdin ist ein Strom, kein Wert; die Schleife liest bei jedem Durchlauf die nächste Zeile (§4.6). Der Index von `for int i, T x in …` zählt auch dort die Elemente ab 0; `for int i, str line in try io.lines()` ist erlaubt.
 - `io.lines()` und `range` stehen nur als Quelle einer `for`-Schleife. Beispiele bei R30.
 - **Folgen von Ergebnissen.** Hat eine Quelle Elemente vom Typ `T!E` oder `?T` (eine Liste oder ein Array `[](int!E)`, `io.lines()`, später weitere), entpackt `for T x in try xs` jedes Element wie `try` (R12): `x` ist das `T`; ist ein Element ein Fehler, kehrt die Funktion sofort mit ihm zurück. `try` steht in der Schleifenform wie überall in `expr`, die Grammatik `for_stmt` bleibt; `or` ist erlaubt (`for int n in try rs or E.V(…)`). Ohne `try` ist die Schleifenvariable ein `T!E` (`for int!E r in rs`); `for int n in rs` mit solchen Elementen ist `R8`, Meldung `` expected int, found int!ParseErr `` an der Variablen, Hinweis `for int n in try rs`. Beispiele und Fehler in „R11, Teil 2c“ unten, Regeln für den Fehlertyp in R12.
 
@@ -1174,7 +1176,7 @@ some_val = "some" "(" expr ")" ;
 
 Teil 2b legt fest:
 
-- **Typen.** `?T` ist ein `T` oder `none`; `T!E` ist ein `T` oder ein Fehler `E`; `void!E` ist „nichts oder ein Fehler“. `E` ist ein beliebiger Typ (`enum`, `struct`, `str`, …) ohne Sonderregel; ausgegeben wird er in der Textform von R28. In Typen bindet `!E` am schwächsten: `?int!E` ist `(?int)!E`. Weiter verschachtelt (`??int`, `int!A!B`) ist `S1`, Hinweis `a type has at most one ? and one !E`. `?void` ist `R12`, Meldung `?void has no value that could be missing`, Hinweis `use void!E`. `void!E` steht wie `void` nur als Rückgabetyp; sonst darf `?T` und `T!E` überall stehen, wo ein Typ steht (Variablen, Parameter, Felder).
+- **Typen.** `?T` ist ein `T` oder `none`; `T!E` ist ein `T` oder ein Fehler `E`; `void!E` ist „nichts oder ein Fehler“. `E` ist ein beliebiger Typ (`enum`, `struct`, `str`, …) ohne Sonderregel; ausgegeben wird er in der Textform von R28. In Typen bindet `!E` am schwächsten: `?int!E` ist `(?int)!E`. Weiter verschachtelt (`??int`, `int!A!B`) ist `S1`, Hinweis `a type has at most one ? and one !E`; ein `?` vor einem `?` ist also nie erlaubt, auch nicht in Klammern (`?(?int)`). Die Grenze gilt für jeden `type` einzeln: der Elementtyp einer Liste, eines Arrays oder einer Map ist ein eigener Typ (R2, Teil 2c), darum sind `?[]?int` (optionale Liste optionaler Zahlen, kein verschachteltes Optional) und `[](int!E)!F` gültig. Klammern um einen Elementtyp sind nur für ein `!E` nötig (`[](int!E)`, denn `[]int!E` ist „Liste oder Fehler“); `[](?int)` ist dasselbe wie `[]?int`, und `dif fmt` entfernt die Klammern (§0). `?void` ist `R12`, Meldung `?void has no value that could be missing`, Hinweis `use void!E`. `void!E` steht wie `void` nur als Rückgabetyp; sonst darf `?T` und `T!E` überall stehen, wo ein Typ steht (Variablen, Parameter, Felder).
 - **Erfolg.** Ein `T` passt dort, wo `?T` oder `T!E` erwartet wird (R31): bei `return`, Initialisierung, Zuweisung und Argument; als Operand von `==` nicht (R28). Eine `void!E`-Funktion endet mit `return` oder am Ende ihres Rumpfs und ist damit erfolgreich; jede andere braucht auf jedem Weg ein `return` mit Wert (R8).
 - **`none`** ist der leere Wert von `?T`, **`some(x)`** ein `?T` mit dem Wert `x`, **`err(e)`** der Fehlerwert von `T!E`; `e` hat den Typ `E` (sonst `R8`). `some(x)` hat den Typ `?T`, wobei `T` der Typ von `x` ist; `x` selbst ist kein `?U` (`some(x)` mit `x` vom Typ `?int` ist `R12`, Meldung `` `some` needs a plain value, found ?int ``, Hinweis `use x directly`). `none` und `err(e)` nehmen ihren Typ von ihrer **Stelle** (R8; bei `==` und `!=` ist der andere Operand die Stelle, `r == err(E.X)` und `x == none` sind also gültig).
 - **Falsche Stelle.** Ein Wert, der an seiner Stelle nicht passt, ist `R8` wie jeder andere: `int n = none` mit der Meldung `` expected int, found none `` (bei `err(…)` ebenso `found err(…)`, bei `some(3)` `` found ?int ``), Hinweis bei einer Deklaration `declare it as ?int n` (bei `err(e)` `int!AgeErr n`, mit dem Typ von `e`). Nur wenn gar keine Stelle da ist (`none == none`, `print(none)`), ist es `R12`, Meldung `` `none` needs a place of type ?T `` bzw. `` `err(…)` needs a place of type T!E ``, ohne Hinweis.
@@ -1601,7 +1603,7 @@ use_decl = "use" "std" "." IDENT ;      (* Teil 2c; use name, use c und as folge
 
 Teil 2c legt fest (nur die Standardbibliothek; eigene Module, `as` und `pub` folgen):
 
-- `use std.io` und `use std.os` machen den Namen `io` bzw. `os` bekannt; Funktionen und Typen daraus schreibt man mit dem Modul davor: `io.read_file(path)`, `io.IoErr`, `io.IoErr.NotFound(path)`, `os.args()`. Die Zeile steht vor allen anderen Deklarationen, eine Zeile nur einmal; sonst `R16`, Meldung `` `use` comes before all other declarations `` bzw. `` `std.io` is already used ``, Hinweis `move it to the top of the file` bzw. `remove this line`.
+- `use std.io` und `use std.os` machen den Namen `io` bzw. `os` bekannt; Funktionen und Typen daraus schreibt man mit dem Modul davor: `io.read_file(path)`, `io.IoErr`, `io.IoErr.NotFound(path)`, `os.args()`. Die `use`-Zeilen stehen am Anfang der Datei vor allen anderen Deklarationen (R1; die Reihenfolge der übrigen ist beliebig), eine Zeile nur einmal. Ein `use` hinter einer anderen Deklaration und eine doppelte Zeile sind `R16` am `use`, Meldung `` `use` comes before all other declarations `` bzw. `` `std.io` is already used ``, Hinweis `move it to the top of the file` bzw. `remove this line`.
 - Ein Modul, das nicht existiert (`use std.json`), ist `R16` am Namen, Meldung `` unknown standard module `json` ``, Hinweis `available: io, os`.
 - Die Benutzung von `io.…` oder `os.…` ohne `use` ist `R16` am Namen, Meldung `` `io` is not imported ``, Hinweis `add use std.io at the top of the file`. Ein Name `io` oder `os` als Variable, Parameter oder Funktion ist `R4`, sobald das Modul benutzt wird.
 - Die Textform eines Typs aus einem Modul nennt ihn ohne Modul (`IoErr.NotFound("a.txt")`, R28).
@@ -1783,7 +1785,7 @@ main.dif:5:6: error[R18]: test "sum" is declared twice
 
 ### R28 — Fähigkeiten
 
-**Regel.** Jeder Typ ohne Funktionswert-Felder ist `equal` (`==`) und `text` (Ausgabe, `"{x}"`); `ordered` (`<`) sind Zahlen und `str`; `hashable` ist alles, was `equal` ist. Griffe vergleichen ihre Identität, Maps sind gleich, wenn ihre Einträge gleich sind.
+**Regel.** Jeder Typ ohne Funktionswert-Felder ist `equal` (`==`) und `text` (Ausgabe, `"{x}"`); `ordered` (`<`) sind Zahlen, `rune` und `str`; `hashable` ist alles, was `equal` ist. Griffe vergleichen ihre Identität, Maps sind gleich, wenn ihre Einträge gleich sind.
 
 Teil 1 legt die Textform fest: `int` dezimal mit `-` für negative Zahlen, `bool` als `true`/`false`, `str` unverändert. `str` vergleicht `<` bytweise (UTF-8).
 
@@ -1799,7 +1801,7 @@ Teil 2b ergänzt `?T` und `T!E`:
 
 Teil 2c ergänzt Zahlen, `rune`, Listen, Arrays und Maps:
 
-- **Fähigkeiten.** Alle Zahlentypen und `rune` sind `equal`, `text`, `ordered` und `hashable` (`rune` ist damit `ordered`, abweichend von der Kurzfassung oben); `bool` und `str` bleiben, wie sie waren. `[]T`, `[N]T` und `map[K]V` sind `equal`, `text` und `hashable`, wenn ihre Elemente es sind, aber nie `ordered`.
+- **Fähigkeiten.** Alle Zahlentypen und `rune` sind `equal`, `text`, `ordered` und `hashable` (auch `rune` ist `ordered`); `bool` und `str` bleiben, wie sie waren. `[]T`, `[N]T` und `map[K]V` sind `equal`, `text` und `hashable`, wenn ihre Elemente es sind, aber nie `ordered`.
 - **Gleichheit.** `==` an `f64` ist IEEE (`NaN != NaN`, `0.0 == -0.0`). Listen und Arrays sind gleich bei gleicher Länge und gleichen Elementen in Reihenfolge, Maps bei gleichen Schlüsseln mit gleichen Werten, gleich in welcher Reihenfolge. Ein `[]T` und ein `[N]T` vergleicht man nicht (`R8`). Weil `NaN != NaN`, ist eine Liste mit `NaN` nie gleich zu sich selbst.
 - **Text.** `int` und die anderen Ganzzahltypen dezimal. `f64`: R29. `rune` allein ausgegeben (`print(r)`, `"{r}"`) ist das Zeichen unverändert, in einer Textform (Liste, Struct, `some(…)`) steht es in `'`: `['a', 'b']`. Listen und Arrays `[1, 2, 3]` (leer `[]`), Maps `{"a": 1, "b": 2}` in der Reihenfolge der Einfügung (leer `{}`), die Elemente jeweils in ihrer Textform. Ein `str` in einer Textform steht in `"`; maskiert werden `"`, `\`, Zeilenumbruch, Tabulator, Wagenrücklauf (`\"`, `\\`, `\n`, `\t`, `\r`), NUL (`\0`) und die übrigen Steuerzeichen unter 0x20 als `\u{…}`; Klammern bleiben unmaskiert. Ein `rune` in einer Textform maskiert dasselbe, statt `"` aber `'`.
 - **Schlüssel.** Zwei Schlüssel einer Map sind gleich, wenn `==` sie gleich nennt; `NaN` ist kein Schlüssel (R14).
@@ -1845,7 +1847,7 @@ panic: shift by 64 out of range 0..63 (main.dif:3:13)
 Teil 2c legt fest:
 
 - **`i8 … u64`** rechnen wie `int` auf ihrer Breite: `+ - *` und Vorzeichen `-` brechen ab, wenn das Ergebnis nicht in den Typ passt (`integer overflow in +`); `/` rundet Richtung 0, `%` hat das Vorzeichen des Dividenden, Division und `%` durch 0 brechen ab, ebenso `MIN / -1` (`-128 / -1` bei `i8`; `MIN % -1` ist `0`). `+% -% *%` rechnen modulo 2^Bits des Typs. `~` kehrt die Bits des Typs um. `<<` und `>>` verschieben um `0 … Bits-1` Stellen, andere Weiten brechen ab (`shift by 8 out of range 0..7` bei `u8`); `<<` verliert Bits über der Breite ohne Abbruch, `>>` füllt bei Typen mit Vorzeichen mit dem Vorzeichen, bei `u8 … u64` mit 0. Die Weite hat den Typ des Operanden (R8).
-- **`f64`** ist IEEE 754 binary64 mit Rundung zum nächsten Wert, bei Gleichstand zum geraden. `+ - * /`, `%` (wie C `fmod`, Vorzeichen des Dividenden) und das Vorzeichen `-` brechen nie ab: ein Überlauf ist `inf`, `1.0 / 0.0` ist `inf`, `0.0 / 0.0` und `x % 0.0` sind `NaN`. Jede Operation rundet für sich auf `f64`: der Compiler fasst `a * b + c` nicht zusammen (kein FMA) und rechnet nie mit größerer Breite. Vergleiche mit `NaN` sind `false`, außer `!=`.
+- **`f64`** ist IEEE 754 binary64 mit Rundung zum nächsten Wert, bei Gleichstand zum geraden. `+ - * /`, `%` (wie C `fmod`, Vorzeichen des Dividenden) und das Vorzeichen `-` brechen nie ab: ein Überlauf ist `inf` (ein Literal, das `inf` oder fälschlich 0 würde, ist dagegen `R8`, siehe dort), `1.0 / 0.0` ist `inf`, auch beim Kompilieren, `0.0 / 0.0` und `x % 0.0` sind `NaN`. Jede Operation rundet für sich auf `f64`: der Compiler fasst `a * b + c` nicht zusammen (kein FMA) und rechnet nie mit größerer Breite. Vergleiche mit `NaN` sind `false`, außer `!=`.
 - **Textform von `f64`:** die kürzeste Dezimalfolge, die beim Zurücklesen (Literal, `parse_f64`) denselben Wert ergibt. Hat der Wert die wissenschaftliche Schreibweise `d.ddd × 10^e`, steht er ohne Exponenten, wenn `-6 ≤ e ≤ 20` (`5`, `22.5`, `0.000001`, `100000000000000000000`), sonst als `d.ddde<e>` ohne `+` und führende Nullen (`1e21`, `1.5e-7`). Ein ganzer Wert hat keinen Dezimalpunkt. `0`, `-0`, `inf`, `-inf` und `NaN` stehen so da.
 - **Formatangaben** (§1.4) gelten nur für `f64`; an einem anderen Typ ist die Angabe `R8` am Ausdruck, Meldung `` the format .2f needs f64, found int ``, Hinweis `f64(n)`. `{x:.Nf}` schreibt `N` Nachkommastellen genau wie C `printf("%.Nf")` (der exakte Wert wird gerundet, bei genauer Mitte zur geraden Ziffer: `{2.5:.0f}` ist `2`); `{x:g}` schreibt wie C `%g` (sechs gültige Ziffern, ohne überflüssige Nullen, Exponent als `e+21`). `inf`, `-inf` und `NaN` schreiben beide wie die Textform.
 
@@ -1903,12 +1905,12 @@ entry   = expr ":" expr ;
 
 Teil 2c legt fest:
 
-- **Typ und Literal.** `map[K]V` verbindet Schlüssel `K` mit Werten `V`; `K` ist `hashable` (R28), `V` ein beliebiger Typ. `{"a": 1, "b": 2}` hat die Typen der Stelle (R8); ohne Stelle die des ersten Eintrags; ein späterer Schlüssel oder Wert anderen Typs ist `R8`, Meldung `` expected str, found int `` am Ausdruck. Das leere `{}` braucht eine Stelle (`map[str]int m = {}`), sonst `R8`, Meldung `` `{}` needs a place of type map[K]V ``, ohne Hinweis. Steht ein Schlüssel zweimal im Literal, ist das `R30` am zweiten, wenn beide Literale oder `const` sind (Meldung `` duplicate key "a" ``, Hinweis `first used at main.dif:2:22`); sonst setzt der spätere Eintrag den Wert des früheren, wie `m[k] = v`. Mehrzeilig und mit abschließendem Komma wie `struct_lit` (R5, kanonisch §0).
+- **Typ und Literal.** `map[K]V` verbindet Schlüssel `K` mit Werten `V`; `K` ist `hashable` (R28), `V` ein beliebiger Typ. `{"a": 1, "b": 2}` hat die Typen der Stelle (R8); ohne Stelle die des ersten Eintrags, bei Schlüsseln und Werten je für sich nach der Regel der Liste (R5, Teil 2c: erstes Element, das kein Literal ist); ein späterer Schlüssel oder Wert anderen Typs ist `R8`, Meldung `` expected str, found int `` am Ausdruck. Das leere `{}` braucht eine Stelle (`map[str]int m = {}`), sonst `R8`, Meldung `` `{}` needs a place of type map[K]V ``, ohne Hinweis. Steht ein Schlüssel zweimal im Literal, ist das `R30` am zweiten, wenn beide Literale oder `const` sind (Meldung `` duplicate key "a" ``, Hinweis `first used at main.dif:2:22`); sonst setzt der spätere Eintrag den Wert des früheren, wie `m[k] = v`. Mehrzeilig und mit abschließendem Komma wie `struct_lit` (R5, kanonisch §0).
 - **Lesen.** `m[k]` hat den Typ `?V`: `some(v)`, wenn `k` vorkommt, sonst `none`; nie ein Abbruch. `k` hat den Typ `K` (R8). Man benutzt es mit `??`, `switch` oder `try` (R12): `counts[w] ?? 0`.
-- **Schreiben.** `m[k] = v` ersetzt den Wert von `k` oder fügt den Eintrag hinten an. Ersetzen ändert die Stelle des Eintrags nicht; wer `k` mit `remove` entfernt und wieder setzt, steht hinten. `m[k] += 1` und die anderen Zuweisungsoperatoren sind `R8` am Operator, Meldung `` cannot apply `+=` to ?int and int ``, Hinweis `counts["a"] = (counts["a"] ?? 0) + 1` (mit `m[k]` aus dem Quelltext).
+- **Schreiben.** `m[k] = v` ersetzt den Wert von `k` oder fügt den Eintrag hinten an. Für R6 gilt `m[k] = v` als Änderung von `m`, auch wenn `m[k]` kein Ort ist. Ersetzen ändert die Stelle des Eintrags nicht; wer `k` mit `remove` entfernt und wieder setzt, steht hinten. `m[k] += 1` und die anderen Zuweisungsoperatoren sind `R8` am Operator, Meldung `` cannot apply `+=` to ?int and int ``, Hinweis `counts["a"] = (counts["a"] ?? 0) + 1` (mit `m[k]` aus dem Quelltext).
 - **Kein Ort.** Ein Eintrag wird nur durch `m[k] = v` ersetzt. `m[k].f = v`, `m[k].push(x)` (eine Methode, die `self` ändert) und `mut m[k]` sind `R30` am Anfang des Orts, Meldung `` a map entry is changed by assigning it ``, Hinweis `read it, change the copy, and store it: m[k] = v`.
 - **Reihenfolge.** Einträge liegen in der Reihenfolge der Einfügung; `for K k, V v in m`, `m.keys()`, `m.values()` und die Textform halten sie ein. Die Ausgabe eines Programms ist darum bei gleicher Eingabe immer gleich.
-- **Schlüssel.** `K` ist jeder Typ, der `equal` ist; zwei Schlüssel sind dieselben, wenn `==` sie gleich nennt (`0.0` und `-0.0` sind derselbe Schlüssel). `NaN` als Schlüssel bricht ab (R14). Gleichheit, Textform: R28; Methoden: §4.5; Kopie und Schnappschuss: R5, Teil 2c.
+- **Schlüssel.** `K` ist jeder Typ, der `equal` ist; zwei Schlüssel sind dieselben, wenn `==` sie gleich nennt (`0.0` und `-0.0` sind derselbe Schlüssel). Ein Schlüssel, der irgendwo ein `NaN` enthält (`f64`, Liste, Struct), bricht ab (R14, `NaN cannot be a map key`). Gleichheit, Textform: R28; Methoden: §4.5; Kopie und Schnappschuss: R5, Teil 2c.
 
 ```dif
 void main() {
@@ -2090,7 +2092,7 @@ Signaturen stehen wie Deklarationen (R7): `R T.name(params)`; `T` ist der Elemen
 | `[]T repeat(T x, int n)` | eine Liste aus `n` Kopien von `x`; `n` darf 0 sein, negativ bricht ab; `T` ist der Elementtyp der Stelle (R8), sonst der von `x` |
 | `T(x)` | Umwandlung in `T`, exakt oder Abbruch (R31) |
 
-`print` ist ein Aufruf mit Ein-/Ausgabe und erfüllt damit R13, ebenso `assert`. `expect` gilt nur in `test`-Blöcken und ist dort eine Wirkung. stdout wird beim Programmende, vor jedem Lesen von stdin (§4.6) und vor der Meldung eines Abbruchs geschrieben, damit Eingabeaufforderungen und die Reihenfolge der Ausgabe stimmen.
+`print` ist ein Aufruf mit Ein-/Ausgabe und erfüllt damit R13, ebenso `assert`. `expect` gilt nur in `test`-Blöcken und ist dort eine Wirkung. stdout wird beim Programmende, vor jedem Lesen von stdin (§4.6), vor jedem `io.eprint` und vor der Meldung eines Abbruchs geschrieben, damit Eingabeaufforderungen und die Reihenfolge der Ausgabe stimmen.
 
 ### 4.2 `str` und `rune`
 
@@ -2110,8 +2112,8 @@ Ein `str` ist unveränderlich (R5, Teil 2c). Längen, Positionen und `slice` zä
 | `str str.replace(str from, str to)` | ersetzt jedes Vorkommen von `from` von links ohne Überlappung; leeres `from` bricht ab | |
 | `str str.repeat(int n)` | `n` Kopien hintereinander; `n < 0` bricht ab | |
 | `str str.slice(int a, int b)` | die Bytes `a … b-1`; `0 ≤ a ≤ b ≤ len()`, und `a` und `b` liegen auf Zeichengrenzen, sonst Abbruch | |
-| `?int str.parse_int()` | `-?[0-9]+` (nur ASCII-Ziffern) ohne Leerraum und Unterstriche, sonst `none`; passt der Wert nicht in `int`, `none` | |
-| `?f64 str.parse_f64()` | die Form des Literals mit optionalem `-` (`3`, `-1.5e2`, `0.25`), außerdem `inf`, `-inf`, `NaN`; ein Wert, der als `f64` `inf` würde, ist `none`; sonst `none` | |
+| `?int str.parse_int()` | genau `[+-]?[0-9]+`: optionales Vorzeichen, mindestens eine ASCII-Ziffer, führende Nullen erlaubt (`"007"` ist `some(7)`, Daten haben sie oft), kein Leerraum, kein `_`; passt der Wert nicht in `int`, `none`; alles andere `none` | |
+| `?f64 str.parse_f64()` | genau `[+-]?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?` (wie das Literal, aber mit Vorzeichen, mit führenden Nullen, ohne `_`; `".5"` und `"5."` sind `none`) oder `[+-]?inf` oder `NaN` (die Wörter der Textform, R29); der Wert wird auf den nächsten `f64` gerundet; wäre er `inf` oder würde eine Ziffernfolge ungleich 0 zu 0, `none` (wie beim Literal, R8); alles andere `none` | |
 | `bool rune.is_digit()` | Unicode-Kategorie `Nd` (`'٣'` ja, `'½'` nein) | |
 | `bool rune.is_letter()` | Unicode-Kategorien `L*` (`'ä'` ja) | |
 | `bool rune.is_space()` | `White_Space` (Unicode) | |
@@ -2130,6 +2132,7 @@ print("Hallo".find("ll"))
 print("x".find("y"))
 print("42".parse_int() ?? 0)
 print("4x".parse_int())
+print("+007".parse_int())
 print("-1.5e2".parse_f64())
 print("ab".repeat(3))
 print("a-b-c".replace("-", "+"))
@@ -2140,7 +2143,7 @@ print('x'.is_letter())
 print(' '.is_space())
 ```
 
-Ausgabe: `HALLO, WELT`, `15`, `4`, `2`, `["a", "b", "", "c"]`, `["a", "b"]`, `al`, `some(2)`, `none`, `42`, `none`, `some(-150)`, `ababab`, `a+b+c`, `äpfel`, `STRAßE`, `true`, `true`, `true`.
+Ausgabe: `HALLO, WELT`, `15`, `4`, `2`, `["a", "b", "", "c"]`, `["a", "b"]`, `al`, `some(2)`, `none`, `42`, `none`, `some(7)`, `some(-150)`, `ababab`, `a+b+c`, `äpfel`, `STRAßE`, `true`, `true`, `true`.
 
 ```dif panic "slice 1..2 is not on character boundaries"
 str s = "äö"
@@ -2229,6 +2232,7 @@ struct P {
 void main() {
     []P ps = [P{x: 2}, P{x: 1}]
     ps.sort()
+    print(ps)
 }
 ```
 
@@ -2272,7 +2276,7 @@ Beide Module sind Teil der Standardbibliothek und werden mit `use std.io` bzw. `
 
 `std.io` hat einen Fehlertyp, der jeder Funktion mit `!` gehört:
 
-```dif
+```text
 enum IoErr {
     NotFound(str path)
     NoPermission(str path)
@@ -2293,6 +2297,10 @@ enum IoErr {
 | `[]str os.args()` | die Argumente des Programms ohne den Programmnamen | |
 | `void os.exit(int code)` | schreibt stdout und stderr, beendet das Programm mit Exit-Code `code` (0 … 255, sonst Abbruch); `defer` läuft nicht (R23) | beendet |
 | `?str os.env(str name)` | der Wert der Umgebungsvariablen; `none`, wenn sie nicht gesetzt ist, `some("")`, wenn sie leer ist | |
+
+**Eingabe ist ein Strom.** stdin gehört dem Programm genau einmal; `io.lines()` und `io.read_line()` teilen eine Leseposition und lesen Zeile für Zeile erst, wenn sie gebraucht werden (nicht vorab). Die Schleife über `io.lines()` liest bei jedem Durchlauf eine Zeile (sie ist vom Schnappschuss in R11 ausgenommen); nach einem `break` liest `io.read_line()` oder eine zweite `io.lines()`-Schleife die nächste ungelesene Zeile. Eine Zeile mit ungültigem UTF-8 wird dabei verbraucht. stdout wird vor jedem Lesen geschrieben (§4.1).
+
+**Argumente und Umgebung.** Ein Argument oder ein Wert von `os.env`, der kein gültiges UTF-8 ist, bricht ab: `invalid UTF-8 in argument <i>` (Index ab 0 in `os.args()`) bzw. `invalid UTF-8 in environment variable <name>`.
 
 `io.read_line`, `io.write_file`, `io.eprint` und `os.exit` haben eine Wirkung (R13); `io.read_file` und `os.args` nicht: ihr Ergebnis wird verwendet. Der Fehler `io.IoErr.NotFound(path)` entsteht, wenn die Datei fehlt, `NoPermission(path)`, wenn das Betriebssystem den Zugriff verweigert, `InvalidUtf8(path)`, wenn der Inhalt kein gültiges UTF-8 ist, sonst `Other(path, reason)`.
 
@@ -2330,6 +2338,19 @@ void main() {
 ```
 
 Ausgabe: `missing: does-not-exist.txt`, `0`, `unset`, `done`.
+
+Eine Zeile mit `read_line` lesen (ohne Eingabe ist das Ergebnis `ok(none)` und `try` gibt `none`, `??` setzt den Vorgabewert ein):
+
+```dif
+use std.io
+
+void!io.IoErr main() {
+    str name = try io.read_line() ?? "world"
+    print("hello {name}")
+}
+```
+
+Ausgabe: `hello world`.
 
 Ein Programm, das alle Zahlen seiner Eingabe addiert (hier mit leerer Eingabe):
 
