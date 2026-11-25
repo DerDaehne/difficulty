@@ -1082,7 +1082,7 @@ Teil 1 legt fest:
 
 Teil 2c legt fest:
 
-- **Quellen.** `for T x in xs` läuft über die Elemente einer Liste oder eines Arrays in Reihenfolge; `for int i, T x in xs` liefert zusätzlich den Index `i` ab 0 (sein Typ ist `int`); `for K k, V v in m` läuft über die Einträge einer Map in der Reihenfolge der Einfügung (R30); `for str line in io.lines()` über die Zeilen von stdin (§4.6). Eine Quelle anderen Typs ist `R11` an der Quelle, Meldung `` cannot loop over int ``, Hinweis bei `int`: `for int i in range(n)`, bei `str`: `for rune r in s.runes()`, sonst keiner. Ein `str` ist keine Quelle.
+- **Quellen.** `for T x in xs` läuft über die Elemente einer Liste oder eines Arrays in Reihenfolge; `for int i, T x in xs` liefert zusätzlich den Index `i` ab 0 (sein Typ ist `int`); `for K k, V v in m` läuft über die Einträge einer Map in der Reihenfolge der Einfügung (R30); `for str line in try io.lines()` über die Zeilen von stdin; `io.lines()` liefert `str!io.IoErr`, ohne `try` steht die Schleifenvariable `str!io.IoErr` (§4.6). Eine Quelle anderen Typs ist `R11` an der Quelle, Meldung `` cannot loop over int ``, Hinweis bei `int`: `for int i in range(n)`, bei `str`: `for rune r in s.runes()`, sonst keiner. Ein `str` ist keine Quelle.
 - **Variablen.** Die Typen der Schleifenvariablen sind die der Elemente (bei `m` Schlüssel und Wert); ein anderer ist `R8`, Meldung `` expected str, found int `` an der Variablen. Die Form passt zur Quelle: eine Map mit einer Variablen ist `R11`, Meldung `` a loop over a map needs key and value ``, Hinweis `for str k, int v in counts` (mit den Typen und dem Namen der Quelle); `for int i, T x in m` ist `R8` wie oben. Die Variablen sind Kopien (R5); ihre Änderung wirkt nur bis zum nächsten Durchlauf.
 - **Schnappschuss.** Die Quelle wird einmal vor der Schleife ausgewertet und als Wert festgehalten (R5, Teil 2c). Schreibt der Rumpf in `xs` oder `m`, sieht diese Schleife davon nichts; `for int x in xs { xs.push(x) }` endet.
 - `io.lines()` und `range` stehen nur als Quelle einer `for`-Schleife. Beispiele bei R30.
@@ -2041,7 +2041,7 @@ Signaturen stehen wie Deklarationen (R7): `R T.name(params)`; `T` ist der Elemen
 
 ### 4.2 `str` und `rune`
 
-Ein `str` ist unveränderlich (R5, Teil 2c). Längen, Positionen und `slice` zählen Bytes (UTF-8); ein `str` hat keinen Index. Groß- und Kleinschreibung (`lower`, `upper`) und die Klassen von `rune` (`is_digit`, `is_letter`, `is_space`) kennen in v0 nur ASCII; andere Zeichen bleiben unverändert und sind in keiner Klasse. Leerraum (`trim`, `is_space`) ist Leerzeichen, Tabulator, `\n`, `\r`, Seitenvorschub und vertikaler Tabulator.
+Ein `str` ist unveränderlich (R5, Teil 2c). Längen, Positionen und `slice` zählen Bytes (UTF-8); ein `str` hat keinen Index. `lower` und `upper` bilden Zeichen für Zeichen nach der einfachen Fallzuordnung von Unicode (`UnicodeData`) ab, ohne Mehrzeichen-Abbildungen: `"Äpfel".lower()` ist `"äpfel"`, `"straße".upper()` ist `"STRAßE"`. `is_letter` gilt für Zeichen der Unicode-Kategorien `L*`, `is_digit` für `Nd`, `is_space` und `trim` für die Unicode-Eigenschaft `White_Space` (Leerzeichen, Tabulator, Zeilenumbrüche, U+00A0 …). Länge, Position und `slice` zählen weiter Bytes.
 
 | Signatur | Verhalten | Wirkung |
 |---|---|---|
@@ -2051,17 +2051,17 @@ Ein `str` ist unveränderlich (R5, Teil 2c). Längen, Positionen und `slice` zä
 | `[]str str.split(str sep)` | teilt an jedem `sep`, von links, ohne Überlappung; aufeinanderfolgende `sep` geben leere Texte; `"".split(",")` ist `[""]`; leeres `sep` bricht ab | |
 | `[]str str.lines()` | teilt an `\n`, ein `\r` davor entfällt; ein letzter Zeilenumbruch erzeugt keine leere Zeile; `""` gibt `[]` | |
 | `str str.trim()`, `trim_start()`, `trim_end()` | entfernt Leerraum an beiden Enden, am Anfang, am Ende | |
-| `str str.lower()`, `upper()` | ASCII-Buchstaben umgewandelt | |
+| `str str.lower()`, `upper()` | jedes Zeichen einzeln in Klein- bzw. Großbuchstaben (einfache Fallzuordnung); der Rest bleibt | |
 | `bool str.contains(str s)`, `starts_with(str s)`, `ends_with(str s)` | Teiltext, Anfang, Ende; der leere Text ist immer enthalten | |
 | `?int str.find(str s)` | Byte-Position des ersten Vorkommens, sonst `none`; `find("")` ist `some(0)` | |
 | `str str.replace(str from, str to)` | ersetzt jedes Vorkommen von `from` von links ohne Überlappung; leeres `from` bricht ab | |
 | `str str.repeat(int n)` | `n` Kopien hintereinander; `n < 0` bricht ab | |
 | `str str.slice(int a, int b)` | die Bytes `a … b-1`; `0 ≤ a ≤ b ≤ len()`, und `a` und `b` liegen auf Zeichengrenzen, sonst Abbruch | |
-| `?int str.parse_int()` | `-?[0-9]+` ohne Leerraum und Unterstriche, sonst `none`; passt der Wert nicht in `int`, `none` | |
+| `?int str.parse_int()` | `-?[0-9]+` (nur ASCII-Ziffern) ohne Leerraum und Unterstriche, sonst `none`; passt der Wert nicht in `int`, `none` | |
 | `?f64 str.parse_f64()` | die Form des Literals mit optionalem `-` (`3`, `-1.5e2`, `0.25`), außerdem `inf`, `-inf`, `NaN`; ein Wert, der als `f64` `inf` würde, ist `none`; sonst `none` | |
-| `bool rune.is_digit()` | `'0' … '9'` | |
-| `bool rune.is_letter()` | `'a' … 'z'`, `'A' … 'Z'` | |
-| `bool rune.is_space()` | Leerraum wie oben | |
+| `bool rune.is_digit()` | Unicode-Kategorie `Nd` (`'٣'` ja, `'½'` nein) | |
+| `bool rune.is_letter()` | Unicode-Kategorien `L*` (`'ä'` ja) | |
+| `bool rune.is_space()` | `White_Space` (Unicode) | |
 | `str(r)` | der Text aus dem einen Zeichen `r` (R31) | |
 
 ```dif snippet
@@ -2080,12 +2080,14 @@ print("4x".parse_int())
 print("-1.5e2".parse_f64())
 print("ab".repeat(3))
 print("a-b-c".replace("-", "+"))
+print("Äpfel".lower())
+print("straße".upper())
 print('7'.is_digit())
 print('x'.is_letter())
 print(' '.is_space())
 ```
 
-Ausgabe: `HALLO, WELT`, `15`, `4`, `2`, `["a", "b", "", "c"]`, `["a", "b"]`, `al`, `some(2)`, `none`, `42`, `none`, `some(-150)`, `ababab`, `a+b+c`, `true`, `true`, `true`.
+Ausgabe: `HALLO, WELT`, `15`, `4`, `2`, `["a", "b", "", "c"]`, `["a", "b"]`, `al`, `some(2)`, `none`, `42`, `none`, `some(-150)`, `ababab`, `a+b+c`, `äpfel`, `STRAßE`, `true`, `true`, `true`.
 
 ```dif panic "slice 1..2 is not on character boundaries"
 str s = "äö"
@@ -2113,6 +2115,8 @@ Für `f64`:
 | `f64 f64.round()` | auf die nächste ganze Zahl, bei genauer Mitte von 0 weg (`2.5` → `3`, `-2.5` → `-3`) | |
 | `f64 f64.trunc()`, `floor()`, `ceil()` | zu 0 hin, nach unten, nach oben gerundet | |
 | `f64 f64.sqrt()` | Quadratwurzel; negativ gibt `NaN` | |
+| `f64 f64.abs()` | Betrag (löscht das Vorzeichenbit, bricht nie ab) | |
+| `f64 f64.min(f64 b)`, `f64 f64.max(f64 b)` | der kleinere bzw. größere von `self` und `b`; ist ein Operand `NaN`, ist das Ergebnis der andere (wie C `fmin`, `fmax`) | |
 
 Die Ergebnisse sind wieder `f64`; wer eine Ganzzahl will, schreibt `int(x.round())` (R31). `NaN` und `inf` bleiben bei `round` & Co. unverändert. Umwandlungen, Formatangaben und Textform: R31, R29, R28. Eine Methode auf einem Zahl-Literal steht in Klammern: `(5).abs()`.
 
@@ -2211,7 +2215,7 @@ Für `map[K]V`; Literal, `m[k]` und `m[k] = v` stehen in R30.
 
 ### 4.6 `io` und `os`
 
-Beide Module sind Teil der Standardbibliothek und werden mit `use std.io` bzw. `use std.os` geladen (R16). Text, den sie lesen, ist immer gültiges UTF-8: ungültige Bytes ersetzt die Bibliothek durch U+FFFD.
+Beide Module sind Teil der Standardbibliothek und werden mit `use std.io` bzw. `use std.os` geladen (R16). Ein `str` ist immer gültiges UTF-8: enthält gelesener Text ungültige Bytes, ist das ein Fehler (`IoErr.InvalidUtf8`), nie ein stiller Ersatz.
 
 `std.io` hat einen Fehlertyp, der jeder Funktion mit `!` gehört:
 
@@ -2219,16 +2223,17 @@ Beide Module sind Teil der Standardbibliothek und werden mit `use std.io` bzw. `
 enum IoErr {
     NotFound(str path)
     NoPermission(str path)
+    InvalidUtf8(str path)
     Other(str path, str reason)
 }
 ```
 
-`reason` ist der Text des Betriebssystems; er ist nicht festgelegt. Von außen heißt der Typ `io.IoErr`.
+`reason` ist der Text des Betriebssystems; er ist nicht festgelegt. `path` ist bei stdin `"<stdin>"`. Von außen heißt der Typ `io.IoErr`.
 
 | Signatur | Verhalten | Wirkung |
 |---|---|---|
-| `io.lines()` | Quelle einer `for`-Schleife (R11): die Zeilen von stdin ohne `\n` (ein `\r` davor entfällt), bis zum Ende der Eingabe; eine letzte Zeile ohne Zeilenumbruch zählt; leere Eingabe gibt keine Durchläufe; ein Lesefehler beendet wie das Ende | |
-| `?str io.read_line()` | die nächste Zeile von stdin wie bei `lines()`; `none` am Ende der Eingabe | ändert die Eingabe |
+| `io.lines()` | Quelle einer `for`-Schleife (R11) mit Elementen vom Typ `str!io.IoErr`: die Zeilen von stdin ohne `\n` (ein `\r` davor entfällt), bis zum Ende der Eingabe; eine letzte Zeile ohne Zeilenumbruch zählt; leere Eingabe gibt keine Durchläufe; eine Zeile mit ungültigem UTF-8 ist `err(IoErr.InvalidUtf8("<stdin>"))` und das letzte Element, danach endet die Schleife. `for str line in try io.lines()` entpackt jedes Element wie `try` (R12): der Fehler beendet die Funktion, die dafür `U!io.IoErr` liefern muss (auch `void!io.IoErr main()`). Ohne `try` ist die Schleifenvariable ein `str!io.IoErr` (`for str!io.IoErr r in io.lines()`), die man mit `switch` oder `??` behandelt; `for str line in io.lines()` ist `R8`, Meldung `` expected str, found str!IoErr ``, Hinweis `for str line in try io.lines()` | |
+| `?str!io.IoErr io.read_line()` | die nächste Zeile von stdin wie bei `lines()`; `ok(none)` am Ende der Eingabe, `err(IoErr.InvalidUtf8("<stdin>"))` bei ungültigem UTF-8 | ändert die Eingabe |
 | `str!io.IoErr io.read_file(str path)` | der ganze Inhalt der Datei | |
 | `void!io.IoErr io.write_file(str path, str text)` | legt die Datei an oder überschreibt sie mit den Bytes von `text` | ändert die Datei |
 | `void io.eprint(text T x)` | schreibt `"{x}"` und einen Zeilenumbruch auf stderr | ändert stderr |
@@ -2236,7 +2241,7 @@ enum IoErr {
 | `void os.exit(int code)` | schreibt stdout und stderr, beendet das Programm mit Exit-Code `code` (0 … 255, sonst Abbruch); `defer` läuft nicht (R23) | beendet |
 | `?str os.env(str name)` | der Wert der Umgebungsvariablen; `none`, wenn sie nicht gesetzt ist, `some("")`, wenn sie leer ist | |
 
-`io.read_line`, `io.write_file`, `io.eprint` und `os.exit` haben eine Wirkung (R13); `io.read_file` und `os.args` nicht: ihr Ergebnis wird verwendet. Der Fehler `io.IoErr.NotFound(path)` entsteht, wenn die Datei fehlt, `NoPermission(path)`, wenn das Betriebssystem den Zugriff verweigert, sonst `Other(path, reason)`.
+`io.read_line`, `io.write_file`, `io.eprint` und `os.exit` haben eine Wirkung (R13); `io.read_file` und `os.args` nicht: ihr Ergebnis wird verwendet. Der Fehler `io.IoErr.NotFound(path)` entsteht, wenn die Datei fehlt, `NoPermission(path)`, wenn das Betriebssystem den Zugriff verweigert, `InvalidUtf8(path)`, wenn der Inhalt kein gültiges UTF-8 ist, sonst `Other(path, reason)`.
 
 ```dif
 use std.io
@@ -2248,6 +2253,8 @@ str describe(io.IoErr e) {
         return "missing: {path}"
     case io.IoErr.NoPermission(str path):
         return "no permission: {path}"
+    case io.IoErr.InvalidUtf8(str path):
+        return "not UTF-8: {path}"
     case io.IoErr.Other(str path, str reason):
         return "{path}: {reason}"
     }
@@ -2276,9 +2283,9 @@ Ein Programm, das alle Zahlen seiner Eingabe addiert (hier mit leerer Eingabe):
 ```dif
 use std.io
 
-void main() {
+void!io.IoErr main() {
     int total = 0
-    for str line in io.lines() {
+    for str line in try io.lines() {
         total += line.trim().parse_int() ?? 0
     }
     print(total)
