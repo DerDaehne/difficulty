@@ -115,15 +115,7 @@ fn llms_txt() {
 
 /// Sections of the spec whose examples are checked but not built and run;
 /// a section is listed here only while its backend is missing.
-const CHECK_ONLY: &[&str] = &[];
-
-/// Sections whose examples need the compiler of part 2b and are skipped entirely
-/// until it exists; the compiler change removes them here.
-const PENDING: &[&str] = &[];
-
-/// Sections of part 2c (collections, number widths, text, io/os): their examples need the
-/// compiler of part 2c and are skipped until it exists; the compiler change removes them here.
-const PENDING_2C: &[&str] = &[
+const CHECK_ONLY: &[&str] = &[
     "### 1.4 ",
     "### R5, Teil 2c",
     "### R8, Teil 2c",
@@ -180,12 +172,7 @@ fn doc_examples(doc: &str, tag: &str) -> usize {
             }
             lines[from..to].join("\n")
         });
-        if PENDING
-            .iter()
-            .chain(PENDING_2C)
-            .chain(PENDING_2D)
-            .any(|p| section.starts_with(p))
-        {
+        if PENDING_2D.iter().any(|p| section.starts_with(p)) {
             continue;
         }
         let check_only = CHECK_ONLY.iter().any(|p| section.starts_with(p));

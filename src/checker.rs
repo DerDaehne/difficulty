@@ -9,8 +9,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
-use crate::lexer::Fmt;
 use crate::diag::{Diag, Pos};
+use crate::lexer::Fmt;
 use crate::live::{self, CallChanges};
 
 mod p2c;
@@ -676,10 +676,7 @@ impl<'a> Checker<'a> {
     /// `T!E`, and so `?T!E` (R31).
     fn fits_place(&self, want: Ty, got: Ty) -> bool {
         want == got
-            || (got != Ty::Void
-                && self
-                    .inner(want)
-                    .is_some_and(|w| self.fits_place(w, got)))
+            || (got != Ty::Void && self.inner(want).is_some_and(|w| self.fits_place(w, got)))
     }
 
     /// Functions that end without a value: `void` and `void!E`.
@@ -1446,7 +1443,8 @@ impl<'a> Checker<'a> {
                     let ot = self.opt(vt);
                     if rt != Ty::Err && vt != Ty::Err {
                         let binop = &op[..op.len() - 1];
-                        let msg = format!("cannot apply `{op}` to {} and {}", self.tn(ot), self.tn(rt));
+                        let msg =
+                            format!("cannot apply `{op}` to {} and {}", self.tn(ot), self.tn(rt));
                         let hint = format!(
                             "{p} = ({p} ?? {}) {binop} {}",
                             self.zero(vt),
@@ -1630,7 +1628,12 @@ impl<'a> Checker<'a> {
             Pattern::Rune(c, p) => match over {
                 Ty::Rune => Some((format!("rune {c}"), *p)),
                 Ty::Err => None,
-                _ => wrong(self, format!("{:?}", char::from_u32(*c).unwrap_or('?')), Ty::Rune, *p),
+                _ => wrong(
+                    self,
+                    format!("{:?}", char::from_u32(*c).unwrap_or('?')),
+                    Ty::Rune,
+                    *p,
+                ),
             },
             Pattern::Str(s, p) => match over {
                 Ty::Str => Some((format!("{s:?}"), *p)),
@@ -1900,9 +1903,7 @@ impl<'a> Checker<'a> {
     fn expr_kind(&mut self, e: &'a Expr, place: Ty) -> (Ty, Val) {
         match &e.kind {
             ExprKind::Missing => (Ty::Err, Val::Runtime),
-            ExprKind::Int(v) if self.lit_float => {
-                (Ty::FloatLit, Val::Float(*v as f64))
-            }
+            ExprKind::Int(v) if self.lit_float => (Ty::FloatLit, Val::Float(*v as f64)),
             ExprKind::Int(v) => (Ty::IntLit, Val::Int(*v as i128)),
             ExprKind::Float(text) => self.float_lit(e, text),
             ExprKind::Rune(c) => {
@@ -2011,9 +2012,10 @@ impl<'a> Checker<'a> {
         if !allowed {
             let msg = format!("cannot apply `{op}` to {}", self.tn(t));
             let hint = match (op, t) {
-                ("-", t) if t.is_int() => {
-                    Some(format!("use 0 -% {} for wrapping, or a signed type", self.text(x)))
-                }
+                ("-", t) if t.is_int() => Some(format!(
+                    "use 0 -% {} for wrapping, or a signed type",
+                    self.text(x)
+                )),
                 (_, t) if t.is_float() => Some("use ints for bit operations".to_string()),
                 _ => None,
             };
@@ -2122,7 +2124,11 @@ impl<'a> Checker<'a> {
             _ => None,
         };
         let Some(ty) = ty else {
-            let msg = format!("cannot apply `{shown}` to {} and {}", self.tn(lt), self.tn(rt));
+            let msg = format!(
+                "cannot apply `{shown}` to {} and {}",
+                self.tn(lt),
+                self.tn(rt)
+            );
             let (ltext, rtext) = (self.text(l), self.text(r));
             let arithmetic = matches!(op, "+" | "-" | "*" | "/" | "%") || int_op;
             let hint = if op == "+" && (lt == Ty::Str || rt == Ty::Str) {
@@ -2622,9 +2628,10 @@ impl<'a> Checker<'a> {
             // `m[k].push(x)`: an entry is changed by assigning it (R30)
             let inner = self.opts[i as usize];
             let changes = match inner {
-                Ty::Named(t) => self.types[t as usize].methods.get(m).is_some_and(|&id| {
-                    self.derived.as_ref().is_some_and(|d| d[id].changes_self)
-                }),
+                Ty::Named(t) => self.types[t as usize]
+                    .methods
+                    .get(m)
+                    .is_some_and(|&id| self.derived.as_ref().is_some_and(|d| d[id].changes_self)),
                 _ => self.builtin_changes(inner, m),
             };
             if changes {
@@ -2834,7 +2841,9 @@ impl<'a> Checker<'a> {
                 match want {
                     Ty::Opt(_) | Ty::Err => (want, Val::Known),
                     // `?T!E`: `none` is a `?T` that is not an error
-                    Ty::Res(i) if matches!(self.ress[i as usize].0, Ty::Opt(_)) => (want, Val::Known),
+                    Ty::Res(i) if matches!(self.ress[i as usize].0, Ty::Opt(_)) => {
+                        (want, Val::Known)
+                    }
                     _ => {
                         let hint = decl
                             .filter(|_| !matches!(want, Ty::Res(_)))

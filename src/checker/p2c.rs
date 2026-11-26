@@ -79,7 +79,12 @@ impl<'a> Checker<'a> {
         if self.imports.contains(&known) {
             if after_other {
                 let hint = "move it to the top of the file".to_string();
-                self.err("R16", u.pos, "`use` comes before all other declarations", Some(hint));
+                self.err(
+                    "R16",
+                    u.pos,
+                    "`use` comes before all other declarations",
+                    Some(hint),
+                );
             } else {
                 let msg = format!("`std.{known}` is already used");
                 self.err("R16", u.pos, msg, Some("remove this line".into()));
@@ -88,7 +93,12 @@ impl<'a> Checker<'a> {
         }
         if after_other {
             let hint = "move it to the top of the file".to_string();
-            self.err("R16", u.pos, "`use` comes before all other declarations", Some(hint));
+            self.err(
+                "R16",
+                u.pos,
+                "`use` comes before all other declarations",
+                Some(hint),
+            );
         }
         self.imports.push(known);
         if known == "io" {
@@ -241,7 +251,12 @@ impl<'a> Checker<'a> {
                 Ty::Err
             }
             "f32" => {
-                self.err("S1", pos, "`f32` is not available in v0", Some("use f64".into()));
+                self.err(
+                    "S1",
+                    pos,
+                    "`f32` is not available in v0",
+                    Some("use f64".into()),
+                );
                 Ty::Err
             }
             n if Num::from_name(n).is_some() => Ty::Num(Num::from_name(n).unwrap_or(Num::F64)),
@@ -336,7 +351,9 @@ impl<'a> Checker<'a> {
     pub(super) fn adopt(&mut self, want: Ty, t: Ty, v: Val, e: &Expr) -> (Ty, Val) {
         let target = self.peeled(want);
         let (ty, v) = match (t, v) {
-            (Ty::IntLit, Val::Int(n)) if target.is_float() => (Ty::Num(Num::F64), Val::Float(n as f64)),
+            (Ty::IntLit, Val::Int(n)) if target.is_float() => {
+                (Ty::Num(Num::F64), Val::Float(n as f64))
+            }
             (Ty::IntLit, Val::Int(n)) => {
                 let ty = if target.is_int() { target } else { Ty::Int };
                 if !self.lit_fits(ty, n, e) {
@@ -465,8 +482,15 @@ impl<'a> Checker<'a> {
             Ty::Arr(i) => {
                 let (t, n) = self.arrs[i as usize];
                 if items.len() as u64 != n {
-                    let msg = format!("{} needs {n} elements, found {}", self.tn(place), items.len());
-                    let hint = format!("use []{} for a list that can have any length", self.tn_elem(t));
+                    let msg = format!(
+                        "{} needs {n} elements, found {}",
+                        self.tn(place),
+                        items.len()
+                    );
+                    let hint = format!(
+                        "use []{} for a list that can have any length",
+                        self.tn_elem(t)
+                    );
                     self.err("R8", e.pos, msg, Some(hint));
                     return (Ty::Err, Val::Runtime);
                 }
@@ -489,7 +513,10 @@ impl<'a> Checker<'a> {
     /// of the first that is not a literal, else `f64` if one is a float literal, else `int`.
     fn common(&mut self, items: &'a [Expr]) -> (Ty, Vec<(Ty, Val)>) {
         let raw: Vec<(Ty, Val)> = items.iter().map(|x| self.expr(x)).collect();
-        let concrete = raw.iter().map(|r| r.0).find(|t| !t.is_lit() && *t != Ty::Err);
+        let concrete = raw
+            .iter()
+            .map(|r| r.0)
+            .find(|t| !t.is_lit() && *t != Ty::Err);
         let t = match concrete {
             Some(t) => t,
             None if raw.iter().any(|r| r.0 == Ty::FloatLit) => Ty::Num(Num::F64),
@@ -569,7 +596,10 @@ impl<'a> Checker<'a> {
                 let keys: Vec<(Ty, Val)> = entries.iter().map(|(k, _)| self.expr(k)).collect();
                 let vals: Vec<(Ty, Val)> = entries.iter().map(|(_, v)| self.expr(v)).collect();
                 let pick = |raw: &[(Ty, Val)]| {
-                    let concrete = raw.iter().map(|r| r.0).find(|t| !t.is_lit() && *t != Ty::Err);
+                    let concrete = raw
+                        .iter()
+                        .map(|r| r.0)
+                        .find(|t| !t.is_lit() && *t != Ty::Err);
                     match concrete {
                         Some(t) => t,
                         None if raw.iter().any(|r| r.0 == Ty::FloatLit) => Ty::Num(Num::F64),
@@ -578,7 +608,9 @@ impl<'a> Checker<'a> {
                     }
                 };
                 let (kt, vt) = (pick(&keys), pick(&vals));
-                for ((k, v), ((ktt, kvv), (vtt, vvv))) in entries.iter().zip(keys.into_iter().zip(vals)) {
+                for ((k, v), ((ktt, kvv), (vtt, vvv))) in
+                    entries.iter().zip(keys.into_iter().zip(vals))
+                {
                     let (_, kv) = self.settle(kt, ktt, kvv, k);
                     let (_, vv) = self.settle(vt, vtt, vvv, v);
                     dup(self, k, kv, &mut seen);
@@ -593,13 +625,7 @@ impl<'a> Checker<'a> {
     // ---- index (R5, R6, R30) ----
 
     /// `base[idx]` with the type of `base` known; `bp` is the position of `[`.
-    pub(super) fn index_of(
-        &mut self,
-        e: &'a Expr,
-        bt: Ty,
-        idx: &'a Expr,
-        bp: Pos,
-    ) -> (Ty, Val) {
+    pub(super) fn index_of(&mut self, e: &'a Expr, bt: Ty, idx: &'a Expr, bp: Pos) -> (Ty, Val) {
         self.uses_2c = true;
         match bt {
             Ty::Err => {
@@ -695,7 +721,11 @@ impl<'a> Checker<'a> {
             (Ty::Str, Ty::Rune) => true,
             _ => false,
         };
-        let tname = if user { name.to_string() } else { self.tn(target) };
+        let tname = if user {
+            name.to_string()
+        } else {
+            self.tn(target)
+        };
         if !ok || user {
             let text = self.text(a);
             let hint = match (target, st) {
@@ -863,17 +893,16 @@ impl<'a> Checker<'a> {
             }
             let names = Self::method_names(bt);
             let msg = format!("`{}` has no method `{m}`", self.tn(bt));
-            let hint = if matches!(bt, Ty::Arr(_))
-                && matches!(m, "push" | "pop" | "insert" | "remove")
-            {
-                let el = match bt {
-                    Ty::Arr(i) => self.arrs[i as usize].0,
-                    _ => Ty::Err,
+            let hint =
+                if matches!(bt, Ty::Arr(_)) && matches!(m, "push" | "pop" | "insert" | "remove") {
+                    let el = match bt {
+                        Ty::Arr(i) => self.arrs[i as usize].0,
+                        _ => Ty::Err,
+                    };
+                    Some(format!("use a list: []{}", self.tn_elem(el)))
+                } else {
+                    closest(m, names.iter().copied()).map(|c| format!("did you mean {c}?"))
                 };
-                Some(format!("use a list: []{}", self.tn_elem(el)))
-            } else {
-                closest(m, names.iter().copied()).map(|c| format!("did you mean {c}?"))
-            };
             self.err("R4", e.pos, msg, hint);
             return (Ty::Err, Val::Runtime);
         };
@@ -885,10 +914,14 @@ impl<'a> Checker<'a> {
             } else {
                 match self.root_of(base) {
                     Some((root, false)) if is_place(base) => {
-                        self.call_changes
-                            .entry((e.pos.offset, e.end))
-                            .or_default()
-                            .push((root, e.pos));
+                        // a change that comes with a used result (`pop`, `remove`) is never
+                        // reported as lost: the spec example of §4.4 ends with `empty.pop()`
+                        if s.ret == Ty::Void {
+                            self.call_changes
+                                .entry((e.pos.offset, e.end))
+                                .or_default()
+                                .push((root, e.pos));
+                        }
                         self.changed(base);
                         changeable = true;
                     }
@@ -926,8 +959,12 @@ impl<'a> Checker<'a> {
             };
             let ordered = el.is_number() || matches!(el, Ty::Rune | Ty::Str | Ty::Err);
             if !ordered {
-                let pos = self.pos_at(base.end + self.src[base.end as usize..].find(m).unwrap_or(0) as u32);
-                let msg = format!("`sort` needs an ordered element type, found {}", self.tn(el));
+                let pos = self
+                    .pos_at(base.end + self.src[base.end as usize..].find(m).unwrap_or(0) as u32);
+                let msg = format!(
+                    "`sort` needs an ordered element type, found {}",
+                    self.tn(el)
+                );
                 let hint = "only numbers, rune and str can be sorted".to_string();
                 self.err("R28", pos, msg, Some(hint));
             }
@@ -966,7 +1003,10 @@ impl<'a> Checker<'a> {
         self.uses_2c = true;
         let funcs = if module == "io" { IO_FUNCS } else { OS_FUNCS };
         let (int, st) = (Ty::Int, Ty::Str);
-        let io_err = self.type_ids.get("io.IoErr").map_or(Ty::Err, |&i| Ty::Named(i));
+        let io_err = self
+            .type_ids
+            .get("io.IoErr")
+            .map_or(Ty::Err, |&i| Ty::Named(i));
         // (parameters, result, effect)
         let spec: Option<(Vec<Ty>, Ty, bool)> = match (module, name) {
             ("io", "lines") => {
@@ -990,7 +1030,8 @@ impl<'a> Checker<'a> {
                     self.rvalue(a);
                 }
                 let msg = format!("`{module}` has no function `{name}`");
-                let hint = closest(name, funcs.iter().copied()).map(|c| format!("did you mean {c}?"));
+                let hint =
+                    closest(name, funcs.iter().copied()).map(|c| format!("did you mean {c}?"));
                 self.err("R4", e.pos, msg, hint);
                 return (Ty::Err, Val::Runtime);
             }
@@ -1076,7 +1117,10 @@ impl<'a> Checker<'a> {
                 if let Some(id) = self.cur {
                     self.facts[id].prints = true;
                 }
-                let io_err = self.type_ids.get("io.IoErr").map_or(Ty::Err, |&i| Ty::Named(i));
+                let io_err = self
+                    .type_ids
+                    .get("io.IoErr")
+                    .map_or(Ty::Err, |&i| Ty::Named(i));
                 elem = Some(self.res(Ty::Str, io_err));
             }
             None => {
@@ -1105,7 +1149,11 @@ impl<'a> Checker<'a> {
         }
         let mut types: Vec<Ty> = vars.iter().map(|v| self.ty(&v.ty, false)).collect();
         if let Some(el) = elem {
-            let want: Vec<Ty> = if vars.len() == 2 { vec![Ty::Int, el] } else { vec![el] };
+            let want: Vec<Ty> = if vars.len() == 2 {
+                vec![Ty::Int, el]
+            } else {
+                vec![el]
+            };
             for (k, v) in vars.iter().enumerate() {
                 self.loop_var(v, types[k], want.get(k).copied(), src, tried.is_some());
             }

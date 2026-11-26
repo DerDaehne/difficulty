@@ -453,7 +453,11 @@ impl<'a> Parser<'a> {
             let j = self.type_end(k + 1)?;
             return (*self.peek_n(j) == Tok::Op(")")).then_some(j + 1);
         }
-        let k = if matches!(self.peek_n(k), Tok::Op("?")) { k + 1 } else { k };
+        let k = if matches!(self.peek_n(k), Tok::Op("?")) {
+            k + 1
+        } else {
+            k
+        };
         self.base_end(k)
     }
 
@@ -2361,7 +2365,10 @@ impl<'a> Parser<'a> {
         self.bump(); // use
         let std = matches!(self.peek(), Tok::Ident(n) if n == "std");
         if !std || *self.peek_n(1) != Tok::Op(".") || !matches!(self.peek_n(2), Tok::Ident(_)) {
-            let msg = format!("expected `std.name` after `use`, found {}", describe(self.peek()));
+            let msg = format!(
+                "expected `std.name` after `use`, found {}",
+                describe(self.peek())
+            );
             self.err("S1", self.pos(), msg, Some("use std.io".into()));
             return None;
         }
