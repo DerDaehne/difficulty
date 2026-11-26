@@ -1950,7 +1950,11 @@ impl<'a> Emitter<'a> {
             ExprKind::Ident(name) if self.funcs.contains_key(name.as_str()) => {
                 let func = self.funcs[name.as_str()];
                 let items = self.args_of(func, args, None);
-                self.apply(&Self::cname(func), &items, (e.pos.line as usize, e.pos.col as usize))
+                self.apply(
+                    &Self::cname(func),
+                    &items,
+                    (e.pos.line as usize, e.pos.col as usize),
+                )
             }
             ExprKind::Ident(_) => self.convert(e, &args[0]),
             _ => unreachable!("call of something that is not a function"),
@@ -2002,7 +2006,6 @@ impl<'a> Emitter<'a> {
             None => self.at(Ty::Int, idx),
         }
     }
-
 
     /// `"a {x} b"`: a fresh buffer, filled left to right.
     fn text(&mut self, segs: &'a [StrSeg]) -> String {
@@ -2198,6 +2201,9 @@ impl<'a> Emitter<'a> {
         let span = marker.trim_start_matches('s');
         let (a, b) = span.split_once(':').unwrap_or(("0", "0"));
         let key = (a.parse().unwrap_or(0), b.parse().unwrap_or(0));
-        self.idx_temps.get(&key).cloned().unwrap_or_else(|| "0".into())
+        self.idx_temps
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| "0".into())
     }
 }

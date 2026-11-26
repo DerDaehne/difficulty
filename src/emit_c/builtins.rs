@@ -762,6 +762,7 @@ impl<'a> Emitter<'a> {
         self.line(d + 1, &format!("int {k} = 1;"));
         self.line(d + 1, &format!("for (int64_t {i} = 0; {k} >= 0; {i}++) {{"));
         self.line(d + 2, "dif_str l_; dif_ioerr e_;");
+        self.line(d + 2, &format!("(void){i};"));
         self.line(d + 2, &format!("{k} = dif_io_read_line(&l_, &e_);"));
         self.line(d + 2, &format!("if ({k} == 0) break;"));
         self.line(d + 2, &format!("{rt} {y} = {{0}};"));

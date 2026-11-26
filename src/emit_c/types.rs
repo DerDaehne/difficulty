@@ -556,13 +556,8 @@ impl<'a> Emitter<'a> {
                                 );
                             }
                             let _ = writeln!(c, "    return true;\n}}");
-                            // `io.IoErr` is written without its module in the text form
-                            let shown = n
-                                .rsplit('_')
-                                .next()
-                                .filter(|_| n.contains('_'))
-                                .unwrap_or(&n);
-                            let shown = if d.name.contains('.') { shown } else { &n };
+                            // `io.IoErr` is written without its module in the text form (R28)
+                            let shown = d.name.rsplit('.').next().unwrap_or(&d.name);
                             for (k, v) in vs.iter().enumerate() {
                                 let _ = writeln!(text, "    if (v.tag == {k}) {{");
                                 let _ = writeln!(
