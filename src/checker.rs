@@ -1626,7 +1626,7 @@ impl<'a> Checker<'a> {
                 _ => wrong(self, v.to_string(), Ty::Int, *p),
             },
             Pattern::Rune(c, p) => match over {
-                Ty::Rune => Some((format!("rune {c}"), *p)),
+                Ty::Rune => Some((format!("{:?}", char::from_u32(*c).unwrap_or('?')), *p)),
                 Ty::Err => None,
                 _ => wrong(
                     self,
@@ -2832,6 +2832,17 @@ impl<'a> Checker<'a> {
     /// `some(…)` take their type from this place (R12). `decl` is the name of the
     /// variable being declared, for the hint. Returns the type found and its value.
     fn at_place(&mut self, want: Ty, e: &'a Expr, decl: Option<&str>) -> (Ty, Val) {
+        if want == Ty::Err {
+            // the type of the place was reported; an empty literal needs no second message
+            let empty = match &e.kind {
+                ExprKind::ListLit(v) => v.is_empty(),
+                ExprKind::MapLit(v) => v.is_empty(),
+                _ => false,
+            };
+            if empty {
+                return (Ty::Err, Val::Runtime);
+            }
+        }
         let r = match &e.kind {
             ExprKind::Paren(x) if !matches!(x.kind, ExprKind::Missing) => {
                 self.at_place(want, x, decl)
@@ -3154,7 +3165,8 @@ fn is_place(e: &Expr) -> bool {
     }
 }
 
-/// The path of a place: root, then fields.
+/// The path of a place: root, fields, and indexes (`#n` for a constant index, `#?` for
+/// one only known at run time).
 fn path(e: &Expr) -> Vec<String> {
     match &e.kind {
         ExprKind::Ident(n) => vec![n.clone()],
@@ -3164,16 +3176,24 @@ fn path(e: &Expr) -> Vec<String> {
             p.push(f.clone());
             p
         }
-        ExprKind::Index(b, _, _) => path(b),
+        ExprKind::Index(b, i, _) => {
+            let mut p = path(b);
+            p.push(match &i.kind {
+                ExprKind::Int(n) => format!("#{n}"),
+                _ => "#?".into(),
+            });
+            p
+        }
         _ => Vec::new(),
     }
 }
 
-/// Two places overlap when one path starts with the other (R6).
+/// Two places overlap when one path starts with the other (R6); `xs[0]` and `xs[1]` never
+/// do, and two indexes of which one is only known at run time are checked there.
 fn overlap(a: &Expr, b: &Expr) -> bool {
     let (pa, pb) = (path(a), path(b));
     let n = pa.len().min(pb.len());
-    n > 0 && pa[..n] == pb[..n]
+    n > 0 && pa[..n].iter().zip(&pb[..n]).all(|(x, y)| x == y && x != "#?")
 }
 
 /// Does every path through the block end in `return`? `complete` holds the

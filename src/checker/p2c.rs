@@ -283,7 +283,13 @@ impl<'a> Checker<'a> {
     fn array_len(&mut self, text: &str, pos: Pos) -> Option<u64> {
         let n = match text.parse::<u64>() {
             Ok(n) => Some(n as i128),
-            Err(_) => self.const_int(text, 0),
+            Err(_) => match self.local(text) {
+                Some(l) if l.is_const && l.ty == Ty::Int => match l.val {
+                    Val::Int(n) => Some(n),
+                    _ => None,
+                },
+                _ => self.const_int(text, 0),
+            },
         };
         match n.filter(|&n| (1..=i64::MAX as i128).contains(&n)) {
             Some(n) => Some(n as u64),

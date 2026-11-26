@@ -90,11 +90,21 @@ impl Live<'_> {
                         live.insert(r);
                     }
                 }
-                // index expressions inside the place are read too
-                if let ExprKind::Index(_, i, _) = &place.kind {
-                    live = self.expr(i, live);
+                // the place is evaluated first, then the value; index expressions in the
+                // place are read too (`xs[i][j] = v`)
+                live = self.expr(value, live);
+                let mut p = place;
+                loop {
+                    match &p.kind {
+                        ExprKind::Index(b, i, _) => {
+                            live = self.expr(i, live);
+                            p = b;
+                        }
+                        ExprKind::Field(b, _) => p = b,
+                        _ => break,
+                    }
                 }
-                self.expr(value, live)
+                live
             }
             Stmt::If {
                 branches,
@@ -241,7 +251,7 @@ impl Live<'_> {
             }
             ExprKind::Str(segs) => {
                 for s in segs.iter().rev() {
-                    if let StrSeg::Expr(x) = s {
+                    if let StrSeg::Expr(x) | StrSeg::Fmt(x, _) = s {
                         live = self.expr(x, live);
                     }
                 }
@@ -250,6 +260,19 @@ impl Live<'_> {
             ExprKind::StructLit(_, inits) => {
                 for i in inits.iter().rev() {
                     live = self.expr(&i.value, live);
+                }
+                live
+            }
+            ExprKind::ListLit(items) => {
+                for x in items.iter().rev() {
+                    live = self.expr(x, live);
+                }
+                live
+            }
+            ExprKind::MapLit(entries) => {
+                for (k, v) in entries.iter().rev() {
+                    live = self.expr(v, live);
+                    live = self.expr(k, live);
                 }
                 live
             }

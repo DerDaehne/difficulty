@@ -477,7 +477,7 @@ list_lit = "[" [ expr { "," expr } [ "," ] ] "]" ;
 - **Werte.** `str`, `[]T`, `[N]T` und `map[K]V` sind Werte wie `int`: eine Zuweisung, ein Argument ohne `mut`, ein Rückgabewert und ein Feld in einem Struct-Literal sind unabhängige Kopien, auch tief (Liste von Listen, Struct mit einer Liste im Feld). Ein Schreiben in die Kopie ändert nie das Original und umgekehrt: nach `ys = xs; xs[0] = 1` hat `ys` den alten Wert, nach `Hall b = a; b.seats.push(x)` hat `a.seats` den alten Inhalt. Ein Text ist unveränderlich; `s += "x"` und `s = s + "x"` bauen einen neuen Wert.
 - **Intern geteilt.** `str`, Listen und Maps sind referenzgezählt mit Copy-on-Write: eine Kopie teilt den Speicher mit dem Original, bis eine der beiden geschrieben wird. Ein Schreiben an einem Wert, den nichts teilt, geschieht an Ort und Stelle, `push` ist amortisiert O(1); an einem geteilten Wert kopiert die erste Änderung vorher den Speicher, O(n). Zuweisung, Argument und Rückgabe kosten O(1), außer bei `[N]T` und Structs, die inline liegen und kopiert werden. Kein Programm kann sehen, ob ein Wert geteilt ist; der Speicher wird frei, sobald der letzte Wert verschwindet, und weil es im sicheren Code keine Referenzen gibt, gibt es keine Zyklen. Ist der Speicher erschöpft, bricht das Programm ab (R14).
 - **Griffe** (Kanal, Task, `shared`, Datei, C-Objekt) sind Werte, die auf etwas außerhalb zeigen: kopiert wird der Griff, nicht das Ding. Das Copy-on-Write gilt für sie nicht, und `==` vergleicht ihre Identität (R28). Eine Liste von Griffen kopiert die Griffe. Die Standardbibliothek von Teil 2c (§4) hat keinen Griff; sie kommen mit ihren Modulen.
-- **Listen `[]T`** wachsen und schrumpfen. Das Literal `[1, 2, 3]` hat den Elementtyp seiner Stelle (R8): `[]u8 b = [1, 2]` ist eine Liste von `u8`; ohne Stelle ist es der Typ des ersten Elements, das kein Literal ist, sonst der des ersten Elements (`[x, 1]` und `[1, x]` mit `x` vom Typ `u8` sind beide `[]u8`; `print([1, 2])` ist `[]int`, `[1, 2.5]` ist `R8` am zweiten Element). Ein späteres Element anderen Typs ist `R8`, Meldung `` expected int, found str ``, am Element. Die leere Liste `[]` hat keinen Typ von sich aus: ohne Stelle (`print([])`, `_ = []`) ist sie `R8`, Meldung `` `[]` needs a place of type []T ``, ohne Hinweis. Mit Stelle (`[]int xs = []`, Argument, Feldvorgabe, `return []`) gilt der Typ der Stelle. `==` vergleicht Länge und Elemente (R28).
+- **Listen `[]T`** wachsen und schrumpfen. Das Literal `[1, 2, 3]` hat den Elementtyp seiner Stelle (R8): `[]u8 b = [1, 2]` ist eine Liste von `u8`; ohne Stelle bekommen alle Elemente denselben Typ, und der hängt nicht von der Reihenfolge ab: der Typ des ersten Elements, das kein Literal ist; bestehen alle aus Literalen, ist er `f64`, wenn eines davon ein Float-Literal ist, sonst `int` (`[x, 1]` und `[1, x]` mit `x` vom Typ `u8` sind beide `[]u8`; `print([1, 2])` ist `[]int`; `[1, 2.5]` und `[2.5, 1]` sind beide `[]f64`, denn ein Ganzzahl-Literal passt an die Stelle eines `f64` (R8, Teil 2c)). Danach wird jedes Element nach R8 an diesen Typ gebunden; eines, das nicht passt, ist `R8` am Element (`[x, 2.5]` mit `x` vom Typ `int`: Meldung `` expected int, found f64 ``, Hinweis `int(2.5)`; ein `str` darin: `` expected int, found str ``). Bei Schlüsseln und Werten einer Map gilt dieselbe Regel (R30). Die leere Liste `[]` hat keinen Typ von sich aus: ohne Stelle (`print([])`, `_ = []`) ist sie `R8`, Meldung `` `[]` needs a place of type []T ``, ohne Hinweis. Mit Stelle (`[]int xs = []`, Argument, Feldvorgabe, `return []`) gilt der Typ der Stelle. `==` vergleicht Länge und Elemente (R28).
 - **Arrays `[N]T`** haben genau `N` Elemente und liegen inline; `N` ist ein Ganzzahl-Literal oder eine `const int` mit Wert ab 1, sonst `R5`, Meldung `` the length of an array is a constant of at least 1 ``. Das Literal `[a, b, c]` an der Stelle eines `[3]int` muss genau `N` Elemente haben, sonst `R8`, Meldung `` [3]int needs 3 elements, found 2 ``, Hinweis `use []int for a list that can have any length`, am `[`. Eine Liste wird nie von selbst zum Array (R31); `xs.slice(0, 3)` ist wieder eine Liste. Arrays verschachteln (`[3][3]int`).
 - **Index.** `x[i]` liest ein Element einer Liste oder eines Arrays; `i` ist ein `int`, sonst `R8`, Meldung `` expected int, found u8 ``, Hinweis `int(i)`. Das Ergebnis ist eine Kopie. `x[i] = v`, `x[i] += v` und `x[i].f = v` schreiben in das Element (Ort, R6); das Element muss existieren, `xs[xs.len()] = v` hängt nicht an (`push`). Der Index ist immer geprüft: außerhalb von `0 … len-1` bricht das Programm ab (R14) an der `[`. Bei einem Array mit konstantem Index steht der Abbruch schon beim Kompilieren fest und ist `error[R14]`. Ein `str` hat keinen Index: `s[0]` ist `R8`, Meldung `` cannot index str ``, Hinweis `use s.slice(a, b) or s.runes()`.
 - **Schleife über einen Schnappschuss.** `for T x in xs` läuft über den Wert, den `xs` beim Eintritt hatte (R11); Änderungen an `xs` im Rumpf sind sicher, wirken aber nicht auf diese Schleife. Das kostet nichts, bis der Rumpf `xs` schreibt: dann kopiert dieses erste Schreiben einmal.
@@ -499,6 +499,28 @@ print(xs.len())
 ```
 
 Ausgabe: `[10, 2, 3, 4]`, `[1, 2, 3]`, `5`.
+
+```dif snippet
+u8 x = 7
+print([1, 2])
+print([1, 2.5])
+print([2.5, 1])
+print([x, 1])
+```
+
+Ausgabe: `[1, 2]`, `[1, 2.5]`, `[2.5, 1]`, `[7, 1]`.
+
+```dif error R8
+void main() {
+    int x = 1
+    print([x, 2.5])
+}
+```
+
+```
+main.dif:3:15: error[R8]: expected int, found f64
+  hint: int(2.5)
+```
 
 ```dif
 struct Hall {
@@ -1567,9 +1589,11 @@ Teil 2c ergänzt (alle Meldungen auf englisch, wie in Teil 1; `<…>` sind die t
 | gleiche Elemente zweimal mit `mut` in einem Aufruf (R6) | `overlapping mut arguments: index <i>` |
 | `os.exit` mit einem Code außerhalb `0 … 255` | `exit code <n> out of range 0..255` |
 | `assert(false)` | `assertion failed: <Bedingung>` (Quelltext, Zeilenumbrüche als Leerzeichen) |
+| ein Argument von `os.args()` ist kein gültiges UTF-8 | `invalid UTF-8 in argument <i>` (`<i>` ab 0, wie der Index in `os.args()`) |
+| ein Wert von `os.env(name)` ist kein gültiges UTF-8 | `invalid UTF-8 in environment variable <name>` |
 | Speicher erschöpft | `out of memory` |
 
-Die Position ist die des Operators, bei einem Index die des `[`, bei einem Aufruf (`T(x)`, Methode) die des Namens vor der `(`. Was beim Kompilieren feststeht (nur Literale und `const`: Index in ein Array, `T(x)`, Shifts), ist `error[R14]` mit derselben Meldung.
+Die Position ist die des Operators, bei einem Index die des `[`, bei einem Aufruf (`T(x)`, Methode, `os.args()`, `os.env(…)`) die des Namens vor der `(`. Was beim Kompilieren feststeht (nur Literale und `const`: Index in ein Array, `T(x)`, Shifts), ist `error[R14]` mit derselben Meldung.
 
 ```dif snippet
 int big = 9223372036854775807
@@ -2672,7 +2696,7 @@ enum IoErr {
 
 **Eingabe ist ein Strom.** stdin gehört dem Programm genau einmal; `io.lines()` und `io.read_line()` teilen eine Leseposition und lesen Zeile für Zeile erst, wenn sie gebraucht werden (nicht vorab). Die Schleife über `io.lines()` liest bei jedem Durchlauf eine Zeile (sie ist vom Schnappschuss in R11 ausgenommen); nach einem `break` liest `io.read_line()` oder eine zweite `io.lines()`-Schleife die nächste ungelesene Zeile. Eine Zeile mit ungültigem UTF-8 wird dabei verbraucht. stdout wird vor jedem Lesen geschrieben (§4.1).
 
-**Argumente und Umgebung.** Ein Argument oder ein Wert von `os.env`, der kein gültiges UTF-8 ist, bricht ab: `invalid UTF-8 in argument <i>` (Index ab 0 in `os.args()`) bzw. `invalid UTF-8 in environment variable <name>`.
+**Argumente und Umgebung.** Ein Argument oder ein Wert von `os.env`, der kein gültiges UTF-8 ist, bricht ab: `invalid UTF-8 in argument <i>` (Index ab 0 in `os.args()`) bzw. `invalid UTF-8 in environment variable <name>`. Der Abbruch geschieht im Aufruf von `os.args()` bzw. `os.env(name)` (Position und Meldung in der Tabelle von R14), nicht erst beim Benutzen des Wertes.
 
 `io.read_line`, `io.write_file`, `io.eprint` und `os.exit` haben eine Wirkung (R13); `io.read_file` und `os.args` nicht: ihr Ergebnis wird verwendet. Der Fehler `io.IoErr.NotFound(path)` entsteht, wenn die Datei fehlt, `NoPermission(path)`, wenn das Betriebssystem den Zugriff verweigert, `InvalidUtf8(path)`, wenn der Inhalt kein gültiges UTF-8 ist, sonst `Other(path, reason)`.
 

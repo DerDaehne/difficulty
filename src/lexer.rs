@@ -390,7 +390,12 @@ impl<'a> Lexer<'a> {
             && matches!(self.peek_at(1), Some(c) if c.is_alphabetic() || c == '_')
         {
             let raw: String = self.chars[start..self.i].iter().map(|&(_, c)| c).collect();
-            let hint = format!("put the number in parentheses: ({raw}).abs()");
+            let word: String = self.chars[self.i + 1..]
+                .iter()
+                .map(|&(_, c)| c)
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            let hint = format!("put the number in parentheses: ({raw}).{word}()");
             let msg = "a method on a number literal needs parentheses";
             self.err("L8", p, msg, Some(&hint));
         }
