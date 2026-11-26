@@ -5,6 +5,7 @@ Standard library only. See eval/README.md.
 """
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -41,27 +42,45 @@ def extract(text):
     return blocks[-1] if blocks else None
 
 
-def ask_model(model, prompt, cwd):
-    """One model call. Returns (answer, tokens dict)."""
-    r = subprocess.run(
-        ["claude", "-p", "--model", model, "--output-format", "json", "--tools", "",
-         "--no-session-persistence", "--disable-slash-commands"],
-        input=prompt, capture_output=True, text=True, cwd=cwd, timeout=MODEL_TIMEOUT)
-    j = json.loads(r.stdout)
-    u = j.get("usage", {})
-    return j.get("result", ""), {
+SYSTEM_PROMPT = "You are a careful programmer. Answer exactly as the task asks."
+NO_TOKENS = dict.fromkeys(["input", "cache_creation", "cache_read", "output"], 0)
+
+
+def ask_model(model, prompt, cwd, claude=None):
+    """One model call. Returns (answer, tokens dict, error or None); never raises for a bad call.
+
+    `claude` (or $EVAL_CLAUDE) replaces the command, for tests."""
+    cmd = claude or os.environ.get("EVAL_CLAUDE", "claude")
+    try:
+        r = subprocess.run(
+            [cmd, "-p", "--model", model, "--output-format", "json", "--tools", "",
+             "--no-session-persistence", "--disable-slash-commands", "--system-prompt", SYSTEM_PROMPT],
+            input=prompt, capture_output=True, text=True, cwd=cwd, timeout=MODEL_TIMEOUT)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        return "", NO_TOKENS, f"model call failed: {type(e).__name__}"
+    if r.returncode != 0:
+        return "", NO_TOKENS, f"model call failed: exit code {r.returncode}"
+    try:
+        j = json.loads(r.stdout)
+        if j.get("is_error"):
+            return "", NO_TOKENS, "model call failed: is_error"
+        u = j.get("usage", {})
+        result = j.get("result", "")
+    except (ValueError, AttributeError):
+        return "", NO_TOKENS, "model call failed: invalid JSON"
+    return result, {
         "input": u.get("input_tokens", 0),
         "cache_creation": u.get("cache_creation_input_tokens", 0),
         "cache_read": u.get("cache_read_input_tokens", 0),
         "output": u.get("output_tokens", 0),
-    }
+    }, None
 
 
 def ask_dry(lang, task):
     """Stand-in for the model: the reference solution, or a placeholder for dif."""
     ref = EVAL / "tasks" / task / f"ref.{EXT[lang]}"
     code = ref.read_text() if ref.exists() else "void main() {\n}\n"
-    return "```\n" + code + "```", dict.fromkeys(["input", "cache_creation", "cache_read", "output"], 0)
+    return "```\n" + code + "```", NO_TOKENS, None
 
 
 def run_tests(cmd, task):
@@ -79,9 +98,9 @@ def run_tests(cmd, task):
         if got != want:
             n = next((k for k in range(max(len(got), len(want)))
                       if k >= len(got) or k >= len(want) or got[k] != want[k]), 0)
-            exp = want[n] if n < len(want) else "<end of output>"
-            act = got[n] if n < len(got) else "<end of output>"
-            return i, len(ins), f"test {f.stem}: output line {n + 1} differs\nexpected: {exp}\nactual:   {act}"
+            # the expected output stays hidden: show only the model's own output
+            mine = "\n".join(got)[:500]
+            return i, len(ins), f"test {f.stem}: output differs from the expected one (first difference at line {n + 1})\nyour output (first 500 characters):\n{mine}"
     return len(ins), len(ins), None
 
 
@@ -117,10 +136,13 @@ def one_run(lang, model, task, args):
         for rnd in range(1, args.rounds + 1):
             p = prompt_for(lang, task, feedback, last)
             res["prompt_chars"].append(len(p))
-            ans, tok = ask_dry(lang, task) if args.dry_run else ask_model(model, p, work / "model")
+            ans, tok, err = ask_dry(lang, task) if args.dry_run else ask_model(model, p, work / "model")
             res["tokens"].update(tok)
             code = extract(ans)
             res["rounds"] = rnd
+            if err:  # failed round: keep the previous solution and feedback, ask again
+                res["history"].append({"round": rnd, "ok": False, "codes": [], "error": err})
+                continue
             if code is None:
                 ok, feedback, codes, last = False, "No fenced code block found in the answer.", [], ans
             else:

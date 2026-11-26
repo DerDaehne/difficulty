@@ -24,9 +24,9 @@ A solution is a program that reads stdin and writes stdout. A test passes when s
 For every language x model x task the runner:
 
 1. builds the prompt: `llms.txt` (difficulty only) + `task.md` + the answer format (one fenced code block);
-2. calls `claude -p --model <model> --output-format json` without tools in an empty directory and reads the token counts from the JSON;
+2. calls `claude -p --model <model> --output-format json` with a replaced system prompt (`--system-prompt`, so the context is only `llms.txt` + task), without tools, session storage or slash commands, in an empty directory and reads the token counts from the JSON;
 3. extracts the last fenced block;
-4. difficulty: `dif check --json`, then `dif build`, then all tests. Python: all tests. A failure produces feedback: the diagnostics, the build error, or the first differing output line of the first failing test (expected vs. actual; the test input stays hidden);
+4. difficulty: `dif check --json`, then `dif build`, then all tests. Python: all tests. A failure produces feedback: the diagnostics, the build error, or the test name, exit code or the first 500 characters of the program's own output for the first failing test (expected output and test input stay hidden);
 5. on failure, asks again with the previous solution and the feedback, up to 5 rounds in total.
 
 Every round is a fresh call; nothing is carried over except the previous solution and its feedback.
@@ -72,3 +72,7 @@ Full run Haiku + Sonnet, both languages, 5 tasks (20 task runs):
 - worst case (every run uses 5 rounds): difficulty 10 x 25k, Python 10 x 8k, in total about 330k input and 100k output tokens.
 
 Add the per-call system prompt of `claude -p` (a fixed block per call, cheap through caching; 1 call per round, so up to 100 calls in the worst case). Cost in the subscription quota: a full run is small next to an interactive session, but Sonnet consumes noticeably more of the quota per token than Haiku, and Opus (later) more again. Check `claude -p "/usage"` before and after a run; use `--task` and `--model` to start with one cheap run. The exact numbers per run end up in the result JSON (`tokens`, `prompt_chars`).
+
+## Failed calls and tests
+
+A call that times out, exits non-zero, returns invalid JSON or `is_error` counts as a failed round (reason in the result `history`, field `error`); the run goes on with the same prompt. `python3 -m unittest discover eval` runs the tests (a stand-in for `claude` via `$EVAL_CLAUDE`, no model call).
