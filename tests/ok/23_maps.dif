@@ -1,0 +1,96 @@
+struct Seat {
+    int row
+    str who = ""
+}
+
+void fill(mut map[str]int m, str k) {
+    m[k] = (m[k] ?? 0) + 1
+}
+
+void main() {
+    map[str]int m = {}
+    print(m)
+    print(m.len())
+    fill(mut m, "b")
+    fill(mut m, "a")
+    fill(mut m, "b")
+    print(m)
+    print(m["b"])
+    print(m["zz"])
+    print(m["a"] ?? -1)
+    print(m.has("a"))
+    print(m.has("c"))
+    print(m.remove("a"))
+    print(m.remove("a"))
+    print(m)
+    m["a"] = 7
+    m["c"] = 3
+    print(m)
+    print(m.keys())
+    print(m.values())
+    print(m.len())
+
+    map[str]int copy = m
+    copy["d"] = 4
+    m["b"] = 100
+    print(m)
+    print(copy)
+
+    // equality ignores the order
+    map[int]str x = {1: "one", 2: "two"}
+    map[int]str y = {2: "two", 1: "one"}
+    print(x == y)
+    y[1] = "uno"
+    print(x == y)
+    print(x != y)
+
+    // structs, lists and maps as values, keys of every kind
+    map[str]Seat seats = {"a": Seat{row: 1}}
+    Seat s = seats["a"] ?? Seat{row: 0}
+    s.who = "Ada"
+    seats["a"] = s
+    seats["b"] = Seat{row: 2, who: "Bob"}
+    print(seats)
+    map[str][]int lists = {}
+    for int i in range(6) {
+        str key = "k{i % 2}"
+        []int cur = lists[key] ?? []
+        cur.push(i)
+        lists[key] = cur
+    }
+    print(lists)
+    map[Seat]bool visited = {Seat{row: 1}: true}
+    print(visited[Seat{row: 1}])
+    print(visited[Seat{row: 2}])
+    map[f64]str fm = {0.0: "zero", 1.5: "x"}
+    print(fm[-0.0])
+    map[[2]int]int arr = {[1, 2]: 3}
+    print(arr[[1, 2]])
+    map[str]map[str]int nested = {"o": {"i": 1}}
+    print(nested)
+    print(nested["o"]?? {})
+    map[bool]int bm = {true: 1}
+    print(bm)
+    map[rune]int rm = {'a': 1}
+    print(rm)
+
+    // iteration works on a snapshot, in insertion order
+    map[int]int sq = {}
+    for int i in range(5) {
+        sq[i] = i * i
+    }
+    sq.remove(2)
+    sq[2] = -4
+    for int k, int v in sq {
+        if k == 0 {
+            sq[99] = 0
+        }
+        print("{k} -> {v}")
+    }
+    print(sq.len())
+    for int k, int v in sq {
+        if v == 9 {
+            break
+        }
+    }
+}

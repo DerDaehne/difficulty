@@ -1,0 +1,83 @@
+struct Task {
+    str title
+    []str tags = []
+    bool done = false
+}
+
+struct Board {
+    []Task tasks = []
+    map[str]int counts = {}
+}
+
+void normalize(mut Task t) {
+    t.title = t.title.trim().lower()
+    t.tags.push("norm")
+}
+
+void swap(mut Task a, mut Task b) {
+    Task t = a
+    a = b
+    b = t
+}
+
+int total(Board b) {
+    int n = 0
+    for Task t in b.tasks {
+        n += t.tags.len()
+    }
+    return n
+}
+
+str join_all([]Task ts) {
+    str out = ""
+    for int i, Task t in ts {
+        if i > 0 {
+            out += ", "
+        }
+        out += t.title
+    }
+    return out
+}
+
+void main() {
+    Board b = Board{}
+    b.tasks.push(Task{title: "  Write  "})
+    b.tasks.push(Task{title: "READ", tags: ["a", "b"]})
+    normalize(mut b.tasks[0])
+    b.tasks[1].done = true
+    b.counts["x"] = 1
+    b.counts["x"] = (b.counts["x"] ?? 0) + 1
+    print(b)
+    print(total(b))
+    print(join_all(b.tasks))
+    swap(mut b.tasks[0], mut b.tasks[1])
+    print(join_all(b.tasks))
+    Board c = b
+    c.tasks[0].title = "changed"
+    print(join_all(b.tasks))
+    print(join_all(c.tasks))
+    []int xs = []
+    for int i in range(1000) {
+        xs.push(i * i)
+    }
+    print(xs.len())
+    print(xs[999])
+    [][]int grid = [[1, 2], [3, 4]]
+    grid[1][0] = 30
+    grid[0].push(9)
+    print(grid)
+    [2][]str names = [["a"], []]
+    names[1].push("zz")
+    print(names)
+    map[str][]int m = {"a": [1], "b": []}
+    []int got = m["a"] ?? []
+    got.push(5)
+    print(got)
+    print(m)
+    str s = "x"
+    for int i in range(5) {
+        s = s + "{i}"
+    }
+    print(s)
+    print(s.slice(1, 3))
+}

@@ -1,0 +1,91 @@
+enum E { Bad(str why) }
+
+str!E name(int i) {
+    if i % 2 == 0 {
+        return "n{i}"
+    }
+    return err(E.Bad("odd {i}"))
+}
+
+str!E pair(int a, int b) {
+    str x = try name(a)
+    str y = try name(b)
+    return x + y
+}
+
+str!E mix(str p, int b) {
+    return p + (try name(b)) + p
+}
+
+str fallback(int i) {
+    return name(i) ?? "none"
+}
+
+str handle(int i) {
+    switch name(i) {
+    case ok(str s):
+        return "ok {s}"
+    case err(E e):
+        switch e {
+        case E.Bad(str w):
+            return "err {w}"
+        }
+    }
+}
+
+[]str!E list() {
+    []str out = []
+    for int i in range(6) {
+        if i == 1 {
+            continue
+        }
+        if i == 5 {
+            break
+        }
+        out.push(try name(i + 1) or E.Bad("late {i}"))
+    }
+    return out
+}
+
+void main() {
+    print(pair(0, 2))
+    print(pair(0, 1))
+    print(pair(1, 2))
+    print(mix("p", 2))
+    print(mix("p", 3))
+    print(fallback(2))
+    print(fallback(3))
+    print(handle(4))
+    print(handle(5))
+    print(list())
+    [](str!E) rs = []
+    for int i in range(4) {
+        rs.push(name(i))
+    }
+    print(rs)
+    str acc = ""
+    for str!E r in rs {
+        switch r {
+        case ok(str s):
+            acc += s
+        case err(E e):
+            acc += "!"
+        }
+    }
+    print(acc)
+    map[str][]str idx = {}
+    for int i in range(6) {
+        str k = "k{i % 3}"
+        []str cur = idx[k] ?? []
+        cur.push("v{i}")
+        idx[k] = cur
+    }
+    print(idx)
+    for str k, []str v in idx {
+        if k == "k1" {
+            continue
+        }
+        str j = v.join("|")
+        print("{k}: {j}")
+    }
+}

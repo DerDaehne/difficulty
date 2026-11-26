@@ -1,0 +1,14 @@
+Board{tasks: [Task{title: "write", tags: ["norm"], done: false}, Task{title: "READ", tags: ["a", "b"], done: true}], counts: {"x": 2}}
+3
+write, READ
+READ, write
+READ, write
+changed, write
+1000
+998001
+[[1, 2, 9], [30, 4]]
+[["a"], ["zz"]]
+[1, 5]
+{"a": [1], "b": []}
+x01234
+01

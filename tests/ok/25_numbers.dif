@@ -1,0 +1,141 @@
+struct V {
+    f64 x
+    u8 tiny = 7
+    rune r = 'q'
+}
+
+f64 half(f64 x) {
+    return x / 2
+}
+
+void main() {
+    // widths
+    u8 a = 200
+    print(a +% 100)
+    print(a -% 201)
+    print(a *% 2)
+    print(a / 7)
+    print(a % 7)
+    print(a & 15)
+    print(a | 1)
+    print(a ^ 255)
+    print(~a)
+    print(a >> 3)
+    print(a << 1)
+    i8 b = -128
+    print(b +% -1)
+    print(b >> 2)
+    print(b % -1)
+    print(~b)
+    print((b +% 1).abs())
+    i16 c = -300
+    i32 d = -70000
+    u16 e = 65535
+    u32 f = 4000000000
+    u64 g = 18446744073709551615
+    print("{c} {d} {e} {f} {g}")
+    print(g / 3)
+    print(g >> 60)
+    print(g +% 2)
+    print(f * 1)
+    int big = 9223372036854775807
+    print(big +% 1)
+    print(-big - 1)
+    print((-7).abs())
+    print((3).min(9))
+    print((3).max(9))
+    print(a.min(100))
+    print(c.max(0))
+
+    // conversions
+    int n = 300
+    print(n.to_u8())
+    print(n.to_u16())
+    print(n.to_i8())
+    print(n.to_int())
+    print((-1).to_u64())
+    print(g.to_int())
+    print(a.to_i8())
+    print(u8(65))
+    print(i8(-128))
+    print(u64(n))
+    print(int(g >> 1))
+    print(f64(n) / 8)
+    print(f64(a))
+    print(int(2.0))
+    print(int((-2.9).trunc()))
+    print(u8(255.0))
+    print(int(1e15))
+    print(rune(n))
+    print(rune(128512))
+    print(str('x'))
+    print(int('é'))
+    print(u8('A'))
+
+    // f64
+    f64 x = 22.5
+    print(x)
+    print(0.1 + 0.2)
+    print(7.0 / 2)
+    print(1.0 / 0.0)
+    print(-1.0 / 0.0)
+    print(0.0 / 0.0)
+    print(0.0 / 0.0 == 0.0 / 0.0)
+    print(0.0 == -0.0)
+    print(-0.0)
+    print(1e21)
+    print(1e20)
+    print(1.5e-7)
+    print(0.000001)
+    print(100.0)
+    print(123456789.125)
+    print(5e-324)
+    print(1.7976931348623157e308)
+    print((2.5).round())
+    print((-2.5).round())
+    print((2.5).trunc())
+    print((-2.5).floor())
+    print((-2.5).ceil())
+    print((2.0).sqrt())
+    print((-1.0).sqrt())
+    print((-3.5).abs())
+    print((1.0).min(0.0 / 0.0))
+    print((1.0).max(2.0))
+    print(x % 4)
+    print(-x)
+    print(x > 22.0)
+    print(x <= 22.5)
+    print(half(5))
+    print(0.1 * 3)
+    print(1.0 - 0.9)
+    f64 pct = 9.0 / 40.0 * 100
+    print("{pct:.1f} % {pct:g} {x:.0f} {2.5:.0f} {3.5:.0f} {1e21:g} {0.5:.3f}")
+    print("{1.0 / 0.0:.2f} {0.0 / 0.0:g}")
+    print("{x} {-x} {n}")
+    print(V{x: 1.5})
+    print([1.5, 2.0, 3.0])
+    print({1.5: 'a'})
+    []f64 fs = [2, 3]
+    print(fs)
+    f64 sum = 0
+    for int i in range(10) {
+        sum += 0.1
+    }
+    print(sum)
+    sum *= 2
+    sum /= 4
+    sum -= 0.5
+    print(sum)
+    u8 w = 250
+    w += 3
+    w -= 1
+    w *= 1
+    w /= 2
+    w %= 100
+    w <<= 1
+    w >>= 1
+    w &= 255
+    w |= 1
+    w ^= 3
+    print(w)
+}

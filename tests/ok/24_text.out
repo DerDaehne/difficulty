@@ -1,0 +1,72 @@
+[Hallo, Welt]
+[Hallo, Welt  ]
+[  Hallo, Welt]
+15
+false
+true
+4
+['ä', 'ö']
+2
+["a", "b", "", "c"]
+[""]
+["", ""]
+["a", "b"]
+["a", "b"]
+["a", "b", "", "c"]
+["x"]
+[]
+[""]
+al
+
+ö
+some(2)
+some(0)
+none
+true
+true
+true
+true
+false
+a+b+c
+ba
+none
+ababab
+
+äpfel
+STRAßE
+àéî
+some(42)
+some(7)
+some(-12)
+none
+none
+none
+none
+some(-9223372036854775808)
+some(-150)
+some(2)
+none
+none
+some(inf)
+some(NaN)
+true
+true
+false
+true
+true
+false
+true
+true
+xy xz
+401
+400
+DONE!
+16
+tab	quote"back\slash
+["tab\tquote\"back\\slash\u{1}", "a{b}"]
+'
+['\'', '\n', 'x']
+true
+false
+true
+true

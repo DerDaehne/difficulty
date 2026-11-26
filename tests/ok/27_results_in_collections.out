@@ -1,0 +1,15 @@
+ok("n0n2")
+err(E.Bad("odd 1"))
+err(E.Bad("odd 1"))
+ok("pn2p")
+err(E.Bad("odd 3"))
+n2
+none
+ok n4
+err odd 5
+err(E.Bad("late 0"))
+[ok("n0"), err(E.Bad("odd 1")), ok("n2"), err(E.Bad("odd 3"))]
+n0!n2!
+{"k0": ["v0", "v3"], "k1": ["v1", "v4"], "k2": ["v2", "v5"]}
+k0: v0|v3
+k2: v2|v5

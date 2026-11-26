@@ -1,0 +1,36 @@
+{}
+0
+{"b": 2, "a": 1}
+some(2)
+none
+1
+true
+false
+true
+false
+{"b": 2}
+{"b": 2, "a": 7, "c": 3}
+["b", "a", "c"]
+[2, 7, 3]
+3
+{"b": 100, "a": 7, "c": 3}
+{"b": 2, "a": 7, "c": 3, "d": 4}
+true
+false
+true
+{"a": Seat{row: 1, who: "Ada"}, "b": Seat{row: 2, who: "Bob"}}
+{"k0": [0, 2, 4], "k1": [1, 3, 5]}
+some(true)
+none
+some("zero")
+some(3)
+{"o": {"i": 1}}
+{"i": 1}
+{true: 1}
+{'a': 1}
+0 -> 0
+1 -> 1
+3 -> 9
+4 -> 16
+2 -> -4
+6

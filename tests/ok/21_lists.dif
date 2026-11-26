@@ -1,0 +1,104 @@
+struct P {
+    int x
+    str tag
+}
+
+int sum([]int xs) {
+    int t = 0
+    for int x in xs {
+        t += x
+    }
+    return t
+}
+
+void main() {
+    []int xs = [5, 3, 8]
+    print(xs.len())
+    print(xs.is_empty())
+    xs.push(1)
+    xs.insert(0, 9)
+    xs.insert(xs.len(), 7)
+    print(xs)
+    xs.sort()
+    print(xs)
+    print(xs.pop())
+    print(xs.first())
+    print(xs.last())
+    print(xs.index_of(8))
+    print(xs.index_of(4))
+    print(xs.contains(5))
+    print(xs.count(3))
+    print(xs.slice(1, 3))
+    print(xs.slice(2, 2))
+    xs.reverse()
+    print(xs)
+    print(xs.remove(0))
+    print(xs.remove(xs.len() - 1))
+    print(xs)
+    []int empty = []
+    print(empty.pop())
+    print(empty.first())
+    print(empty.last())
+    print(empty.is_empty())
+    print(empty)
+    print(["b", "a", "c"].join("-"))
+    []str none_strs = []
+    str joined = none_strs.join(",")
+    print("[{joined}]")
+    print(repeat("ab", 3))
+    print(repeat(0, 0))
+
+    // copies are independent
+    []int ys = xs
+    ys.push(100)
+    xs[0] = -1
+    print(xs)
+    print(ys)
+    print(xs == ys)
+    []int zs = [-1, 3, 5]
+    print(xs == zs)
+    print(sum(ys))
+
+    // lists of structs and of lists
+    []P ps = [P{x: 2, tag: "b"}, P{x: 1, tag: "a"}]
+    ps[1].tag = "z"
+    ps.push(P{x: 3, tag: "q"})
+    print(ps)
+    print(ps.contains(P{x: 1, tag: "z"}))
+    print(ps.index_of(P{x: 3, tag: "q"}))
+    [][]int rows = [[1], [2, 3]]
+    rows[0].push(9)
+    rows.push([])
+    print(rows)
+    [][]int want = [[1, 9], [2, 3], []]
+    print(rows == want)
+
+    // sorting
+    []str words = ["pear", "Apple", "fig", "apple"]
+    words.sort()
+    print(words)
+    []f64 fs = [2.5, 0.0 / 0.0, -1.0, 1.0 / 0.0]
+    fs.sort()
+    print(fs)
+    []rune rs = ['z', 'a', 'é']
+    rs.sort()
+    print(rs)
+    []bool bs = [true, false]
+    print(bs)
+
+    // the snapshot of a loop
+    []int grow = [1, 2, 3]
+    for int g in grow {
+        grow.push(g * 10)
+    }
+    print(grow)
+    for int i, int g in grow {
+        if i == 1 {
+            continue
+        }
+        if i == 4 {
+            break
+        }
+        print("{i}:{g}")
+    }
+}
