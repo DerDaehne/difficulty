@@ -1152,4 +1152,205 @@ DIF_FN dif_str dif_str_trim(dif_str s, bool start, bool end) {
     return dif_str_sub(s, a, b);
 }
 
+// ---------------------------------------------------------------------------------------
+// 10. f64: text form (R29), formats, descriptor. The math functions of 4.3 are the C ones:
+//     round, trunc, floor, ceil, sqrt, fabs, fmin, fmax, fmod (`%`) - link with -lm.
+// ---------------------------------------------------------------------------------------
+
+// Shortest decimal text that reads back as the same value: the least precision 1 ... 17
+// whose correctly rounded `%.*e` form round-trips (so it is also the closest of its length).
+DIF_FN void dif_put_f64(dif_buf *b, double x) {
+    if (x != x) return dif_put(b, "NaN", 3);
+    if (isinf(x)) return dif_put(b, x < 0 ? "-inf" : "inf", x < 0 ? 4 : 3);
+    if (x == 0) return dif_put(b, signbit(x) ? "-0" : "0", signbit(x) ? 2 : 1);
+    char t[40], d[24];
+    int p, nd = 0;
+    for (p = 1; p <= 17; p++) {
+        snprintf(t, sizeof t, "%.*e", p - 1, x);
+        if (strtod(t, NULL) == x) break;
+    }
+    const char *q = t + (t[0] == '-');
+    for (; *q != 'e'; q++)
+        if (*q != '.') d[nd++] = *q;
+    int e = atoi(q + 1);
+    if (t[0] == '-') dif_put(b, "-", 1);
+    if (e < -6 || e > 20) { // d.ddde<e>
+        dif_put(b, d, 1);
+        if (nd > 1) {
+            dif_put(b, ".", 1);
+            dif_put(b, d + 1, nd - 1);
+        }
+        char s[16];
+        dif_put(b, s, snprintf(s, sizeof s, "e%d", e));
+    } else if (e < 0) { // 0.000ddd
+        dif_put(b, "0.", 2);
+        for (int i = 0; i < -e - 1; i++) dif_put(b, "0", 1);
+        dif_put(b, d, nd);
+    } else { // ddd000 or ddd.ddd
+        dif_put(b, d, nd < e + 1 ? nd : e + 1);
+        for (int i = nd; i < e + 1; i++) dif_put(b, "0", 1);
+        if (nd > e + 1) {
+            dif_put(b, ".", 1);
+            dif_put(b, d + e + 1, nd - e - 1);
+        }
+    }
+}
+// `{x:.Nf}` (prec = N) and `{x:g}` (prec < 0) like C printf; inf, -inf and NaN as in the text form
+DIF_FN void dif_put_f64_fmt(dif_buf *b, double x, int prec) {
+    if (x != x || isinf(x)) return dif_put_f64(b, x);
+    char t[512];
+    int n = prec < 0 ? snprintf(t, sizeof t, "%g", x) : snprintf(t, sizeof t, "%.*f", prec, x);
+    dif_put(b, t, n);
+}
+DIF_FN bool dif_teq_f64(const dif_ty *t, const void *a, const void *b) { (void)t; return *(const double *)a == *(const double *)b; }
+DIF_FN int dif_tcmp_f64(const dif_ty *t, const void *a, const void *b) { // NaN after all numbers (sort)
+    (void)t;
+    double x = *(const double *)a, y = *(const double *)b;
+    if (x != x) return y != y ? 0 : 1;
+    return y != y ? -1 : (x > y) - (x < y);
+}
+DIF_FN void dif_tput_f64(const dif_ty *t, dif_buf *b, const void *p) { (void)t; dif_put_f64(b, *(const double *)p); }
+DIF_FN uint64_t dif_thash_f64(const dif_ty *t, const void *p) {
+    (void)t;
+    double x = *(const double *)p;
+    if (x != x) dif_nan_seen = 1;
+    if (x == 0 || x != x) x = 0; // 0.0 and -0.0 are one key
+    uint64_t u;
+    memcpy(&u, &x, 8);
+    return dif_hash_u64(u);
+}
+DIF_CONST dif_ty dif_ty_f64 = {8, NULL, NULL, 0, NULL, NULL, dif_teq_f64, dif_tput_f64, dif_tcmp_f64, dif_thash_f64};
+
+// ---------------------------------------------------------------------------------------
+// 11. Conversions T(x) (R31): exact or abort. An integer type is (bits, signed); `int` is
+//     (64, true). Signed sources use the *_s functions (int64_t), unsigned ones and rune the
+//     *_u functions (uint64_t). The result of `dif_conv_s` fits the target; cast it.
+// ---------------------------------------------------------------------------------------
+
+DIF_FN _Noreturn void dif_panic_buf(dif_buf *b, int l, int c) {
+    dif_put(b, "", 0);
+    dif_put(b, "\0", 1);
+    dif_panic(b->p, l, c);
+}
+DIF_FN const char *dif_tyname(char *o, int bits, bool sgn) {
+    if (sgn && bits == 64) return "int";
+    snprintf(o, 8, "%c%d", sgn ? 'i' : 'u', bits);
+    return o;
+}
+// `to_u8()` and friends: does the value fit?
+DIF_FN bool dif_fits_s(int64_t v, int bits, bool sgn) {
+    if (sgn) return bits == 64 || (v >= -((int64_t)1 << (bits - 1)) && v < ((int64_t)1 << (bits - 1)));
+    return v >= 0 && (bits == 64 || v < ((int64_t)1 << bits));
+}
+DIF_FN bool dif_fits_u(uint64_t v, int bits, bool sgn) {
+    if (sgn) return v <= UINT64_MAX >> (65 - bits);
+    return bits == 64 || v < ((uint64_t)1 << bits);
+}
+DIF_FN int64_t dif_conv_s(int64_t v, int bits, bool sgn, int l, int c) {
+    char n[8];
+    if (!dif_fits_s(v, bits, sgn)) dif_panicf(l, c, "%" PRId64 " does not fit in %s", v, dif_tyname(n, bits, sgn));
+    return v;
+}
+DIF_FN uint64_t dif_conv_u(uint64_t v, int bits, bool sgn, int l, int c) {
+    char n[8];
+    if (!dif_fits_u(v, bits, sgn)) dif_panicf(l, c, "%" PRIu64 " does not fit in %s", v, dif_tyname(n, bits, sgn));
+    return v;
+}
+// f64 -> integer type: only whole values that fit. The range ends are powers of two.
+DIF_FN bool dif_f2i_ok(double x, int bits, bool sgn, bool *whole) {
+    *whole = x == trunc(x) && !isinf(x);
+    double hi = sgn ? ldexp(1.0, bits - 1) : ldexp(1.0, bits), lo = sgn ? -hi : 0.0;
+    return x >= lo && x < hi;
+}
+DIF_FN _Noreturn void dif_f2i_fail(double x, int bits, bool sgn, bool whole, int l, int c) {
+    char n[8];
+    dif_buf b = dif_buf_new();
+    dif_put_f64(&b, x);
+    dif_put_c(&b, whole ? " does not fit in " : " is not an exact ");
+    dif_put_c(&b, dif_tyname(n, bits, sgn));
+    dif_panic_buf(&b, l, c);
+}
+DIF_FN int64_t dif_f2s(double x, int bits, bool sgn, int l, int c) {
+    bool whole;
+    if (!dif_f2i_ok(x, bits, sgn, &whole) || !whole) dif_f2i_fail(x, bits, sgn, whole && x == x, l, c);
+    return (int64_t)x;
+}
+DIF_FN uint64_t dif_f2u(double x, int bits, bool sgn, int l, int c) {
+    bool whole;
+    if (!dif_f2i_ok(x, bits, sgn, &whole) || !whole) dif_f2i_fail(x, bits, sgn, whole && x == x, l, c);
+    return (uint64_t)x;
+}
+// integer -> f64: only if the double holds the value exactly (all up to 2^53)
+DIF_FN double dif_s2f(int64_t v, int l, int c) {
+    double d = (double)v;
+    if (!(d >= -9223372036854775808.0 && d < 9223372036854775808.0 && (int64_t)d == v))
+        dif_panicf(l, c, "%" PRId64 " is not an exact f64", v);
+    return d;
+}
+DIF_FN double dif_u2f(uint64_t v, int l, int c) {
+    double d = (double)v;
+    if (!(d < 18446744073709551616.0 && (uint64_t)d == v)) dif_panicf(l, c, "%" PRIu64 " is not an exact f64", v);
+    return d;
+}
+// integer -> rune
+DIF_FN uint32_t dif_rune_s(int64_t v, int l, int c) {
+    if (!dif_rune_ok(v)) dif_panicf(l, c, "%" PRId64 " is not a valid rune", v);
+    return (uint32_t)v;
+}
+DIF_FN uint32_t dif_rune_u(uint64_t v, int l, int c) {
+    if (v > 0x10FFFF || !dif_rune_ok((int64_t)v)) dif_panicf(l, c, "%" PRIu64 " is not a valid rune", v);
+    return (uint32_t)v;
+}
+
+// parse_int(): exactly [+-]?[0-9]+ that fits in int
+DIF_FN bool dif_parse_int(dif_str s, int64_t *out) {
+    int64_t i = 0;
+    bool neg = s.n > 0 && s.p[0] == '-';
+    if (s.n > 0 && (s.p[0] == '-' || s.p[0] == '+')) i = 1;
+    if (i >= s.n) return false;
+    uint64_t v = 0;
+    for (; i < s.n; i++) {
+        unsigned d = (unsigned)(s.p[i] - '0');
+        if (d > 9 || v > (UINT64_MAX - d) / 10) return false;
+        v = v * 10 + d;
+    }
+    if (v > (neg ? (uint64_t)INT64_MAX + 1 : (uint64_t)INT64_MAX)) return false;
+    *out = (int64_t)(neg ? 0 - v : v);
+    return true;
+}
+// parse_f64(): [+-]?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)? or [+-]?inf or NaN; none if the value
+// would be inf or a nonzero digit string would be 0
+DIF_FN bool dif_parse_f64(dif_str s, double *out) {
+    if (dif_eq(s, DIF_S("NaN"))) return *out = NAN, true;
+    if (dif_eq(s, DIF_S("inf")) || dif_eq(s, DIF_S("+inf"))) return *out = INFINITY, true;
+    if (dif_eq(s, DIF_S("-inf"))) return *out = -INFINITY, true;
+    int64_t i = 0;
+    bool nonzero = false;
+    if (i < s.n && (s.p[i] == '+' || s.p[i] == '-')) i++;
+    int64_t d0 = i;
+    for (; i < s.n && s.p[i] >= '0' && s.p[i] <= '9'; i++) nonzero |= s.p[i] != '0';
+    if (i == d0) return false;
+    if (i < s.n && s.p[i] == '.') {
+        int64_t f0 = ++i;
+        for (; i < s.n && s.p[i] >= '0' && s.p[i] <= '9'; i++) nonzero |= s.p[i] != '0';
+        if (i == f0) return false;
+    }
+    if (i < s.n && (s.p[i] == 'e' || s.p[i] == 'E')) {
+        i++;
+        if (i < s.n && (s.p[i] == '+' || s.p[i] == '-')) i++;
+        int64_t e0 = i;
+        for (; i < s.n && s.p[i] >= '0' && s.p[i] <= '9'; i++) {}
+        if (i == e0) return false;
+    }
+    if (i != s.n) return false;
+    char *z = dif_alloc((size_t)s.n + 1);
+    memcpy(z, s.p, (size_t)s.n);
+    z[s.n] = 0;
+    double r = strtod(z, NULL);
+    free(z);
+    if (isinf(r) || (r == 0 && nonzero)) return false;
+    *out = r;
+    return true;
+}
+
 #endif // DIF_RT_H
