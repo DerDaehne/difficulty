@@ -927,7 +927,9 @@ impl<'a> Checker<'a> {
                         // the result alone is wanted: say how to get it without the change
                         let text = self.text(base);
                         let hint = match m {
-                            "pop" => Some(format!("use {text}.last() if the list is not needed afterwards")),
+                            "pop" => Some(format!(
+                                "use {text}.last() if the list is not needed afterwards"
+                            )),
                             "remove" if args.len() == 1 => Some(format!(
                                 "use {text}[{}] if the list is not needed afterwards",
                                 self.text(&args[0])
