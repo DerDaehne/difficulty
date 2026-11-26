@@ -54,7 +54,10 @@ def ask_model(model, prompt, cwd, claude=None):
     try:
         r = subprocess.run(
             [cmd, "-p", "--model", model, "--output-format", "json", "--tools", "",
-             "--no-session-persistence", "--disable-slash-commands", "--system-prompt", SYSTEM_PROMPT],
+             "--no-session-persistence", "--disable-slash-commands", "--system-prompt", SYSTEM_PROMPT,
+             # no local MCP servers, user hooks or plugins: the context is only the prompt
+             "--strict-mcp-config", "--setting-sources", "project",
+             "--exclude-dynamic-system-prompt-sections"],
             input=prompt, capture_output=True, text=True, cwd=cwd, timeout=MODEL_TIMEOUT)
     except (subprocess.TimeoutExpired, OSError) as e:
         return "", NO_TOKENS, f"model call failed: {type(e).__name__}"

@@ -24,7 +24,7 @@ A solution is a program that reads stdin and writes stdout. A test passes when s
 For every language x model x task the runner:
 
 1. builds the prompt: `llms.txt` (difficulty only) + `task.md` + the answer format (one fenced code block);
-2. calls `claude -p --model <model> --output-format json` with a replaced system prompt (`--system-prompt`, so the context is only `llms.txt` + task), without tools, session storage or slash commands, in an empty directory and reads the token counts from the JSON;
+2. calls `claude -p --model <model> --output-format json` with a replaced system prompt (`--system-prompt`), without tools, session storage or slash commands, without locally configured MCP servers (`--strict-mcp-config`), user settings with their hooks and plugins (`--setting-sources project`) and dynamic system prompt sections, so the context is only `llms.txt` + task; in an empty directory; reads the token counts from the JSON;
 3. extracts the last fenced block;
 4. difficulty: `dif check --json`, then `dif build`, then all tests. Python: all tests. A failure produces feedback: the diagnostics, the build error, or the test name, exit code or the first 500 characters of the program's own output for the first failing test (expected output and test input stay hidden);
 5. on failure, asks again with the previous solution and the feedback, up to 5 rounds in total.
@@ -58,11 +58,21 @@ One model call is about `prompt + answer` tokens. Rough sizes (about 3.5 charact
 
 | part | size |
 |---|---|
-| `llms.txt` (difficulty only) | about 10 KB, 3k tokens |
+| `llms.txt` (difficulty only) | about 16 KB, 4.5k tokens |
 | `task.md` | 0.8 to 2 KB, 0.2 to 0.6k tokens |
 | answer (program) | 0.5 to 2k tokens |
 | feedback round | previous program and message, 1 to 2.5k tokens extra |
-| Claude Code's own system prompt per call | fixed overhead, mostly served from cache |
+| fixed block of `claude -p` per call | about 3.5k tokens (measured below) |
+
+Measured per call (2026-11-26, Haiku, prompt `llms.txt` + "Answer with ok.", 16 448 characters, empty directory; input tokens 2 in every case, the rest is cache creation):
+
+| call | cache creation tokens |
+|---|---|
+| default `claude -p` flags of the first version | 63 670 |
+| plus `--system-prompt` | 60 667 |
+| plus `--strict-mcp-config --setting-sources project --exclude-dynamic-system-prompt-sections` (current) | 8 027 |
+
+Without the last three flags, locally configured MCP servers, hooks and plugins add about 50k tokens to every call; the current call is about `llms.txt` plus 3.5k tokens.
 
 Per task and round: difficulty about 4k input, Python about 1k input. With r rounds the input grows to roughly `r x (prompt + feedback)`.
 
@@ -71,7 +81,7 @@ Full run Haiku + Sonnet, both languages, 5 tasks (20 task runs):
 - expected (average 2 rounds): difficulty 10 runs x about 10k input = 100k, Python 10 runs x about 3k = 30k, plus about 20 to 40k output, in total about 150k input and 30k output tokens;
 - worst case (every run uses 5 rounds): difficulty 10 x 25k, Python 10 x 8k, in total about 330k input and 100k output tokens.
 
-Add the per-call system prompt of `claude -p` (a fixed block per call, cheap through caching; 1 call per round, so up to 100 calls in the worst case). Cost in the subscription quota: a full run is small next to an interactive session, but Sonnet consumes noticeably more of the quota per token than Haiku, and Opus (later) more again. Check `claude -p "/usage"` before and after a run; use `--task` and `--model` to start with one cheap run. The exact numbers per run end up in the result JSON (`tokens`, `prompt_chars`).
+Add the fixed block of `claude -p` (about 3.5k tokens per call; 1 call per round, so up to 100 calls in the worst case). Cost in the subscription quota: a full run is small next to an interactive session, but Sonnet consumes noticeably more of the quota per token than Haiku, and Opus (later) more again. Check `claude -p "/usage"` before and after a run; use `--task` and `--model` to start with one cheap run. The exact numbers per run end up in the result JSON (`tokens`, `prompt_chars`).
 
 ## Failed calls and tests
 
