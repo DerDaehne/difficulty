@@ -1,0 +1,151 @@
+use std.io
+use std.os
+
+struct Task {
+    str title
+    bool done = false
+}
+
+struct Board {
+    []Task tasks = []
+    map[str][]int tags = {}
+}
+
+void Board.add(str title) {
+    self.tasks.push(Task{title: title})
+}
+
+int Board.open() {
+    int n = 0
+    for Task t in self.tasks {
+        if !t.done {
+            n += 1
+        }
+    }
+    return n
+}
+
+void normalize(mut Task t) {
+    t.title = t.title.trim().lower()
+}
+
+void swap(mut int a, mut int b) {
+    int t = a
+    a = b
+    b = t
+}
+
+str!io.IoErr first_line() {
+    for str line in try io.lines() {
+        return line
+    }
+    return ""
+}
+
+void!io.IoErr main() {
+    Board b = Board{}
+    b.add("  Write  ")
+    normalize(mut b.tasks[0])
+    b.tasks[0].done = true
+    []int xs = [3, 1, 2]
+    swap(mut xs[0], mut xs[1])
+    xs.sort()
+    ?[]int maybe = xs
+    []?int opt = [1, none, 3]
+    [](int!io.IoErr) rs = [1, err(io.IoErr.NotFound("x"))]
+    map[str]int counts = {"a": 1}
+    counts["b"] = 2
+    print(counts["a"] ?? 0)
+    b.tags["x"] = [1, 2]
+    print(b.tags["x"])
+    for int i, str t in ["a", "b"] {
+        print("{i} {t}")
+    }
+    for str k, []int v in b.tags {
+        print("{k} {v}")
+    }
+    print(b.open())
+    print(maybe)
+    print(opt)
+    print(rs.len())
+    print(os.args().len())
+    print(os.env("HOME") ?? "none")
+    str line = try io.read_line() ?? "x"
+    print(line)
+    try io.write_file("out", "text")
+    int total = 0
+    for int n in try rs {
+        total += n
+    }
+    io.eprint("done {total}")
+    assert(total > 0)
+    print(repeat(0, 3))
+    []u8 bytes = repeat(0, 4)
+    bytes[0] = 255
+    print(bytes[0] + 1)
+    print(xs.len() / 2)
+    f64 avg = f64(total) / 2
+    print("{avg:.2f}")
+}
+
+str describe(io.IoErr e) {
+    switch e {
+    case io.IoErr.NotFound(str path):
+        return "missing: {path}"
+    case io.IoErr.NoPermission(str path):
+        return "no permission: {path}"
+    case io.IoErr.InvalidUtf8(str path):
+        return "not UTF-8: {path}"
+    case io.IoErr.Other(str path, str reason):
+        return "{path}: {reason}"
+    }
+}
+
+// every builtin method of §4 with its signature
+void methods() {
+    str s = " Hallo, Welt "
+    int n = s.len() + s.trim().len() + s.trim_start().len() + s.trim_end().len()
+    bool b = s.is_empty() || s.contains("a") || s.starts_with("H") || s.ends_with("t")
+    []rune rs = s.runes()
+    []str parts = s.split(",")
+    []str ls = s.lines()
+    str t = s.lower() + s.upper() + s.replace("a", "b") + s.repeat(2) + s.slice(0, 1)
+    ?int at = s.find("l")
+    ?int pi = "42".parse_int()
+    ?f64 pf = "4.5".parse_f64()
+    bool r1 = 'a'.is_digit() || 'a'.is_letter() || 'a'.is_space()
+    int a = (-5).abs() + (3).min(4) + (3).max(4)
+    ?u8 narrow = a.to_u8()
+    ?int same = a.to_int()
+    ?i8 i8v = a.to_i8()
+    ?u64 u64v = a.to_u64()
+    f64 x = 2.5
+    f64 y = x.round() + x.trunc() + x.floor() + x.ceil() + x.sqrt() + x.abs() + x.min(1.0) + x.max(1.0)
+    []int xs = [3, 1, 2]
+    xs.push(4)
+    xs.insert(0, 9)
+    ?int popped = xs.pop()
+    int removed = xs.remove(0)
+    ?int f = xs.first()
+    ?int l = xs.last()
+    bool has = xs.contains(1)
+    ?int idx = xs.index_of(1)
+    int cnt = xs.count(1)
+    xs.sort()
+    xs.reverse()
+    []int sl = xs.slice(0, 1)
+    str joined = ["a", "b"].join("-")
+    [3]str arr = ["a", "b", "c"]
+    str aj = arr.join(",")
+    arr.sort()
+    arr.reverse()
+    map[str]int m = {"a": 1}
+    int ml = m.len()
+    bool mh = m.has("a")
+    bool mr = m.remove("a")
+    []str ks = m.keys()
+    []int vs = m.values()
+    print("{n}{b}{rs}{parts}{ls}{t}{at}{pi}{pf}{r1}{a}{narrow}{same}{i8v}{u64v}{y}")
+    print(arr)
+    print("{popped}{removed}{f}{l}{has}{idx}{cnt}{sl}{joined}{aj}{ml}{mh}{mr}{ks}{vs}")
+}

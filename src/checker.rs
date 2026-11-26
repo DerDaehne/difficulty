@@ -1169,6 +1169,17 @@ impl<'a> Checker<'a> {
         slot: Option<Slot>,
     ) {
         if self.predefined(name, pos) {
+            // the name exists anyway, so its uses add no second message
+            if let Some(s) = self.scopes.last_mut() {
+                s.push(Local {
+                    name: name.to_string(),
+                    ty: Ty::Err,
+                    is_const: false,
+                    val: Val::Runtime,
+                    pos,
+                    slot: None,
+                });
+            }
             return;
         }
         let prev = self
@@ -2137,13 +2148,15 @@ impl<'a> Checker<'a> {
                 } else {
                     Some("build text with interpolation: \"{a}{b}\"".to_string())
                 }
-            } else if matches!(op, "==" | "!=") {
+            } else if matches!(op, "==" | "!=")
+                && self.equality_hint(op, (l, lt), (r, rt)).is_some()
+            {
                 self.equality_hint(op, (l, lt), (r, rt))
             } else if lt.is_float() && rt.is_float() && int_op {
                 Some("use ints for bit operations".to_string())
             } else if lt == Ty::Rune && rt.is_int() && arithmetic {
                 Some(format!("rune(int({ltext}) {op} {rtext})"))
-            } else if lt.is_number() && rt.is_number() && arithmetic {
+            } else if lt.is_number() && rt.is_number() {
                 Some(format!("{ltext} {shown} {}({rtext})", self.tn(lt)))
             } else {
                 None
@@ -3193,7 +3206,11 @@ fn path(e: &Expr) -> Vec<String> {
 fn overlap(a: &Expr, b: &Expr) -> bool {
     let (pa, pb) = (path(a), path(b));
     let n = pa.len().min(pb.len());
-    n > 0 && pa[..n].iter().zip(&pb[..n]).all(|(x, y)| x == y && x != "#?")
+    n > 0
+        && pa[..n]
+            .iter()
+            .zip(&pb[..n])
+            .all(|(x, y)| x == y && x != "#?")
 }
 
 /// Does every path through the block end in `return`? `complete` holds the
