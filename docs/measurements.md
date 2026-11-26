@@ -69,3 +69,34 @@ Prüfung am `+` braucht 124–142 ms). Fairer Vergleich mit gleicher Semantik: C
 `__builtin_*_overflow` überall liegt bei clang mit 127–150 ms auf dem Niveau des
 erzeugten C. Weiter wäre nur eine allgemeine Wertebereichsanalyse möglich (außerhalb
 dieses Tickets).
+
+## Stand „Sammlungen“ (Teil 2c, Runtime `rt/dif_rt.h` eingebunden)
+
+Rechner: x86_64, AMD Ryzen 7 7800X3D, Linux, gcc 16.2.0, `dif` als Release-Build
+(`cargo build --release`), erzeugtes C mit `-O2 -s`. Zeiten: Wanduhr eines ganzen
+Prozesses (mit Start), Bestwert aus sieben Läufen.
+
+| Größe | Ziel | Gemessen | Erfüllt |
+|---|---|---|---|
+| Hello-World-Binary (gestrippt) mit eingebundener Runtime | ≤ 16 KB | 14 448 B (14,1 KB; vorher 14 352 B) | ja |
+| 1 000 000 × `push` in dif (`xs.push(i)` in einer Schleife) | < 50 ms | 5,2 ms (5,2–6,9 ms über sieben Läufe) | ja |
+| dasselbe Programm als Binary | – | 14 504 B | – |
+| Binary mit Text-, Listen- und Map-Methoden (`tests/ok/24_text.dif`, `23_maps.dif`) | – | 63 816 B, 59 712 B | – |
+| `dif run examples/hello.dif` (gcc) | < 300 ms | 74 ms (vorher 46 ms: das C-File trägt jetzt die Runtime) | ja |
+| `rt/dif_rt.h` | ≤ 1500 Zeilen | 1497 Zeilen (plus `rt/dif_unicode.h`, erzeugt) | ja |
+
+Die Runtime besteht nur aus `static inline`-Funktionen und `static const`-Tabellen; was
+ein Programm nicht aufruft, erzeugt der C-Compiler nicht (die Unicode-Tabellen und die
+Deskriptoren fallen mit weg). Darum bläht sie das Hello-World-Binary nicht auf: das
+Binary wächst nur um 96 B (gemessen gegen den Stand „Hallo, nativ“).
+
+Befehle:
+
+```sh
+dif build examples/hello.dif -o hello && stat -c %s hello
+dif build push.dif -o push                    # 1 000 000 × xs.push(i), dann print(xs.len())
+for i in 1 2 3 4 5 6 7; do s=$(date +%s%N); ./push > /dev/null; e=$(date +%s%N); echo $(( (e-s)/1000 )) us; done
+```
+
+`tests/run2c.rs` prüft die Grenze der Push-Messung bei jedem Testlauf (hier 10× großzügiger:
+ein Lauf unter 50 ms gilt).

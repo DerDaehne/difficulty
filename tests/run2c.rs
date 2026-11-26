@@ -507,3 +507,23 @@ fn driver_exit_code_3_is_a_c_compiler_that_rejects_the_code() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn a_million_pushes_take_less_than_50_ms() {
+    if std::env::var_os("DIF_SAN").is_some() {
+        return; // sanitizers make everything slower; the limit is for the real program
+    }
+    let src = "void main() {\n    []int xs = []\n    for int i in range(1000000) {\n        xs.push(i)\n    }\n    print(xs.len())\n}\n";
+    let (dir, exe) = build("push", src);
+    let best = (0..5)
+        .map(|_| {
+            let start = std::time::Instant::now();
+            let r = Command::new(&exe).output().unwrap();
+            assert_eq!(String::from_utf8_lossy(&r.stdout), "1000000\n");
+            start.elapsed()
+        })
+        .min()
+        .unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+    assert!(best.as_millis() < 50, "1 000 000 pushes took {best:?}");
+}
