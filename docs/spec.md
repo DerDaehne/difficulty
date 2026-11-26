@@ -2226,7 +2226,7 @@ Teil 1 legt den Ganzzahl-Teil fest:
 - `a / b` rundet Richtung 0, `a % b` hat das Vorzeichen von `a`, es gilt `(a / b) * b + a % b == a`. `INT_MIN % -1` ist `0`.
 - `<<` und `>>` verschieben um `0 … 63` Stellen; `>>` ist arithmetisch (füllt mit dem Vorzeichen). `<<` rechnet auf den 64 Bits: was über Bit 63 hinausgeschoben wird, geht verloren, ohne Abbruch, beim Kompilieren wie zur Laufzeit. Andere Weiten brechen ab (R14).
 - `+% -% *%` rechnen modulo 2⁶⁴.
-- Auswertungsreihenfolge: Operanden von links nach rechts, Argumente von links nach rechts, bei einer Zuweisung erst der Ort, dann der Wert.
+- Auswertungsreihenfolge: Operanden von links nach rechts, Argumente von links nach rechts, bei einer Zuweisung erst der Ort, dann der Wert. Bei `xs[f()] = g()` heißt das: zuerst die Teilausdrücke des Ortes von links nach rechts (`f()`, auch verschachtelte Indizes und Felder), dann der Wert (`g()`), erst danach die Indexprüfung (R14) und das Schreiben; ändert `g()` die Liste, gilt die Prüfung für die Liste nach `g()`. Dasselbe gilt für `+=` und die anderen Zuweisungsoperatoren (der alte Wert wird erst nach `g()` gelesen) und für `m[k] = v` (erst `k`, dann `v`).
 
 ```dif snippet
 print(-7 / 2)

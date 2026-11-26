@@ -1188,7 +1188,31 @@ impl<'a> Emitter<'a> {
     }
 
     /// `place = v`, `place += v`, `m[k] = v`.
+    /// The parts of the place first, left to right, then the value, and only then the check of
+    /// the indices and the write (R29): the indices are evaluated into temporaries here.
     fn assign(&mut self, place: &'a Expr, op: &str, value: &'a Expr, pos: Pos, d: usize) {
+        self.hoist_indices(place, d);
+        self.assign_inner(place, op, value, pos, d);
+        self.idx_temps.clear();
+    }
+
+    fn hoist_indices(&mut self, e: &'a Expr, d: usize) {
+        match &e.kind {
+            ExprKind::Paren(x) | ExprKind::Field(x, _) => self.hoist_indices(x, d),
+            ExprKind::Index(b, i, _) => {
+                self.hoist_indices(b, d);
+                if matches!(self.ty(b), Ty::List(_) | Ty::Arr(_)) && !self.plain(i) {
+                    let v = self.at(Ty::Int, i);
+                    let t = self.temp("int64_t".into(), "t");
+                    self.line(d, &format!("{t} = {v};"));
+                    self.idx_temps.insert((i.pos.offset, i.end), t);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn assign_inner(&mut self, place: &'a Expr, op: &str, value: &'a Expr, pos: Pos, d: usize) {
         if let ExprKind::Index(b, k, bp) = &place.kind {
             if let Ty::Map(mi) = self.ty(b) {
                 let (kt, vt) = self.info.maps[mi as usize];
@@ -2065,9 +2089,10 @@ impl<'a> Emitter<'a> {
     }
 
     fn apply(&mut self, name: &str, items: &[Arg<'a>], at: (usize, usize)) -> String {
+        let outer = self.idx_temps.clone();
         let guard = self.overlap_guard(items, at);
         let (pre, vals) = self.ordered(items);
-        self.idx_temps.clear();
+        self.idx_temps = outer;
         let call = format!("{name}({})", vals.join(", "));
         Self::with_pre(guard + &pre, call)
     }

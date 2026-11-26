@@ -527,3 +527,38 @@ fn a_million_pushes_take_less_than_50_ms() {
     let _ = std::fs::remove_dir_all(dir);
     assert!(best.as_millis() < 50, "1 000 000 pushes took {best:?}");
 }
+
+#[test]
+fn a_place_is_evaluated_before_the_value_and_checked_after_it() {
+    let src = r#"int f(int i) {
+    print("f {i}")
+    return i
+}
+
+int g(mut []int xs, int v) {
+    print("g")
+    _ = xs.pop()
+    _ = xs.pop()
+    return v
+}
+
+void main() {
+    []int xs = [1, 2, 3]
+    xs[f(1)] += g(mut xs, 10)
+    print(xs)
+}
+"#;
+    let r = run("order", src);
+    assert_eq!(r.out, "f 1\ng\n");
+    assert_eq!(
+        r.err,
+        "panic: index 1 out of bounds for length 1 (main.dif:15:7)\n"
+    );
+    assert_eq!(r.code, 2);
+    let src = src.replace("xs[f(1)] += g(mut xs, 10)", "xs[f(0)] = g(mut xs, 10)");
+    let r = run("order2", &src);
+    assert_eq!(
+        (r.out.as_str(), r.err.as_str(), r.code),
+        ("f 0\ng\n[10]\n", "", 0)
+    );
+}
