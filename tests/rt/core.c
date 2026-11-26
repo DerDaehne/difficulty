@@ -42,6 +42,11 @@ static void test_int64(void) {
     EXPECT_PANIC("integer overflow in abs (main.dif:1:1)", dif_abs(INT64_MIN, INT64_MIN, 1, 1));
 }
 
+static void test_assert_overlap(void) {
+    EXPECT_PANIC("assertion failed: x > 1 && y (main.dif:9:5)", dif_assert_fail("x > 1 && y", 9, 5));
+    EXPECT_PANIC("overlapping mut arguments: index 1 (main.dif:2:3)", dif_overlap(1, 2, 3));
+}
+
 static void test_widths(void) {
     CHECK(dif_add_u8(200, 55, 0, 0) == 255);
     CHECK(dif_wadd_u8(200, 100) == 44);
@@ -255,6 +260,7 @@ static void test_print(void) {
 int main(void) {
     test_alloc();
     test_int64();
+    test_assert_overlap();
     test_widths();
     test_str_rc();
     test_str_append();

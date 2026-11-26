@@ -153,7 +153,7 @@ static void test_lines(void) {
     dif_str_dec(s);
     // `for line in io.lines()` is the same call in a loop; after a break the next call goes on
     FEED("1\n2\n3\n4\n");
-    int64_t total = 0, v;
+    int64_t total = 0, v = 0;
     for (int r; (r = dif_io_read_line(&s, &e)) == 1;) {
         CHECK(dif_parse_int(s, &v));
         total += v;

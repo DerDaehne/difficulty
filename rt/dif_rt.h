@@ -181,6 +181,10 @@ DIF_ARITH(u16, uint16_t, 16, 0)
 DIF_ARITH(u32, uint32_t, 32, 0)
 DIF_ARITH(u64, uint64_t, 64, 0)
 
+// `assert(false)` and two `mut` arguments naming the same place (R6, R14)
+DIF_COLD _Noreturn void dif_assert_fail(const char *cond, int l, int c) { dif_panicf(l, c, "assertion failed: %s", cond); }
+DIF_COLD _Noreturn void dif_overlap(int arg, int l, int c) { dif_panicf(l, c, "overlapping mut arguments: index %d", arg); }
+
 // abs() of the signed types; the smallest value aborts (R14)
 DIF_FN int64_t dif_abs(int64_t a, int64_t min, int l, int c) {
     if (a == min) dif_panic("integer overflow in abs", l, c);
@@ -1228,7 +1232,6 @@ DIF_CONST dif_ty dif_ty_f64 = {8, NULL, NULL, 0, NULL, NULL, dif_teq_f64, dif_tp
 // ---------------------------------------------------------------------------------------
 
 DIF_FN _Noreturn void dif_panic_buf(dif_buf *b, int l, int c) {
-    dif_put(b, "", 0);
     dif_put(b, "\0", 1);
     dif_panic(b->p, l, c);
 }
