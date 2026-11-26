@@ -551,8 +551,11 @@ impl<'a> Emitter<'a> {
     fn field_ty(&self, sname: &str, field: &str) -> Ty {
         let body = self.info.types.iter().find(|d| d.name == sname);
         match body.map(|d| &d.body) {
-            Some(TypeBody::Struct(fs)) => fs.iter().find(|f| f.0 == field).map_or(Ty::Err, |f| f.1),
-            _ => Ty::Err,
+            Some(TypeBody::Struct(fs)) => match fs.iter().find(|f| f.0 == field) {
+                Some(f) => f.1,
+                None => unreachable!("struct `{sname}` has no field `{field}`"),
+            },
+            _ => unreachable!("`{sname}` is not a struct"),
         }
     }
 
