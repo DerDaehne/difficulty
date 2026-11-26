@@ -1353,4 +1353,136 @@ DIF_FN bool dif_parse_f64(dif_str s, double *out) {
     return true;
 }
 
+// ---------------------------------------------------------------------------------------
+// 12. io and os (4.6). Results are plain C values; the backend wraps them into `T!io.IoErr`.
+//     A str is always valid UTF-8: text from files, stdin, argv and the environment is
+//     checked, invalid input is an error (io) or an abort (os), never replaced.
+// ---------------------------------------------------------------------------------------
+
+enum { DIF_IO_NOTFOUND, DIF_IO_NOPERM, DIF_IO_INVALID_UTF8, DIF_IO_OTHER }; // variant order of IoErr
+typedef struct { int kind; dif_str path, reason; } dif_ioerr; // owned: release with dif_ioerr_dec
+
+DIF_FN void dif_ioerr_dec(dif_ioerr *e) {
+    dif_str_dec(e->path);
+    dif_str_dec(e->reason);
+}
+DIF_FN void dif_ioerr_set(dif_ioerr *e, int kind, dif_str path, const char *reason) {
+    e->kind = kind;
+    e->path = dif_str_inc(path);
+    e->reason = reason ? dif_cstr(reason) : DIF_EMPTY;
+}
+DIF_FN void dif_ioerr_errno(dif_ioerr *e, dif_str path, int err) {
+    int kind = err == ENOENT ? DIF_IO_NOTFOUND : err == EACCES || err == EPERM ? DIF_IO_NOPERM : DIF_IO_OTHER;
+    dif_ioerr_set(e, kind, path, kind == DIF_IO_OTHER ? strerror(err) : NULL);
+}
+// NUL-terminated copy of a path; NULL if the path holds a NUL byte
+DIF_FN char *dif_cpath(dif_str p) {
+    if (p.n && memchr(p.p, 0, (size_t)p.n)) return NULL;
+    char *z = dif_alloc((size_t)p.n + 1);
+    memcpy(z, p.p, (size_t)p.n);
+    z[p.n] = 0;
+    return z;
+}
+// read_file(path): true and *out (owned), or false and *e (owned)
+DIF_FN bool dif_io_read_file(dif_str path, dif_str *out, dif_ioerr *e) {
+    char *z = dif_cpath(path);
+    FILE *f = z ? fopen(z, "rb") : NULL;
+    int err = z ? errno : EINVAL;
+    free(z);
+    if (!f) return dif_ioerr_errno(e, path, err), false;
+    dif_buf b = dif_buf_new();
+    char t[16384];
+    size_t n;
+    while ((n = fread(t, 1, sizeof t, f)) > 0) dif_put(&b, t, (int64_t)n);
+    err = ferror(f) ? errno : 0;
+    fclose(f);
+    if (err) {
+        dif_buf_free(&b);
+        return dif_ioerr_errno(e, path, err), false;
+    }
+    if (!dif_utf8_valid(b.p, b.n)) {
+        dif_buf_free(&b);
+        return dif_ioerr_set(e, DIF_IO_INVALID_UTF8, path, NULL), false;
+    }
+    return *out = dif_take(&b), true;
+}
+DIF_FN bool dif_io_write_file(dif_str path, dif_str text, dif_ioerr *e) {
+    char *z = dif_cpath(path);
+    FILE *f = z ? fopen(z, "wb") : NULL;
+    int err = z ? errno : EINVAL;
+    free(z);
+    if (!f) return dif_ioerr_errno(e, path, err), false;
+    bool ok = fwrite(text.p, 1, (size_t)text.n, f) == (size_t)text.n;
+    err = errno;
+    ok = fclose(f) == 0 && ok;
+    return ok || (dif_ioerr_errno(e, path, err), false);
+}
+// One shared stream: lines() and read_line() both call this. A line ends at \n (a \r before
+// it is dropped); a last line without \n counts. Returns 1 (*out is the line, owned), 0 at
+// the end of the input, -1 with *e (owned) for invalid UTF-8 (the line is used up) or a
+// read error. stdout is written first, so prompts appear before the program waits.
+DIF_FN int dif_io_read_line(dif_str *out, dif_ioerr *e) {
+    fflush(stdout);
+    dif_buf b = dif_buf_new();
+    char t[256];
+    int k = 0, ch;
+    bool any = false, nl = false;
+    while ((ch = getc(stdin)) != EOF) {
+        any = true;
+        if (ch == '\n') {
+            nl = true;
+            break;
+        }
+        t[k++] = (char)ch;
+        if (k == (int)sizeof t) dif_put(&b, t, k), k = 0;
+    }
+    dif_put(&b, t, k);
+    dif_str path = DIF_S("<stdin>");
+    if (!any && ferror(stdin)) {
+        dif_buf_free(&b);
+        return dif_ioerr_errno(e, path, errno), clearerr(stdin), -1;
+    }
+    if (!any) return dif_buf_free(&b), 0;
+    if (nl && b.n > 0 && b.p[b.n - 1] == '\r') b.n--;
+    if (!dif_utf8_valid(b.p, b.n)) {
+        dif_buf_free(&b);
+        return dif_ioerr_set(e, DIF_IO_INVALID_UTF8, path, NULL), -1;
+    }
+    return *out = dif_take(&b), 1;
+}
+
+static int dif_argc __attribute__((unused));
+static char **dif_argv __attribute__((unused));
+DIF_FN void dif_init(int argc, char **argv) { // call first in main
+    dif_argc = argc;
+    dif_argv = argv;
+}
+// os.args(): the arguments without the program name
+DIF_FN dif_list *dif_os_args(int l, int c) {
+    dif_list *r = NULL;
+    for (int i = 1; i < dif_argc; i++) {
+        int64_t n = (int64_t)strlen(dif_argv[i]);
+        if (!dif_utf8_valid(dif_argv[i], n)) dif_panicf(l, c, "invalid UTF-8 in argument %d", i - 1);
+        dif_str s = dif_str_new(dif_argv[i], n);
+        dif_list_push(&dif_ty_str, &r, &s);
+    }
+    return r;
+}
+// os.env(name): true and *out (owned) if the variable is set
+DIF_FN bool dif_os_env(dif_str name, dif_str *out, int l, int c) {
+    char *z = dif_cpath(name);
+    const char *v = z ? getenv(z) : NULL;
+    free(z);
+    if (!v) return false;
+    int64_t n = (int64_t)strlen(v);
+    if (!dif_utf8_valid(v, n)) dif_panicf(l, c, "invalid UTF-8 in environment variable %.*s", (int)name.n, name.p);
+    return *out = dif_str_new(v, n), true;
+}
+DIF_FN _Noreturn void dif_os_exit(int64_t code, int l, int c) {
+    if (code < 0 || code > 255) dif_panicf(l, c, "exit code %" PRId64 " out of range 0..255", code);
+    fflush(stdout);
+    fflush(stderr);
+    DIF_EXIT((int)code);
+}
+
 #endif // DIF_RT_H

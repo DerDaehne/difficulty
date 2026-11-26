@@ -234,7 +234,35 @@ static void test_nested(void) {
     dif_map_dec(&dif_ty_str, &ty_ls, copy);
 }
 
+static void test_float_keys(void) {
+    DIF_CONST dif_ty ty_lf = DIF_LIST_TY(&dif_ty_f64);
+    dif_map *m = NULL;
+    double z = 0.0, nz = -0.0, one = 1.5;
+    int64_t v = 1, w = 2;
+    dif_map_set(&dif_ty_f64, VT, &m, &z, &v, 1, 1);
+    dif_map_set(&dif_ty_f64, VT, &m, &nz, &w, 1, 1); // 0.0 and -0.0 are the same key
+    CHECK(dif_map_len(m) == 1 && *(const int64_t *)dif_map_get(&dif_ty_f64, VT, m, &z, 1, 1) == 2);
+    dif_map_set(&dif_ty_f64, VT, &m, &one, &v, 1, 1);
+    dif_buf b = dif_buf_new();
+    dif_map_put(&dif_ty_f64, VT, &b, m);
+    CHECK_BUF(b, "{0: 2, 1.5: 1}"); // the first spelling stays
+    double nan = NAN;
+    EXPECT_PANIC("NaN cannot be a map key (main.dif:3:5)", dif_map_set(&dif_ty_f64, VT, &m, &nan, &v, 3, 5));
+    EXPECT_PANIC("NaN cannot be a map key (main.dif:3:5)", dif_map_get(&dif_ty_f64, VT, m, &nan, 3, 5));
+    EXPECT_PANIC("NaN cannot be a map key (main.dif:3:5)", dif_map_has(&dif_ty_f64, VT, m, &nan, 3, 5));
+    EXPECT_PANIC("NaN cannot be a map key (main.dif:3:5)", dif_map_remove(&dif_ty_f64, VT, &m, &nan, 3, 5));
+    // a NaN inside a list key counts too
+    dif_list *k = NULL;
+    dif_list_push(&dif_ty_f64, &k, &one);
+    dif_list_push(&dif_ty_f64, &k, &nan);
+    dif_map *lm = NULL;
+    EXPECT_PANIC("NaN cannot be a map key (main.dif:4:4)", dif_map_set(&ty_lf, VT, &lm, &k, &v, 4, 4));
+    dif_list_dec(&dif_ty_f64, k);
+    dif_map_dec(&dif_ty_f64, VT, m);
+}
+
 int main(void) {
+    test_float_keys();
     test_basic();
     test_cow();
     test_eq();
