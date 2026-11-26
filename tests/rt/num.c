@@ -79,6 +79,51 @@ static int digits_of(const char *s) {
     return last;
 }
 
+// does any decimal with `nd - 1` digits (rounded or its neighbours) read back as x?
+static bool shorter_exists(double x, int nd) {
+    char t[64], u[64];
+    snprintf(t, sizeof t, "%.*e", nd - 2, fabs(x));
+    uint64_t D = 0;
+    const char *q = t;
+    for (; *q != 'e'; q++)
+        if (*q != '.') D = D * 10 + (uint64_t)(*q - '0');
+    int e = atoi(q + 1) - (nd - 2);
+    for (int64_t c = -1; c <= 1; c++) {
+        snprintf(u, sizeof u, "%s%" PRIu64 "e%d", x < 0 ? "-" : "", D + (uint64_t)c, e);
+        if (D + (uint64_t)c != 0 && strtod(u, NULL) == x) return true;
+    }
+    return false;
+}
+
+static void test_powers_of_two(void) {
+    CHECK(true);
+    uint64_t u = 0x0060000000000000ULL;
+    double x;
+    memcpy(&x, &u, 8);
+    F64(x, "7.120236347223045e-307"); // the correctly rounded 17 digits (...0444) are not the shortest
+    int bad = 0;
+    for (int e = -1074; e <= 1023; e++) {
+        double p = ldexp(1.0, e), v[3] = {p, nextafter(p, 0), nextafter(p, INFINITY)};
+        for (int k = 0; k < 3; k++)
+            for (int sg = 0; sg < 2; sg++) {
+                double y = sg ? -v[k] : v[k];
+                if (y == 0) continue;
+                dif_buf b = dif_buf_new();
+                dif_put_f64(&b, y);
+                dif_str s = dif_take(&b);
+                double back = 0;
+                char z[64];
+                snprintf(z, sizeof z, "%.*s", (int)s.n, s.p);
+                int nd = digits_of(z);
+                if (!dif_parse_f64(s, &back) || back != y || (nd > 1 && shorter_exists(y, nd))) {
+                    if (bad++ < 5) fprintf(stderr, "power of two %d: %.17g -> %s\n", e, y, z);
+                }
+                dif_str_dec(s);
+            }
+    }
+    CHECK(bad == 0);
+}
+
 static void test_f64_roundtrip(void) {
     uint64_t st = 0x9E3779B97F4A7C15ULL;
     int bad = 0, notshort = 0;
@@ -311,6 +356,7 @@ static void test_parse_f64(void) {
 int main(void) {
     test_f64_text();
     test_f64_roundtrip();
+    test_powers_of_two();
     test_formats();
     test_f64_type();
     test_conversions();

@@ -38,8 +38,6 @@
 
 // ---------------------------------------------------------------------------------------
 // 1. Aborts and allocation
-// ---------------------------------------------------------------------------------------
-
 DIF_COLD _Noreturn void dif_panic(const char *msg, int line, int col) {
     fflush(stdout);
     fprintf(stderr, "panic: %s (%s:%d:%d)\n", msg, dif_file, line, col);
@@ -80,8 +78,6 @@ DIF_FN size_t dif_bytes(int64_t n, size_t size, size_t extra) {
 
 // ---------------------------------------------------------------------------------------
 // 2. Integer arithmetic (R14, R29). `int` is int64_t; i8 ... u64 have a suffix.
-// ---------------------------------------------------------------------------------------
-
 DIF_FN int64_t dif_add(int64_t a, int64_t b, int l, int c) {
     int64_t r;
     if (__builtin_add_overflow(a, b, &r)) dif_panic("integer overflow in +", l, c);
@@ -196,8 +192,6 @@ DIF_FN int64_t dif_abs(int64_t a, int64_t min, int l, int c) {
 //    static data (rc == NULL, e.g. literals). Substrings share the block. A text is
 //    immutable; "copy-on-write" appears as `dif_str_append`: an unshared text with room
 //    left grows in place, otherwise the append builds a new block.
-// ---------------------------------------------------------------------------------------
-
 typedef struct { const char *p; int64_t n; int64_t *rc; } dif_str;
 #define DIF_S(lit) ((dif_str){(lit), (int64_t)sizeof(lit) - 1, NULL})
 #define DIF_EMPTY ((dif_str){"", 0, NULL})
@@ -417,8 +411,6 @@ DIF_FN dif_str dif_str_replace(dif_str s, dif_str from, dif_str to, int l, int c
 //    Only struct and enum types need generated functions (inc/dec/eq/put/hash).
 //    A NULL inc/dec means "plain bytes". Each function gets the descriptor first, so one
 //    function serves all lists (`t->elem`).
-// ---------------------------------------------------------------------------------------
-
 typedef struct dif_ty dif_ty;
 struct dif_ty {
     size_t size;
@@ -510,8 +502,6 @@ DIF_CONST dif_ty dif_ty_str = {sizeof(dif_str), NULL, NULL, 0, dif_str_inc_t, di
 // ---------------------------------------------------------------------------------------
 // 5. Arrays: `n` elements at `d`, of type `et`. [N]T lives inline in the generated C; the
 //    list functions below call these with the data of the list.
-// ---------------------------------------------------------------------------------------
-
 DIF_FN void dif_arr_inc(const dif_ty *et, const void *d, int64_t n) {
     if (et->inc)
         for (int64_t i = 0; i < n; i++) et->inc(et, (const char *)d + (size_t)i * et->size);
@@ -591,8 +581,6 @@ DIF_FN void dif_arr_sort(const dif_ty *et, void *d, int64_t n) {
 // 6. Lists `[]T`: `dif_list *`, NULL is the empty list (no allocation). Block: header,
 //    then the elements. Every mutator takes the address of the variable and first makes the
 //    block unshared and large enough (copy-on-write).
-// ---------------------------------------------------------------------------------------
-
 typedef struct { int64_t rc, len, cap; } dif_list;
 #define DIF_LDATA(l) ((char *)(l) + sizeof(dif_list))
 
@@ -784,8 +772,6 @@ DIF_FN uint64_t dif_array_hash_t(const dif_ty *t, const void *p) { return dif_ar
 
 // ---------------------------------------------------------------------------------------
 // 7. str methods that return lists
-// ---------------------------------------------------------------------------------------
-
 DIF_CONST dif_ty dif_ty_list_str = DIF_LIST_TY(&dif_ty_str);
 
 DIF_FN dif_list *dif_str_split(dif_str s, dif_str sep, int l, int c) {
@@ -821,8 +807,6 @@ DIF_FN dif_list *dif_str_lines(dif_str s) {
 //    order in a dense array `{hash, key, value}`; a removed entry stays as a gap (hash 0)
 //    until the next rebuild. An open-addressing index (int32 entry numbers) finds a key.
 //    Copy-on-write like the list; keys and values are moved in (`set` takes both).
-// ---------------------------------------------------------------------------------------
-
 typedef struct { int64_t rc, len, cnt, cap, icap; int32_t *idx; } dif_map; // entries follow
 #define DIF_LIVE (1ULL << 63)
 DIF_FN size_t dif_map_voff(const dif_ty *kt) { return (8 + kt->size + 7) & ~(size_t)7; }
@@ -1025,10 +1009,9 @@ DIF_FN uint64_t dif_map_hash_t(const dif_ty *t, const void *p) {
 
 // ---------------------------------------------------------------------------------------
 // 9. UTF-8, rune, Unicode classes and simple case mapping (4.2). A str is always valid
-//    UTF-8; text from outside (files, stdin, argv) is checked with `dif_utf8_valid`.
+//    UTF-8 (invariant: every str the runtime hands out is valid; loops over bytes still
+//    advance at least one byte per step); text from outside is checked with `dif_utf8_valid`.
 //    A rune is a uint32_t (0 ... 10FFFF without D800 ... DFFF).
-// ---------------------------------------------------------------------------------------
-
 DIF_FN bool dif_rune_ok(int64_t v) { return v >= 0 && v <= 0x10FFFF && !(v >= 0xD800 && v <= 0xDFFF); }
 // Decodes one strictly valid sequence (no overlong forms, no surrogates, at most 10FFFF).
 // Returns its length 1 ... 4, or 0 if the bytes at p are not valid.
@@ -1047,6 +1030,11 @@ DIF_FN int dif_utf8_decode(const char *s, int64_t n, uint32_t *cp) {
     static const uint32_t min[5] = {0, 0, 0x80, 0x800, 0x10000};
     if (v < min[len] || !dif_rune_ok(v)) return 0;
     return *cp = v, len;
+}
+// like decode, but always advances: an invalid byte (cannot happen in a str) gives U+FFFD
+DIF_FN int dif_utf8_step(const char *p, int64_t n, uint32_t *cp) {
+    int k = dif_utf8_decode(p, n, cp);
+    return k ? k : (*cp = 0xFFFD, 1);
 }
 DIF_FN bool dif_utf8_valid(const char *p, int64_t n) {
     for (int64_t i = 0; i < n;) {
@@ -1090,7 +1078,7 @@ DIF_FN dif_list *dif_str_runes(dif_str s) {
     dif_list *r = dif_list_alloc(&dif_ty_rune, s.n);
     uint32_t cp;
     for (int64_t i = 0; i < s.n;) {
-        i += dif_utf8_decode(s.p + i, s.n - i, &cp);
+        i += dif_utf8_step(s.p + i, s.n - i, &cp);
         ((uint32_t *)DIF_LDATA(r))[r->len++] = cp;
     }
     if (!r->len) return free(r), NULL;
@@ -1127,7 +1115,7 @@ DIF_FN dif_str dif_str_case(dif_str s, bool up) {
     bool changed = false;
     uint32_t cp;
     for (int64_t i = 0, k; i < s.n; i += k) {
-        k = dif_utf8_decode(s.p + i, s.n - i, &cp);
+        k = dif_utf8_step(s.p + i, s.n - i, &cp);
         uint32_t m = up ? dif_rune_upper(cp) : dif_rune_lower(cp);
         changed |= m != cp;
         dif_put_rune(&b, m);
@@ -1148,7 +1136,7 @@ DIF_FN dif_str dif_str_trim(dif_str s, bool start, bool end) {
         a += dif_utf8_decode(s.p + a, b - a, &cp);
     while (end && b > a) {
         int64_t k = 1;
-        while (dif_is_cont(s.p[b - k])) k++;
+        while (k < b - a && dif_is_cont(s.p[b - k])) k++;
         dif_utf8_decode(s.p + b - k, k, &cp);
         if (!dif_rune_is_space(cp)) break;
         b -= k;
@@ -1159,24 +1147,45 @@ DIF_FN dif_str dif_str_trim(dif_str s, bool start, bool end) {
 // ---------------------------------------------------------------------------------------
 // 10. f64: text form (R29), formats, descriptor. The math functions of 4.3 are the C ones:
 //     round, trunc, floor, ceil, sqrt, fabs, fmin, fmax, fmod (`%`) - link with -lm.
-// ---------------------------------------------------------------------------------------
 
-// Shortest decimal text that reads back as the same value: the least precision 1 ... 17
-// whose correctly rounded `%.*e` form round-trips (so it is also the closest of its length).
+// Shortest decimal text that reads back as the same value: the least precision 1 ... 17 for
+// which the correctly rounded `%.*e` form or its neighbour (last digit +-1) round-trips; of
+// two neighbours the closer one. The neighbour matters at powers of two, where the interval
+// of values reading back as x is lopsided.
 DIF_FN void dif_put_f64(dif_buf *b, double x) {
-    if (x != x) return dif_put(b, "NaN", 3);
-    if (isinf(x)) return dif_put(b, x < 0 ? "-inf" : "inf", x < 0 ? 4 : 3);
-    if (x == 0) return dif_put(b, signbit(x) ? "-0" : "0", signbit(x) ? 2 : 1);
-    char t[40], d[24];
-    int p, nd = 0;
-    for (p = 1; p <= 17; p++) {
+    if (x != x) { dif_put(b, "NaN", 3); return; }
+    if (isinf(x)) { dif_put(b, x < 0 ? "-inf" : "inf", x < 0 ? 4 : 3); return; }
+    if (x == 0) { dif_put(b, signbit(x) ? "-0" : "0", signbit(x) ? 2 : 1); return; }
+    char t[48], d[24];
+    int nd = 0, e = 0;
+    for (int p = 1; p <= 17; p++) {
         snprintf(t, sizeof t, "%.*e", p - 1, x);
+        nd = 0;
+        const char *q = t + (t[0] == '-');
+        for (; *q != 'e'; q++)
+            if (*q != '.') d[nd++] = *q;
+        e = atoi(q + 1);
+        d[nd] = 0;
         if (strtod(t, NULL) == x) break;
+        uint64_t D = strtoull(d, NULL, 10);
+        char w[80]; // x to more digits: is x at or above D*10^k? (D is the rounded one)
+        snprintf(w, sizeof w, "%.*e", p + 19, fabs(x));
+        bool above = atoi(strchr(w, 'e') + 1) == e && w[0] == d[0] && strncmp(w + 2, d + 1, (size_t)p - 1) == 0;
+        char u[40];
+        int ok = 0;
+        for (int i = 0; i < 2 && !ok; i++) {
+            uint64_t C = (i == 0) == above ? D + 1 : D - 1;
+            if (C == 0) continue;
+            snprintf(u, sizeof u, "%s%" PRIu64 "e%d", x < 0 ? "-" : "", C, e - p + 1);
+            if (strtod(u, NULL) == x) {
+                nd = snprintf(d, sizeof d, "%" PRIu64, C);
+                e += nd - p;
+                while (nd > 1 && d[nd - 1] == '0') nd--;
+                ok = 1;
+            }
+        }
+        if (ok) break;
     }
-    const char *q = t + (t[0] == '-');
-    for (; *q != 'e'; q++)
-        if (*q != '.') d[nd++] = *q;
-    int e = atoi(q + 1);
     if (t[0] == '-') dif_put(b, "-", 1);
     if (e < -6 || e > 20) { // d.ddde<e>
         dif_put(b, d, 1);
@@ -1201,7 +1210,7 @@ DIF_FN void dif_put_f64(dif_buf *b, double x) {
 }
 // `{x:.Nf}` (prec = N) and `{x:g}` (prec < 0) like C printf; inf, -inf and NaN as in the text form
 DIF_FN void dif_put_f64_fmt(dif_buf *b, double x, int prec) {
-    if (x != x || isinf(x)) return dif_put_f64(b, x);
+    if (x != x || isinf(x)) { dif_put_f64(b, x); return; }
     char t[512];
     int n = prec < 0 ? snprintf(t, sizeof t, "%g", x) : snprintf(t, sizeof t, "%.*f", prec, x);
     dif_put(b, t, n);
@@ -1229,8 +1238,6 @@ DIF_CONST dif_ty dif_ty_f64 = {8, NULL, NULL, 0, NULL, NULL, dif_teq_f64, dif_tp
 // 11. Conversions T(x) (R31): exact or abort. An integer type is (bits, signed); `int` is
 //     (64, true). Signed sources use the *_s functions (int64_t), unsigned ones and rune the
 //     *_u functions (uint64_t). The result of `dif_conv_s` fits the target; cast it.
-// ---------------------------------------------------------------------------------------
-
 DIF_FN _Noreturn void dif_panic_buf(dif_buf *b, int l, int c) {
     dif_put(b, "\0", 1);
     dif_panic(b->p, l, c);
@@ -1360,8 +1367,6 @@ DIF_FN bool dif_parse_f64(dif_str s, double *out) {
 // 12. io and os (4.6). Results are plain C values; the backend wraps them into `T!io.IoErr`.
 //     A str is always valid UTF-8: text from files, stdin, argv and the environment is
 //     checked, invalid input is an error (io) or an abort (os), never replaced.
-// ---------------------------------------------------------------------------------------
-
 enum { DIF_IO_NOTFOUND, DIF_IO_NOPERM, DIF_IO_INVALID_UTF8, DIF_IO_OTHER }; // variant order of IoErr
 typedef struct { int kind; dif_str path, reason; } dif_ioerr; // owned: release with dif_ioerr_dec
 
