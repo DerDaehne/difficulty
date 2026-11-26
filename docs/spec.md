@@ -68,6 +68,17 @@ panic: <message> (<file>:<line>:<column>)
 
 auf stderr und Exit-Code 2. Ein Fehler, der aus `void!E main()` herauskommt, endet mit Exit-Code 1 (Format in R12).
 
+### 0.4 Exit-Codes von `dif`
+
+| Code | `dif check` | `dif run`, `dif build`, `dif test` |
+|---|---|---|
+| 0 | keine Diagnose | gebaut, bei `dif run` gelaufen: der Exit-Code des Programms; bei `dif test` alle Tests bestehen |
+| 1 | Diagnosen | Diagnosen (die Datei lässt sich nicht übersetzen); bei `dif test` scheitert ein Test (R18); bei `dif run` der Exit-Code des Programms, 1 bei einem Fehler aus `main` |
+| 2 | falscher Aufruf, Datei nicht lesbar | falscher Aufruf, Datei nicht lesbar, kein C-Compiler gefunden (`$CC`, sonst `cc`, `gcc`, `clang`); bei `dif test` Diagnosen (R18); bei `dif run` ein Abbruch des Programms (R14) oder ein Signal |
+| 3 | – | **interner Fehler:** der C-Compiler lehnt das C ab, das `dif` erzeugt hat. Das ist ein Fehler von `dif`, nicht des Programms: stderr nennt die Meldung des C-Compilers, es entsteht kein Programm und kein Test läuft |
+
+`dif run` gibt den Exit-Code des Programms weiter, auch den von `os.exit(n)` (§4.6); wer den Code 3 des Compilers von einem Code 3 des Programms trennen will, nimmt `dif build` und startet das Programm selbst. Das erzeugte C braucht die Mathematikbibliothek (`round`, `floor`, `sqrt`, `fmod`); `dif` übergibt dem C-Compiler `-lm`.
+
 ---
 
 ## 1. Lexik
@@ -1591,9 +1602,9 @@ Teil 2c ergänzt (alle Meldungen auf englisch, wie in Teil 1; `<…>` sind die t
 | `assert(false)` | `assertion failed: <Bedingung>` (Quelltext, Zeilenumbrüche als Leerzeichen) |
 | ein Argument von `os.args()` ist kein gültiges UTF-8 | `invalid UTF-8 in argument <i>` (`<i>` ab 0, wie der Index in `os.args()`) |
 | ein Wert von `os.env(name)` ist kein gültiges UTF-8 | `invalid UTF-8 in environment variable <name>` |
-| Speicher erschöpft | `out of memory` |
+| Speicher erschöpft | `out of memory` (ohne Zeile und Spalte: der Speichermangel hängt an keiner Stelle im Quelltext) |
 
-Die Position ist die des Operators, bei einem Index die des `[`, bei einem Aufruf (`T(x)`, Methode, `os.args()`, `os.env(…)`) die des Namens vor der `(`. Was beim Kompilieren feststeht (nur Literale und `const`: Index in ein Array, `T(x)`, Shifts), ist `error[R14]` mit derselben Meldung.
+Die Position ist die des Operators, bei einem Index die des `[`, bei einem Aufruf (`T(x)`, Methode, `os.args()`, `os.env(…)`) die des Namens vor der `(`. Nur `out of memory` hat keine Position: die Meldung nennt statt Zeile und Spalte nur die Datei, `panic: out of memory (main.dif)`. Was beim Kompilieren feststeht (nur Literale und `const`: Index in ein Array, `T(x)`, Shifts), ist `error[R14]` mit derselben Meldung.
 
 ```dif snippet
 int big = 9223372036854775807
@@ -2306,7 +2317,7 @@ Teil 2c legt fest:
 - **Schreiben.** `m[k] = v` ersetzt den Wert von `k` oder fügt den Eintrag hinten an. Für R6 gilt `m[k] = v` als Änderung von `m`, auch wenn `m[k]` kein Ort ist. Ersetzen ändert die Stelle des Eintrags nicht; wer `k` mit `remove` entfernt und wieder setzt, steht hinten. `m[k] += 1` und die anderen Zuweisungsoperatoren sind `R8` am Operator, Meldung `` cannot apply `+=` to ?int and int ``, Hinweis `counts["a"] = (counts["a"] ?? 0) + 1` (mit `m[k]` aus dem Quelltext).
 - **Kein Ort.** Ein Eintrag wird nur durch `m[k] = v` ersetzt. `m[k].f = v`, `m[k].push(x)` (eine Methode, die `self` ändert) und `mut m[k]` sind `R30` am Anfang des Orts, Meldung `` a map entry is changed by assigning it ``, Hinweis `read it, change the copy, and store it: m[k] = v`.
 - **Reihenfolge.** Einträge liegen in der Reihenfolge der Einfügung; `for K k, V v in m`, `m.keys()`, `m.values()` und die Textform halten sie ein. Die Ausgabe eines Programms ist darum bei gleicher Eingabe immer gleich.
-- **Schlüssel.** `K` ist jeder Typ, der `equal` ist; zwei Schlüssel sind dieselben, wenn `==` sie gleich nennt (`0.0` und `-0.0` sind derselbe Schlüssel). Ein Schlüssel, der irgendwo ein `NaN` enthält (`f64`, Liste, Struct), bricht ab (R14, `NaN cannot be a map key`). Gleichheit, Textform: R28; Methoden: §4.5; Kopie und Schnappschuss: R5, Teil 2c.
+- **Schlüssel.** `K` ist jeder Typ, der `equal` ist; zwei Schlüssel sind dieselben, wenn `==` sie gleich nennt (`0.0` und `-0.0` sind derselbe Schlüssel). Ein Schlüssel, der irgendwo ein `NaN` enthält (`f64`, Liste, Struct), bricht ab (R14, `NaN cannot be a map key`), und zwar bei jeder Operation, die einen Schlüssel nimmt: `m[k] = v`, `m[k]`, `m.has(k)` und `m.remove(k)`; die Position ist die des `[` bzw. des Methodennamens. Es gibt nur diese eine Regel, auch wenn die Map leer ist. Gleichheit, Textform: R28; Methoden: §4.5; Kopie und Schnappschuss: R5, Teil 2c.
 
 ```dif
 void main() {
@@ -2409,6 +2420,7 @@ Teil 2c legt fest:
   Bei `T(x)` mit dem Typ von `x` selbst ist das Ergebnis `x`. Gerundet wird nie von selbst: wer von `f64` zu einem Ganzzahltyp will, sagt `x.round()`, `x.trunc()`, `x.floor()` oder `x.ceil()` zuerst (`int(x.round())`).
 - **Nicht erlaubt** ist jede andere Umwandlung, `R31` am Namen des Typs, Meldung `` cannot convert str to int ``, mit Hinweis: von `str` nach Zahl `use "12".parse_int()` bzw. `parse_f64()` (mit dem Argument aus dem Quelltext), von einem anderen Typ nach `str` `build text with interpolation: "{x}"`, von `bool` oder nach `bool` `compare explicitly: n != 0` bzw. `use if b { 1 } else { 0 }`, sonst keiner. Auch `Point(x)` mit einem Typ, der keine Umwandlung ist, ist `R31`.
 - **Zur Übersetzungszeit.** Ein Argument, das nur aus Literalen und `const` besteht, wird beim Kompilieren umgewandelt; scheitert das, ist es `error[R14]` mit der Meldung des Abbruchs und dem Hinweis `round explicitly first with round(), trunc(), floor() or ceil()` (bei `f64` → Ganzzahltyp, sonst keiner). Das Literal hat dabei keine Stelle (`int(2.5)`: `f64`; `u8(300)`: `int`).
+- **Meldung des Abbruchs.** Sie nennt den Zieltyp von `T(x)` und den Wert in seiner Textform (R29): `<wert> does not fit in <T>`, wenn der Wert ganz ist, aber nicht in `T` passt (`300 does not fit in u8`, `-1 does not fit in u64`, `1e30 does not fit in int`), `<wert> is not an exact <T>`, wenn er nicht ganz ist (`2.5 is not an exact int`, `NaN is not an exact i8`) oder bei `f64(n)` nicht genau darstellbar (`9007199254740993 is not an exact f64`), `<n> is not a valid rune` bei `rune(n)`. Für `int` steht `int`, nicht `i64`.
 - **Prüfen statt abbrechen.** Jeder Ganzzahltyp hat `to_i8() … to_u64()` und `to_int()`, die ein `?T` liefern: `none`, wo `T(x)` abbräche (§4.3).
 - **Position.** Der Abbruch und `R31` stehen am Namen des Typs vor der `(`.
 
@@ -2433,6 +2445,24 @@ print(int(x))
 
 ```
 panic: 2.5 is not an exact int (main.dif:3:11)
+```
+
+```dif panic "300 does not fit in u8"
+int n = 300
+print(u8(n))
+```
+
+```
+panic: 300 does not fit in u8 (main.dif:3:11)
+```
+
+```dif panic "2.5 is not an exact u8"
+f64 x = 2.5
+print(u8(x))
+```
+
+```
+panic: 2.5 is not an exact u8 (main.dif:3:11)
 ```
 
 ```dif error R14
@@ -2500,7 +2530,7 @@ Ein `str` ist unveränderlich (R5, Teil 2c). Längen, Positionen und `slice` zä
 | `bool str.is_empty()` | `len() == 0` | |
 | `[]rune str.runes()` | die Codepoints in Reihenfolge | |
 | `[]str str.split(str sep)` | teilt an jedem `sep`, von links, ohne Überlappung; aufeinanderfolgende `sep` geben leere Texte; `"".split(",")` ist `[""]`; leeres `sep` bricht ab | |
-| `[]str str.lines()` | teilt an `\n`, ein `\r` davor entfällt; ein letzter Zeilenumbruch erzeugt keine leere Zeile; `""` gibt `[]` | |
+| `[]str str.lines()` | teilt an `\n`; ein `\r` direkt vor dem Zeilenende entfällt in jeder Zeile, auch in der letzten ohne `\n`; ein letzter Zeilenumbruch erzeugt keine leere Zeile; `""` gibt `[]` | |
 | `str str.trim()`, `trim_start()`, `trim_end()` | entfernt Leerraum an beiden Enden, am Anfang, am Ende | |
 | `str str.lower()`, `upper()` | jedes Zeichen einzeln in Klein- bzw. Großbuchstaben (einfache Fallzuordnung); der Rest bleibt | |
 | `bool str.contains(str s)`, `starts_with(str s)`, `ends_with(str s)` | Teiltext, Anfang, Ende; der leere Text ist immer enthalten | |
@@ -2686,7 +2716,7 @@ enum IoErr {
 
 | Signatur | Verhalten | Wirkung |
 |---|---|---|
-| `io.lines()` | Quelle einer `for`-Schleife (R11) mit Elementen vom Typ `str!io.IoErr`: die Zeilen von stdin ohne `\n` (ein `\r` davor entfällt), bis zum Ende der Eingabe; eine letzte Zeile ohne Zeilenumbruch zählt; leere Eingabe gibt keine Durchläufe; eine Zeile mit ungültigem UTF-8 ist `err(IoErr.InvalidUtf8("<stdin>"))` und das letzte Element, danach endet die Schleife. Die Schleifenform steht in R11 („Folgen von Ergebnissen“): `for str line in try io.lines()` entpackt jedes Element, die Funktion muss `U!io.IoErr` liefern (auch `void!io.IoErr main()`); ohne `try` ist die Variable ein `str!io.IoErr` | |
+| `io.lines()` | Quelle einer `for`-Schleife (R11) mit Elementen vom Typ `str!io.IoErr`: die Zeilen von stdin ohne `\n` (ein `\r` direkt vor dem Zeilenende entfällt in jeder Zeile, auch in der letzten ohne `\n`), bis zum Ende der Eingabe; eine letzte Zeile ohne Zeilenumbruch zählt; leere Eingabe gibt keine Durchläufe; eine Zeile mit ungültigem UTF-8 ist `err(IoErr.InvalidUtf8("<stdin>"))` und das letzte Element, danach endet die Schleife. Die Schleifenform steht in R11 („Folgen von Ergebnissen“): `for str line in try io.lines()` entpackt jedes Element, die Funktion muss `U!io.IoErr` liefern (auch `void!io.IoErr main()`); ohne `try` ist die Variable ein `str!io.IoErr` | |
 | `?str!io.IoErr io.read_line()` | die nächste Zeile von stdin wie bei `lines()`; `ok(none)` am Ende der Eingabe, `err(IoErr.InvalidUtf8("<stdin>"))` bei ungültigem UTF-8 | ändert die Eingabe |
 | `str!io.IoErr io.read_file(str path)` | der ganze Inhalt der Datei | |
 | `void!io.IoErr io.write_file(str path, str text)` | legt die Datei an oder überschreibt sie mit den Bytes von `text` | ändert die Datei |
