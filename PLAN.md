@@ -1,10 +1,10 @@
 # difficulty — Idee & Plan
 
-> Die Einfachheit von Python und die Klarheit von C: keine Syntax, für die man einen Doktor braucht,
-> kein Boilerplate, moderne Features ohne Schnickschnack.
-> Eine kompilierte Sprache für KI-Agenten (und Menschen), die mit ihnen schreiben:
-> C-Optik, statische Typen, native Binaries und direkter Zugriff auf C-Bibliotheken.
-> Der Name ist Programm: Die Schwierigkeit steckt im Compiler, nicht im Programm.
+> Schwierig ist nur der Name: eine kompilierte Sprache, die sich schreibt wie ein angenehmeres C.
+> C-Optik, statische Typen, native Binaries und direkter Zugriff auf C-Bibliotheken, aber ohne
+> Zeiger, `null`, stille Überläufe und verschluckte Fehler. Die Einfachheit von Python und die
+> Klarheit von C: keine Syntax, für die man einen Doktor braucht, kein Boilerplate.
+> Die Schwierigkeit steckt im Compiler, nicht im Programm.
 
 Stand: 2026-11-22 · Status: Entwurf, alle Grundsatzentscheidungen getroffen (§11). Verbindliche Sprachbeschreibung: [docs/spec.md](docs/spec.md).
 
@@ -15,7 +15,7 @@ Stand: 2026-11-22 · Status: Entwurf, alle Grundsatzentscheidungen getroffen (§
 | | |
 |---|---|
 | **Was** | Statisch typisierte, kompilierte Sprache. Optik von C (Typ vorn, `{}`), Einfachheit von Python (`for int i in range(n)`, keine Semikolons, keine Klammern um Bedingungen). |
-| **Für wen** | Primär KI-Agenten: ein Agent soll ein korrektes Programm im ersten oder zweiten Anlauf schreiben, ohne die Sprache aus dem Training zu kennen. |
+| **Für wen** | Wer native Programme in der Nähe von C schreiben will, ohne die Fallen von C. Dieselben Eigenschaften (eine Schreibweise, eindeutige Meldungen mit Reparaturvorschlag) helfen Werkzeugen und KI-Agenten: ein Agent soll ein korrektes Programm im ersten oder zweiten Anlauf schreiben, ohne die Sprache aus dem Training zu kennen; das misst §10. |
 | **Backend** | C11 → System-C-Compiler (gcc/clang). Schnell wie C, Binaries in KB statt MB. |
 | **C-Bibliotheken** | Header direkt importieren (`use c "sqlite3.h"`), `.so`/`.dll` linken oder zur Laufzeit laden, C-Quellen mitbauen. |
 | **Speicher** | Wertsemantik + Referenzzählung + Copy-on-Write. Kein GC, keine Lifetimes, kein Borrow-Checker. |

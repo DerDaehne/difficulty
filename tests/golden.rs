@@ -113,6 +113,11 @@ fn llms_txt() {
     assert!(doc_examples("llms.txt", "llms") >= 2);
 }
 
+#[test]
+fn readme_examples() {
+    assert!(doc_examples("README.md", "readme") >= 9);
+}
+
 /// Sections of the spec whose examples are checked but not built and run;
 /// a section is listed here only while its backend is missing.
 const CHECK_ONLY: &[&str] = &[

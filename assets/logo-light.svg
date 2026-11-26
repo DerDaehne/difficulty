@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="difficulty">
+  <title>difficulty</title>
+  <!-- A C whose open side is closed by a stroke: together they form a d. -->
+  <path d="M77.2 48.8 A30 30 0 1 0 77.2 91.2" fill="none" stroke="#1b2130" stroke-width="12" stroke-linecap="round"/>
+  <line x1="92" y1="16" x2="92" y2="100" stroke="#e0a100" stroke-width="12" stroke-linecap="round"/>
+</svg>
