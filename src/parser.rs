@@ -414,7 +414,11 @@ impl<'a> Parser<'a> {
         while k < start + 2 && matches!(self.peek_n(k), Tok::Op("?" | "??")) {
             k += 1;
         }
-        k = self.base_end(k)?;
+        k = if k > start && *self.peek_n(k) == Tok::Op("(") {
+            self.elem_end(k)?
+        } else {
+            self.base_end(k)?
+        };
         while *self.peek_n(k) == Tok::Op("!") {
             match self.base_end(k + 1) {
                 Some(e) => k = e,
@@ -453,6 +457,7 @@ impl<'a> Parser<'a> {
     }
 
     fn elem_end(&self, k: usize) -> Option<usize> {
+        let start_k = k;
         if *self.peek_n(k) == Tok::Op("(") {
             let j = self.type_end(k + 1)?;
             return (*self.peek_n(j) == Tok::Op(")")).then_some(j + 1);
@@ -462,6 +467,9 @@ impl<'a> Parser<'a> {
         } else {
             k
         };
+        if k > start_k && *self.peek_n(k) == Tok::Op("(") {
+            return self.elem_end(k);
+        }
         self.base_end(k)
     }
 
@@ -623,7 +631,13 @@ impl<'a> Parser<'a> {
                 self.bump();
             }
         }
-        if !self.base_type(name, nested) {
+        if name.starts_with('?') && self.is_op("(") {
+            // `?(?int)`: a `?` before a parenthesised `?` is nested too
+            if !self.elem_type(name, nested) {
+                return false;
+            }
+            *nested |= name.starts_with("??");
+        } else if !self.base_type(name, nested) {
             return false;
         }
         let mut errs = 0;
@@ -736,6 +750,12 @@ impl<'a> Parser<'a> {
             *nested |= self.is_op("??");
             self.bump();
             name.push('?');
+        }
+        if name.ends_with('?') && self.is_op("(") {
+            let at = name.len();
+            let ok = self.elem_type(name, nested);
+            *nested |= name[at..].starts_with('?');
+            return ok;
         }
         self.base_type(name, nested)
     }

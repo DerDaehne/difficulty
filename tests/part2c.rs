@@ -633,3 +633,14 @@ fn file_cut_off_gives_one_message() {
         assert_eq!(diags(src), [want], "{src}");
     }
 }
+
+#[test]
+fn nested_optional_in_parens_is_s1() {
+    let hint = "a type has at most one ? and one !E";
+    let want = |pos: &str| vec![format!("{pos} S1 this type is nested too far | {hint}")];
+    assert_eq!(diags(&in_main("?(?int) c = none")), want("2:5"));
+    assert_eq!(diags(&in_main("??int c = none")), want("2:5"));
+    assert_eq!(diags(&in_main("[]?(?int) c = []")), want("2:5"));
+    assert_eq!(diags("void f(?(?int) a) {\n}\n"), want("1:8"));
+    assert_eq!(diags("struct S {\n    ?(?int) a\n}\n"), want("2:5"));
+}
