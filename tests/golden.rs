@@ -152,7 +152,7 @@ fn llms_txt() {
 
 #[test]
 fn readme_examples() {
-    assert!(doc_examples("README.md", "readme") >= 9);
+    assert!(doc_examples("README.md", "readme", false) >= 9);
 }
 
 /// Sections of the spec whose examples are checked but not built and run;
