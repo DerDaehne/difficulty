@@ -52,7 +52,7 @@ fn root(e: &Expr) -> Option<String> {
     match &e.kind {
         ExprKind::Ident(n) => Some(n.clone()),
         ExprKind::SelfRef => Some("self".into()),
-        ExprKind::Field(b, _) | ExprKind::Index(b, _) => root(b),
+        ExprKind::Field(b, _) | ExprKind::Index(b, _, _) => root(b),
         _ => None,
     }
 }
@@ -91,7 +91,7 @@ impl Live<'_> {
                     }
                 }
                 // index expressions inside the place are read too
-                if let ExprKind::Index(_, i) = &place.kind {
+                if let ExprKind::Index(_, i, _) = &place.kind {
                     live = self.expr(i, live);
                 }
                 self.expr(value, live)
@@ -271,7 +271,7 @@ impl Live<'_> {
                 self.expr(x, after)
             }
             ExprKind::Field(b, _) => self.expr(b, live),
-            ExprKind::Binary(_, l, r, _) | ExprKind::Index(l, r) => {
+            ExprKind::Binary(_, l, r, _) | ExprKind::Index(l, r, _) => {
                 let live = self.expr(r, live);
                 self.expr(l, live)
             }

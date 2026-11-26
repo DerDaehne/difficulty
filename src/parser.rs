@@ -1408,7 +1408,7 @@ impl<'a> Parser<'a> {
                     let idx = self.expr();
                     self.header = header;
                     self.close(open, "]");
-                    ExprKind::Index(Box::new(e), Box::new(idx))
+                    ExprKind::Index(Box::new(e), Box::new(idx), open)
                 }
                 Tok::Op(".") => {
                     self.bump();
@@ -2404,7 +2404,7 @@ fn can_start_stmt(t: &Tok) -> bool {
 fn is_place(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::Ident(_) | ExprKind::SelfRef => true,
-        ExprKind::Field(inner, _) | ExprKind::Index(inner, _) => is_place(inner),
+        ExprKind::Field(inner, _) | ExprKind::Index(inner, _, _) => is_place(inner),
         _ => false,
     }
 }

@@ -241,9 +241,12 @@ fn comments_and_strings_cut_cleanly() {
     assert_eq!(codes(&in_main("/* x\nint a = 1")), ["L2"]);
     // `\` at the end of the line is part of the open string, not a second error
     assert_eq!(codes(&in_main("print(\"abc\\\nprint(1)")), ["L5"]);
-    // format specifications come later: one message, the expression is still read
-    let d = one(&in_main("int x = 1\nprint(\"{x:.2f}\")"));
-    assert_eq!((d.code, d.pos.line, d.pos.col), ("S1", 3, 14));
+    // an unknown format is one S1 at its first character; the expression is still read
+    let d = one(&in_main("int x = 1\nprint(\"{x:q}\")"));
+    assert_eq!((d.code, d.pos.line, d.pos.col), ("S1", 3, 15));
+    assert_eq!(d.msg, "unknown format `q`");
+    let d = one(&in_main("int x = 1\nprint(\"{x:.f}\")"));
+    assert_eq!(d.msg, "unknown format `.f`");
     // an operator at the start of a line says why
     let d = one(&in_main("int a = 1\nint b = a\n    * 2"));
     assert!(

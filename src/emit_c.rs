@@ -208,13 +208,22 @@ static _Noreturn void dif_expect_fail(int line, int col, int64_t off, const char
 //   when any of them calls something.
 
 /// C source for a module that passed the checker; `test` blocks are left out.
+/// What the emitter says to a program of part 2c until its backend exists.
+const PART_2C: &str = "#error \"this program uses collections, number widths, f64, rune or std modules (part 2c); `dif check` accepts it, the C backend for it is not available yet\"\n";
+
 pub fn emit(file: &str, src: &str, m: &Module, info: &Info) -> String {
+    if info.part2c {
+        return PART_2C.into();
+    }
     emitter(file, src, info).module(m, false)
 }
 
 /// C source of the test binary: `./prog <k>` runs test number `k` (R18). `main` is not
 /// called, and a module without `main` is fine.
 pub fn emit_tests(file: &str, src: &str, m: &Module, info: &Info) -> String {
+    if info.part2c {
+        return PART_2C.into();
+    }
     emitter(file, src, info).module(m, true)
 }
 
@@ -313,12 +322,14 @@ fn sets(e: &Expr, n: &str) -> bool {
         | ExprKind::ErrVal(x)
         | ExprKind::OkVal(Some(x)) => sets(x, n),
         ExprKind::Try(x, or) => sets(x, n) || or.as_ref().is_some_and(|(_, e)| sets(e, n)),
-        ExprKind::Binary(_, l, r, _) | ExprKind::Index(l, r) => sets(l, n) || sets(r, n),
+        ExprKind::Binary(_, l, r, _) | ExprKind::Index(l, r, _) => sets(l, n) || sets(r, n),
+        ExprKind::ListLit(items) => items.iter().any(|x| sets(x, n)),
+        ExprKind::MapLit(entries) => entries.iter().any(|(k, v)| sets(k, n) || sets(v, n)),
         ExprKind::Call(f, args) => sets(f, n) || args.iter().any(|a| sets(a, n)),
         ExprKind::StructLit(_, inits) => inits.iter().any(|i| sets(&i.value, n)),
         ExprKind::Str(segs) => segs
             .iter()
-            .any(|s| matches!(s, StrSeg::Expr(x) if sets(x, n))),
+            .any(|s| matches!(s, StrSeg::Expr(x) | StrSeg::Fmt(x, _) if sets(x, n))),
         ExprKind::IfExpr(branches, last) => {
             let vb = |b: &ValueBlock| changes(&b.stmts, n) || sets(&b.value, n);
             branches.iter().any(|(c, b)| sets(c, n) || vb(b)) || vb(last)
@@ -326,6 +337,7 @@ fn sets(e: &Expr, n: &str) -> bool {
         // no `_` arm: a new expression kind must be classified here (it could change `n`)
         ExprKind::Int(_)
         | ExprKind::Float(_)
+        | ExprKind::Rune(_)
         | ExprKind::Bool(_)
         | ExprKind::Ident(_)
         | ExprKind::SelfRef
@@ -382,14 +394,17 @@ fn has_call(e: &Expr) -> bool {
         | ExprKind::SomeVal(x)
         | ExprKind::ErrVal(x)
         | ExprKind::OkVal(Some(x)) => has_call(x),
-        ExprKind::Binary(_, l, r, _) | ExprKind::Index(l, r) => has_call(l) || has_call(r),
+        ExprKind::Binary(_, l, r, _) | ExprKind::Index(l, r, _) => has_call(l) || has_call(r),
+        ExprKind::ListLit(items) => items.iter().any(has_call),
+        ExprKind::MapLit(entries) => entries.iter().any(|(k, v)| has_call(k) || has_call(v)),
         ExprKind::StructLit(_, inits) => inits.iter().any(|i| has_call(&i.value)),
         ExprKind::Str(segs) => segs
             .iter()
-            .any(|s| matches!(s, StrSeg::Expr(x) if has_call(x))),
+            .any(|s| matches!(s, StrSeg::Expr(x) | StrSeg::Fmt(x, _) if has_call(x))),
         // no `_` arm: a new expression kind must be classified here (R29)
         ExprKind::Int(_)
         | ExprKind::Float(_)
+        | ExprKind::Rune(_)
         | ExprKind::Bool(_)
         | ExprKind::Ident(_)
         | ExprKind::SelfRef
@@ -808,6 +823,8 @@ impl<'a> Emitter<'a> {
                     self.structs.insert(&s.name, s);
                 }
                 Decl::Enum(_) | Decl::Test(_) => {}
+                // a program with `use` is part 2c, which `emit` rejects first
+                Decl::Use(_) => unreachable!("part 2c is rejected before emitting"),
             }
         }
         c.push_str(&self.type_defs());
@@ -1235,6 +1252,7 @@ impl<'a> Emitter<'a> {
         match p {
             Pattern::Int(v, _) => format!("{s} == {}", c_int(*v as i64)),
             Pattern::Str(t, _) => format!("dif_eq({s}, {})", self.str_lit(t)),
+            Pattern::Rune(..) => unreachable!("part 2c is rejected before emitting"),
             Pattern::Name(n, _) => match self.consts.get(n.as_str()) {
                 Some(Ty::Str) => format!("dif_eq({s}, d_{n}())"),
                 _ => format!("{s} == d_{n}()"),
@@ -1336,7 +1354,13 @@ impl<'a> Emitter<'a> {
             ExprKind::StructLit(name, inits) => self.struct_lit(name, inits),
             ExprKind::IfExpr(branches, last) => self.if_expr(self.ty(e), branches, last),
             ExprKind::Mut(x) => format!("(&{})", self.expr(x)),
-            ExprKind::Float(_) | ExprKind::Index(..) | ExprKind::Missing => "0".into(),
+            ExprKind::Missing => "0".into(),
+            // part 2c forms: `emit` rejects the program before it gets here
+            ExprKind::Float(_)
+            | ExprKind::Rune(_)
+            | ExprKind::Index(..)
+            | ExprKind::ListLit(_)
+            | ExprKind::MapLit(_) => unreachable!("part 2c is rejected before emitting"),
             ExprKind::NoneVal => format!("(({}){{0}})", self.c_ty(self.ty(e))),
             ExprKind::SomeVal(x) => match self.ty(e) {
                 t @ Ty::Opt(i) => {
@@ -1727,6 +1751,7 @@ impl<'a> Emitter<'a> {
                     let l = Self::lit(&format!("&{b}"), s);
                     parts.push(l.trim_end_matches(';').to_string());
                 }
+                StrSeg::Fmt(..) => unreachable!("part 2c is rejected before emitting"),
                 StrSeg::Expr(x) => {
                     let t = self.ty(x);
                     let v = self.expr(x);

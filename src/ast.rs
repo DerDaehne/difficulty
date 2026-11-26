@@ -220,7 +220,7 @@ pub enum ExprKind {
     /// The last field is the position of the operator.
     Binary(&'static str, Box<Expr>, Box<Expr>, Pos),
     Call(Box<Expr>, Vec<Expr>),
-    Index(Box<Expr>, Box<Expr>),
+    Index(Box<Expr>, Box<Expr>, Pos),
     Field(Box<Expr>, String),
     Paren(Box<Expr>),
     SelfRef,
