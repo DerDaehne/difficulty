@@ -1828,7 +1828,7 @@ Teil 2d legt fest, was zu M2 gehört: Literale und Blöcke an Aufrufen, Funktion
 
 **Literal.**
 
-- Ein Literal hat den Rückgabetyp vorn (R2), dann Parameter wie eine Funktion (ohne Funktionstypen unter ihnen) und einen Rumpf: `bool(Person p) { return p.age >= 18 }`. Es ist kein Wert, den man ablegen kann: es steht nur als Argument. **Erkennung:** Ein Argument ist ein Literal, wenn es mit einem `type` (R2) und `(` beginnt und danach eines von dreien folgt: `mut`, ein `type` und ein Name (`int x`, `mut int x`), oder `)` und `{` in derselben Zeile. `T(x)` (R31) hat dort einen Ausdruck, der nie so beginnt, und ist die Umwandlung; `f(a)(b)` und `x.y(z)` beginnen nicht mit einem `type` und `(`, weil ein Name oder `.` folgt, sind also Aufrufe.
+- Ein Literal hat den Rückgabetyp vorn (R2), dann Parameter wie eine Funktion (ohne Funktionstypen unter ihnen) und einen Rumpf: `bool(Person p) { return p.age >= 18 }`. Es ist kein Wert, den man ablegen kann: es steht nur als Argument. **Erkennung.** Ein Argument ist ein Literal, wenn es mit `X (` beginnt, direkt danach `mut` oder ein `type` mit Namen (`int x`, `mut int x`) steht oder die Klammer leer ist, und hinter der `)` ein `{` folgt. „Dieselbe Zeile“ heißt dabei die Zeile im Quelltext: in Klammern erzeugt der Lexer kein Zeilenende (§1.3), die Regel prüft die physische Zeile. Die Form entscheidet so: `mut` oder `type Name` nach der `(` ist nur bei einem Literal möglich (ein Argument ist ein Ausdruck, `int x` ist keiner); beginnt `X` mit `?`, `[` oder `map[` oder ist ein eingebauter Typname, ist es immer ein Literal. Nur `Name() { … }` mit einem Namen und leerer Klammer kann beides sein, ein Literal ohne Parameter mit dem Rückgabetyp `Name` oder ein Aufruf von `Name` mit Block-Argument. Das entscheidet der Checker über den Namen: benennt er einen Typ (`struct`, `enum`), ist es ein Literal, benennt er eine Funktion oder Methode, ein Aufruf mit Block. Ein Name ist nie beides (R4). `Name(x) { … }` mit Ausdrücken ist immer ein Aufruf mit Block, `T(x)` ohne `{` die Umwandlung (R31).
 - Sein Typ ist `R(T1, T2)`; er muss dem Funktionstyp des Parameters genau gleichen: Rückgabetyp, Parametertypen und `mut` (Namen zählen nicht). Sonst `R8` am Literal, Meldung `` expected bool(int), found int(int) ``, ohne Hinweis. In Meldungen stehen Funktionstypen so: `bool(int)`, `void(mut App, Msg)`, `int!ParseErr(int)`.
 - **Außerhalb eines Arguments** ist ein Literal `R26` an seinem ersten Zeichen, Meldung `` a function literal can only be an argument of a call ``, Hinweis `pass it directly as an argument of a call`; sein Rumpf wird dann nicht weiter geprüft. Das gilt für jede Stelle: Initialwert, Zuweisung, `return`, Operand, Listen- oder Struct-Literal, `_ =`.
 - Der Rumpf ist ein eigener Funktionsrumpf (R3, R8): `return` verlässt nur das Literal und liefert einen `R`; ein Literal mit Rückgabetyp endet auf jedem Weg mit `return` und Wert, sonst `R8` am ersten Zeichen des Literals, Meldung `` the literal does not return a value on every path ``, Hinweis `end it with return, e.g. return false` (wie bei Funktionen mit `0`, `false`, `""` oder `…`). `try` gilt für das Literal wie für eine Funktion (R12): es ist `R12`, wenn der Rückgabetyp `R` kein `T!E` oder `?T` ist; ein Fehler beendet nur das Literal, nicht die Funktion ringsum. `break` und `continue` sehen keine Schleife außerhalb des Literals: sie sind dort `R11` (`` `break` outside a loop ``), auch wenn das Literal in einer Schleife steht.
@@ -1846,7 +1846,7 @@ Teil 2d legt fest, was zu M2 gehört: Literale und Blöcke an Aufrufen, Funktion
 - Ein Block steht direkt hinter der `)` eines Aufrufs, mit dem `{` in derselben Zeile: `times(3) { … }`, `ui.tiles() { … }`, `str body = try net.retry(3) { … }`. Er ist ein Literal ohne Parameter und zugleich das **letzte Argument**: sein Typ ist der Typ des letzten Parameters der Funktion, der `R()` sein muss. Die Klammern bleiben, auch wenn sie leer sind. Ein Block steht nur hinter einer `)`; `a.b { … }` ist `S1`. Nach dem schließenden `}` endet der Ausdruck (die Kette `postfix`, §2); ein weiteres `.name` oder `(` ist `S1`.
 - Der Block zählt als Argument: hat der Aufruf dann zu viele, ist es `R8` (`` `times` takes 2 arguments, found 3 ``). Ist der letzte Parameter kein `R()` (ein Parameter anderen Typs oder ein Funktionstyp mit Parametern), ist es `R26` am `{`, Meldung `` `filter` cannot take a block: its last parameter has type bool(int) `` (bei `[]int.push` mit Typ `int`), Hinweis bei einem Funktionstyp `a block has no parameters; pass a literal instead`, sonst keiner; der Block wird dann nicht weiter geprüft. Typen im Block (`return`) prüft R8 mit dem `R` des Parameters.
 - Steht das `{` erst in der nächsten Zeile, ist das `R3` an der Stelle direkt hinter der `)`, Meldung `` the block argument of `times` must start on the same line ``, Hinweis: die Zeile mit `{` am Ende; der Block wird danach gelesen wie ein Block-Argument, es folgt keine Meldung über die Argumente.
-- **Kopfzeilen** (R3): im Kopf von `if`, `while`, `for` und `switch` beendet ein `{` außerhalb von Klammern den Kopf, wie beim Struct-Literal. Ein Literal steht in den Klammern seines Aufrufs und ist darum im Kopf überall erlaubt: `if xs.any(bool(int x) { return x > 1 }) {`. Ein Block-Argument im Kopf braucht Klammern um den ganzen Aufruf: `if (ready() { … }) {`; ohne sie ist das `{` der Rumpf, und der Aufruf hat ein Argument zu wenig (`R8`, Hinweis siehe Beispiel).
+- **Kopfzeilen** (R3): im Kopf von `if`, `while`, `for` und `switch` beendet ein `{` außerhalb von Klammern den Kopf, wie beim Struct-Literal. Ein Literal steht in den Klammern seines Aufrufs und ist darum im Kopf überall erlaubt: `if xs.any(bool(int x) { return x > 1 }) {`. Ein Block-Argument im Kopf braucht Klammern um den ganzen Aufruf: `if (ready() { … }) {`; ohne sie ist das `{` der Rumpf, und der Aufruf hat ein Argument zu wenig (`R8`). Der Hinweis `a block in a header needs parentheses around the call: if (ready() { … }) {` (mit dem Aufruf des Programms) steht, wenn dieser Aufruf unmittelbar vor dem `{` des Kopfes endet, außerhalb von Klammern steht und der letzte Parameter der Funktion ein Funktionstyp `R()` ohne Parameter ist, der das fehlende Argument wäre; sonst gibt es nur die Meldung über die Argumentzahl.
 - **Kanonisch.** Ein Literal ohne Parameter als letztes Argument ist dasselbe wie ein Block (`times(3, void() { … })` und `times(3) { … }`); der Compiler nimmt beides an, `dif fmt` schreibt den Block, in einer Kopfzeile dagegen das Literal (eine Regel ohne Tiefe: der Kopf enthält nie einen Block). Klammern, die dadurch nichts mehr bewirken, entfernt `dif fmt` (R3); notwendige bleiben, es entfernt nie nur Klammern, die ein Struct- oder Map-Literal oder einen Block im Kopf schützen. Ein Rumpf aus genau einer Anweisung ohne eigenen Block steht einzeilig, wenn die Zeile dann höchstens 100 Zeichen lang ist, sonst mehrzeilig; mehrere Anweisungen oder eine Anweisung mit eigenem Block (`if`, `for` …) stehen mehrzeilig, ein Block immer.
 
 **Umgebung, Lesen und Ändern (R6).**
@@ -1977,6 +1977,31 @@ void main() {
 ```
 main.dif:6:9: error[R26]: `is_even` is a function and can only be called or passed as an argument
 ```
+
+Beide Formen von `Name() { … }` (Literal mit dem Typ `Shape`, Aufruf der Funktion `one` mit Block):
+
+```dif
+enum Shape {
+    Dot
+    Box(int size)
+}
+
+int one(void() body) {
+    body()
+    return 1
+}
+
+int plus(int n) {
+    return n + 1
+}
+
+void main() {
+    print([1, 2].map(Shape(int n) { return Shape.Box(n) }))
+    print(plus(one() { print("hi") }))
+}
+```
+
+Ausgabe: `[Shape.Box(1), Shape.Box(2)]`, `hi`, `2`.
 
 Ein Funktionstyp mit `mut`: das Literal trägt es ebenfalls, der Aufruf `f(mut x)` ändert `x`:
 
