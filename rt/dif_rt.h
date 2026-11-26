@@ -811,4 +811,211 @@ DIF_FN dif_list *dif_str_lines(dif_str s) {
     return r;
 }
 
+// ---------------------------------------------------------------------------------------
+// 8. Maps `map[K]V` (R30): `dif_map *`, NULL is the empty map. Entries lie in insertion
+//    order in a dense array `{hash, key, value}`; a removed entry stays as a gap (hash 0)
+//    until the next rebuild. An open-addressing index (int32 entry numbers) finds a key.
+//    Copy-on-write like the list; keys and values are moved in (`set` takes both).
+// ---------------------------------------------------------------------------------------
+
+typedef struct { int64_t rc, len, cnt, cap, icap; int32_t *idx; } dif_map; // entries follow
+#define DIF_LIVE (1ULL << 63)
+DIF_FN size_t dif_map_voff(const dif_ty *kt) { return (8 + kt->size + 7) & ~(size_t)7; }
+DIF_FN size_t dif_map_stride(const dif_ty *kt, const dif_ty *vt) { return (dif_map_voff(kt) + vt->size + 7) & ~(size_t)7; }
+DIF_FN char *dif_map_ent(const dif_ty *kt, const dif_ty *vt, const dif_map *m, int64_t i) {
+    return (char *)(m + 1) + (size_t)i * dif_map_stride(kt, vt);
+}
+DIF_FN int64_t dif_map_len(const dif_map *m) { return m ? m->len : 0; }
+DIF_FN int64_t dif_map_cnt(const dif_map *m) { return m ? m->cnt : 0; } // entry slots, see key_at
+DIF_FN dif_map *dif_map_inc(dif_map *m) {
+    if (m) m->rc++;
+    return m;
+}
+// entry i (0 <= i < cnt) of an iteration: NULL for a removed entry
+DIF_FN const void *dif_map_key_at(const dif_ty *kt, const dif_ty *vt, const dif_map *m, int64_t i) {
+    char *e = dif_map_ent(kt, vt, m, i);
+    return *(uint64_t *)e ? e + 8 : NULL;
+}
+DIF_FN const void *dif_map_val_at(const dif_ty *kt, const dif_ty *vt, const dif_map *m, int64_t i) {
+    return dif_map_ent(kt, vt, m, i) + dif_map_voff(kt);
+}
+DIF_FN void dif_map_free(const dif_ty *kt, const dif_ty *vt, dif_map *m, bool release) {
+    for (int64_t i = 0; release && i < m->cnt; i++) {
+        char *e = dif_map_ent(kt, vt, m, i);
+        if (*(uint64_t *)e) {
+            dif_dec(kt, e + 8);
+            dif_dec(vt, e + dif_map_voff(kt));
+        }
+    }
+    free(m->idx);
+    free(m);
+}
+DIF_FN void dif_map_dec(const dif_ty *kt, const dif_ty *vt, dif_map *m) {
+    if (m && --m->rc == 0) dif_map_free(kt, vt, m, true);
+}
+DIF_FN uint64_t dif_map_hash_key(const dif_ty *kt, const void *k, int l, int c) {
+    dif_nan_seen = 0;
+    uint64_t h = kt->hash(kt, k);
+    if (dif_nan_seen) dif_panic("NaN cannot be a map key", l, c);
+    return h | DIF_LIVE;
+}
+DIF_FN void dif_map_link(dif_map *m, int64_t e, uint64_t h) {
+    uint64_t mask = (uint64_t)m->icap - 1, i = h & mask;
+    while (m->idx[i] >= 0) i = (i + 1) & mask;
+    m->idx[i] = (int32_t)e;
+}
+// entry number of key k, or -1
+DIF_FN int64_t dif_map_find(const dif_ty *kt, const dif_ty *vt, const dif_map *m, const void *k, uint64_t h) {
+    if (!m || m->len == 0) return -1;
+    uint64_t mask = (uint64_t)m->icap - 1, i = h & mask;
+    for (int32_t e; (e = m->idx[i]) >= 0; i = (i + 1) & mask) {
+        char *p = dif_map_ent(kt, vt, m, e);
+        if (*(uint64_t *)p == h && kt->eq(kt, p + 8, k)) return e;
+    }
+    return -1;
+}
+// new block with room for `cap` entries holding the live entries of `old`: moved if `old`
+// is released afterwards (unshared), copied (counters raised) otherwise
+DIF_FN dif_map *dif_map_rebuild(const dif_ty *kt, const dif_ty *vt, dif_map *old, int64_t cap, bool copy) {
+    size_t stride = dif_map_stride(kt, vt);
+    if (cap < 4) cap = 4;
+    if (cap > INT32_MAX / 2) dif_oom();
+    dif_map *m = dif_alloc(dif_bytes(cap, stride, sizeof(dif_map)));
+    m->rc = 1;
+    m->len = m->cnt = 0;
+    m->cap = cap;
+    for (m->icap = 8; m->icap < 2 * cap; m->icap *= 2) {}
+    m->idx = dif_alloc(dif_bytes(m->icap, sizeof(int32_t), 0));
+    memset(m->idx, 0xff, (size_t)m->icap * sizeof(int32_t));
+    for (int64_t i = 0; old && i < old->cnt; i++) {
+        char *e = dif_map_ent(kt, vt, old, i);
+        if (!*(uint64_t *)e) continue;
+        memcpy(dif_map_ent(kt, vt, m, m->cnt), e, stride);
+        if (copy) {
+            dif_inc(kt, e + 8);
+            dif_inc(vt, e + dif_map_voff(kt));
+        }
+        dif_map_link(m, m->cnt++, *(uint64_t *)e);
+        m->len++;
+    }
+    return m;
+}
+// make *mp unshared with room for `extra` more entries
+DIF_FN void dif_map_own(const dif_ty *kt, const dif_ty *vt, dif_map **mp, int64_t extra) {
+    dif_map *m = *mp;
+    if (!m) {
+        *mp = dif_map_rebuild(kt, vt, NULL, 4, false);
+    } else if (m->rc > 1) {
+        *mp = dif_map_rebuild(kt, vt, m, m->len + extra, true);
+        m->rc--;
+    } else if (m->cnt + extra > m->cap) {
+        *mp = dif_map_rebuild(kt, vt, m, (m->len + extra) * 2, false);
+        dif_map_free(kt, vt, m, false);
+    }
+}
+// m[k]: borrowed pointer to the value or NULL
+DIF_FN const void *dif_map_get(const dif_ty *kt, const dif_ty *vt, const dif_map *m, const void *k, int l, int c) {
+    int64_t e = dif_map_find(kt, vt, m, k, dif_map_hash_key(kt, k, l, c));
+    return e < 0 ? NULL : dif_map_ent(kt, vt, m, e) + dif_map_voff(kt);
+}
+DIF_FN bool dif_map_has(const dif_ty *kt, const dif_ty *vt, const dif_map *m, const void *k, int l, int c) {
+    return dif_map_get(kt, vt, m, k, l, c) != NULL;
+}
+// m[k] = v: takes k and v. An existing key keeps its place.
+DIF_FN void dif_map_set(const dif_ty *kt, const dif_ty *vt, dif_map **mp, const void *k, const void *v, int l, int c) {
+    uint64_t h = dif_map_hash_key(kt, k, l, c);
+    dif_map_own(kt, vt, mp, 1);
+    dif_map *m = *mp;
+    int64_t e = dif_map_find(kt, vt, m, k, h);
+    if (e >= 0) {
+        char *p = dif_map_ent(kt, vt, m, e);
+        dif_dec(kt, (void *)k); // the stored key stays
+        dif_dec(vt, p + dif_map_voff(kt));
+        memcpy(p + dif_map_voff(kt), v, vt->size);
+        return;
+    }
+    char *p = dif_map_ent(kt, vt, m, m->cnt);
+    memcpy(p, &h, 8);
+    memcpy(p + 8, k, kt->size);
+    memcpy(p + dif_map_voff(kt), v, vt->size);
+    dif_map_link(m, m->cnt++, h);
+    m->len++;
+}
+// remove(k): true if the key was there
+DIF_FN bool dif_map_remove(const dif_ty *kt, const dif_ty *vt, dif_map **mp, const void *k, int l, int c) {
+    uint64_t h = dif_map_hash_key(kt, k, l, c);
+    if (dif_map_find(kt, vt, *mp, k, h) < 0) return false;
+    dif_map_own(kt, vt, mp, 0);
+    dif_map *m = *mp;
+    char *p = dif_map_ent(kt, vt, m, dif_map_find(kt, vt, m, k, h));
+    dif_dec(kt, p + 8);
+    dif_dec(vt, p + dif_map_voff(kt));
+    memset(p, 0, 8);
+    m->len--;
+    return true;
+}
+DIF_FN dif_list *dif_map_keys(const dif_ty *kt, const dif_ty *vt, const dif_map *m) {
+    dif_list *r = NULL;
+    for (int64_t i = 0; m && i < m->cnt; i++) {
+        const void *k = dif_map_key_at(kt, vt, m, i);
+        if (k) {
+            dif_inc(kt, k);
+            dif_list_push(kt, &r, k);
+        }
+    }
+    return r;
+}
+DIF_FN dif_list *dif_map_values(const dif_ty *kt, const dif_ty *vt, const dif_map *m) {
+    dif_list *r = NULL;
+    for (int64_t i = 0; m && i < m->cnt; i++) {
+        if (dif_map_key_at(kt, vt, m, i)) {
+            const void *v = dif_map_val_at(kt, vt, m, i);
+            dif_inc(vt, v);
+            dif_list_push(vt, &r, v);
+        }
+    }
+    return r;
+}
+// equal if the same keys have equal values, in any order
+DIF_FN bool dif_map_eq(const dif_ty *kt, const dif_ty *vt, const dif_map *a, const dif_map *b) {
+    if (dif_map_len(a) != dif_map_len(b)) return false;
+    for (int64_t i = 0; a && i < a->cnt; i++) {
+        char *e = dif_map_ent(kt, vt, a, i);
+        if (!*(uint64_t *)e) continue;
+        int64_t j = dif_map_find(kt, vt, b, e + 8, *(uint64_t *)e);
+        if (j < 0 || !vt->eq(vt, e + dif_map_voff(kt), dif_map_ent(kt, vt, b, j) + dif_map_voff(kt))) return false;
+    }
+    return true;
+}
+DIF_FN void dif_map_put(const dif_ty *kt, const dif_ty *vt, dif_buf *b, const dif_map *m) {
+    dif_put(b, "{", 1);
+    bool first = true;
+    for (int64_t i = 0; m && i < m->cnt; i++) {
+        const void *k = dif_map_key_at(kt, vt, m, i);
+        if (!k) continue;
+        if (!first) dif_put(b, ", ", 2);
+        first = false;
+        kt->put(kt, b, k);
+        dif_put(b, ": ", 2);
+        vt->put(vt, b, dif_map_val_at(kt, vt, m, i));
+    }
+    dif_put(b, "}", 1);
+}
+DIF_FN void dif_map_inc_t(const dif_ty *t, const void *p) { (void)t; dif_map_inc(*(dif_map *const *)p); }
+DIF_FN void dif_map_dec_t(const dif_ty *t, void *p) { dif_map_dec(t->key, t->elem, *(dif_map **)p); }
+DIF_FN bool dif_map_eq_t(const dif_ty *t, const void *a, const void *b) {
+    return dif_map_eq(t->key, t->elem, *(dif_map *const *)a, *(dif_map *const *)b);
+}
+DIF_FN void dif_map_put_t(const dif_ty *t, dif_buf *b, const void *p) { dif_map_put(t->key, t->elem, b, *(dif_map *const *)p); }
+DIF_FN uint64_t dif_map_hash_t(const dif_ty *t, const void *p) {
+    const dif_map *m = *(dif_map *const *)p;
+    uint64_t h = (uint64_t)dif_map_len(m); // the order of entries does not count
+    for (int64_t i = 0; m && i < m->cnt; i++)
+        if (dif_map_key_at(t->key, t->elem, m, i))
+            h += dif_hash_mix(t->key->hash(t->key, dif_map_key_at(t->key, t->elem, m, i)),
+                              t->elem->hash(t->elem, dif_map_val_at(t->key, t->elem, m, i)));
+    return h;
+}
+#define DIF_MAP_TY(K, V) {sizeof(dif_map *), (V), (K), 0, dif_map_inc_t, dif_map_dec_t, dif_map_eq_t, dif_map_put_t, NULL, dif_map_hash_t}
+
 #endif // DIF_RT_H
