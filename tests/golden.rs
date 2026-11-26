@@ -7,16 +7,28 @@ use std::process::Command;
 
 const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
+/// A fresh directory for one build (tests run in parallel and may use the same names).
+fn unique_dir(name: &str) -> std::path::PathBuf {
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let k = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("dif-golden-{}-{k}-{name}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
 /// Builds and runs a program; returns (stdout, stderr, exit code).
 fn run(name: &str, src: &str) -> (String, String, i32) {
+    run_in(name, src, std::env::var_os("DIF_SAN").is_some())
+}
+
+/// Like `run`; `san` builds the program with AddressSanitizer and UBSan, leaks included.
+fn run_in(name: &str, src: &str, san: bool) -> (String, String, i32) {
     let c = dif::compile("main.dif", src.as_bytes()).unwrap_or_else(|d| panic!("{name}: {d:#?}"));
-    let dir = std::env::temp_dir().join(format!("dif-golden-{}-{name}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = unique_dir(name);
     let (c_file, exe) = (dir.join("main.c"), dir.join("main"));
     std::fs::write(&c_file, c).unwrap();
     let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
-    // `DIF_SAN=1`: every program runs under AddressSanitizer and UBSan, leaks included
-    let san: &[&str] = if std::env::var_os("DIF_SAN").is_some() {
+    let san: &[&str] = if san {
         &[
             "-fsanitize=address,undefined",
             "-fno-sanitize-recover=undefined",
@@ -51,8 +63,7 @@ fn run(name: &str, src: &str) -> (String, String, i32) {
 
 /// `dif test main.dif [--json]` in a fresh directory; returns (stdout, exit code).
 fn dif_test(name: &str, src: &str, json: bool) -> (String, i32) {
-    let dir = std::env::temp_dir().join(format!("dif-golden-{}-{name}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = unique_dir(name);
     std::fs::write(dir.join("main.dif"), src).unwrap();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_dif"));
     cmd.current_dir(&dir).args(["test", "main.dif"]);
@@ -79,13 +90,23 @@ fn files(dir: &str) -> Vec<std::path::PathBuf> {
 
 #[test]
 fn ok_programs_print_their_output() {
+    ok_programs(false);
+}
+
+/// The same programs under AddressSanitizer and UBSan: no leak, no undefined behaviour.
+#[test]
+fn ok_programs_leak_nothing() {
+    ok_programs(true);
+}
+
+fn ok_programs(san: bool) {
     let all = files("tests/ok");
     assert!(all.len() >= 10);
     for f in all {
         let name = f.file_stem().unwrap().to_string_lossy().into_owned();
         let src = std::fs::read_to_string(&f).unwrap();
         let want = std::fs::read_to_string(f.with_extension("out")).unwrap();
-        assert_eq!(run(&name, &src), (want, String::new(), 0), "{name}");
+        assert_eq!(run_in(&name, &src, san), (want, String::new(), 0), "{name}");
     }
 }
 
@@ -110,7 +131,14 @@ fn err_programs_give_their_diagnostic() {
 
 #[test]
 fn spec_examples() {
-    let n = doc_examples("docs/spec.md", "spec");
+    let n = doc_examples("docs/spec.md", "spec", false);
+    assert!(n >= 20, "only {n} examples found");
+}
+
+/// Every example of the spec once more under AddressSanitizer and UBSan.
+#[test]
+fn spec_examples_leak_nothing() {
+    let n = doc_examples("docs/spec.md", "sanspec", true);
     assert!(n >= 20, "only {n} examples found");
 }
 
@@ -123,7 +151,7 @@ fn llms_txt() {
         size <= 16 * 1024,
         "llms.txt has {size} bytes, more than 16 KB"
     );
-    assert!(doc_examples("llms.txt", "llms") >= 2);
+    assert!(doc_examples("llms.txt", "llms", false) >= 2);
 }
 
 #[test]
@@ -143,7 +171,7 @@ const PENDING_2D: &[&str] = &["### R13, Teil 2d", "### R26 ", "### 4.7 "];
 /// Every ```dif block of a document, by kind: valid module, snippet (inside
 /// `void main()`), `error Rn` (exactly that diagnostic), `panic "message"`.
 /// Returns the number of examples checked.
-fn doc_examples(doc: &str, tag: &str) -> usize {
+fn doc_examples(doc: &str, tag: &str, san: bool) -> usize {
     let spec = std::fs::read_to_string(Path::new(ROOT).join(doc)).unwrap();
     let lines: Vec<&str> = spec.lines().collect();
     let mut i = 0;
@@ -207,7 +235,7 @@ fn doc_examples(doc: &str, tag: &str) -> usize {
             continue;
         }
         if let Some(msg) = kind.strip_prefix("panic ") {
-            let (_, err, code) = run(&format!("{tag}{n}"), &src);
+            let (_, err, code) = run_in(&format!("{tag}{n}"), &src, san);
             assert_eq!(code, 2, "spec example {n}");
             assert!(
                 err.starts_with(&format!("panic: {}", msg.trim_matches('"'))),
@@ -215,7 +243,7 @@ fn doc_examples(doc: &str, tag: &str) -> usize {
             );
         } else if let Some(text) = kind.strip_prefix("fails ") {
             // `void!E main()` ends with `error: <text>` on stderr and exit code 1 (R12)
-            let (_, err, code) = run(&format!("{tag}{n}"), &src);
+            let (_, err, code) = run_in(&format!("{tag}{n}"), &src, san);
             assert_eq!(code, 1, "spec example {n}");
             assert_eq!(
                 err,
@@ -242,7 +270,7 @@ fn doc_examples(doc: &str, tag: &str) -> usize {
         } else if kind.is_empty() || kind.starts_with("snippet") {
             // valid examples also build and run (modules without main only check)
             if src.contains("void main()") {
-                let (out, err, code) = run(&format!("{tag}{n}"), &src);
+                let (out, err, code) = run_in(&format!("{tag}{n}"), &src, san);
                 assert_eq!((err.as_str(), code), ("", 0), "{doc} example {n}");
                 // `Ausgabe: `a`, `b`.` (or `Output: …`) after the example: one printed line per item
                 if let Some(l) = lines

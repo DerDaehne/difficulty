@@ -33,6 +33,14 @@ some(300)
 none
 none
 none
+some(300)
+some(300)
+some(300)
+none
+some(-70000)
+none
+none
+some(4000000000)
 65
 -128
 300
