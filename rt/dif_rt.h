@@ -1031,6 +1031,7 @@ DIF_FN bool dif_rune_ok(int64_t v) { return v >= 0 && v <= 0x10FFFF && !(v >= 0x
 DIF_FN int dif_utf8_decode(const char *s, int64_t n, uint32_t *cp) {
     const unsigned char *p = (const unsigned char *)s;
     uint32_t c = p[0], v;
+    *cp = 0;
     if (c < 0x80) return *cp = c, 1;
     int len = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : 2;
     if (c < 0xC2 || c > 0xF4 || n < len) return 0;
