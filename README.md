@@ -251,7 +251,7 @@ test result: 1 passed, 1 failed
 ### Klein und nativ
 
 Ein Programm wird über C11 mit gcc oder clang übersetzt. Es braucht keine VM und keinen Garbage
-Collector, „Hallo, Welt“ ist gestrippt 14 KB groß. Speicher verwaltet difficulty über Werte,
+Collector, „Hallo, Welt“ ist gestrippt 14 KB groß (dynamisch gegen die libc gelinkt). Speicher verwaltet difficulty über Werte,
 Referenzzählung und Copy-on-Write ([Messungen](docs/measurements.md)).
 
 ```sh
