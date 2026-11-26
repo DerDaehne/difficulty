@@ -124,7 +124,7 @@ static void test_lines(void) {
     line_is("");
     eof();
     FEED("x\r");
-    line_is("x\r"); // a lone \r at the end stays
+    line_is("x"); // a \r before the end of the input goes too (a last line without \n)
     FEED("a\rb\r\r\n\xc3\xa4\n");
     line_is("a\rb\r");
     line_is("\xc3\xa4");

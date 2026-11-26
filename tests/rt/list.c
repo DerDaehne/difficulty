@@ -357,7 +357,7 @@ static void test_split_lines_join(void) {
     EXPECT_TEXT(&dif_ty_str, p, "[\"\"]");
     dif_list_dec(&dif_ty_str, p);
     p = dif_str_lines(DIF_S("a\rb\r"));
-    EXPECT_TEXT(&dif_ty_str, p, "[\"a\\rb\\r\"]"); // a lone \r stays
+    EXPECT_TEXT(&dif_ty_str, p, "[\"a\\rb\"]"); // only a \r at the end of a line goes, also of the last one
     dif_list_dec(&dif_ty_str, p);
     p = dif_str_lines(DIF_S("x\n\n"));
     EXPECT_TEXT(&dif_ty_str, p, "[\"x\", \"\"]");

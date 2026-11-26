@@ -107,8 +107,8 @@ impl<'a> Emitter<'a> {
     pub(super) fn copy(&self, t: Ty, v: &str) -> String {
         match t {
             Ty::Str => format!("dif_str_inc({v})"),
-            Ty::List(_) => format!("dif_list_inc({v})"),
-            Ty::Map(_) => format!("dif_map_inc({v})"),
+            Ty::List(_) => format!("dif_list_inc((dif_list *)({v}))"),
+            Ty::Map(_) => format!("dif_map_inc((dif_map *)({v}))"),
             t if self.managed(t) => format!(
                 "({{ {} c_ = ({v}); dif_inc(&{}, &c_); c_; }})",
                 self.c_ty(t),
