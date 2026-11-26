@@ -409,8 +409,9 @@ impl<'a> Parser<'a> {
         self.type_end(0).unwrap_or(0)
     }
 
-    fn type_end(&self, mut k: usize) -> Option<usize> {
-        while k < 2 && matches!(self.peek_n(k), Tok::Op("?" | "??")) {
+    fn type_end(&self, start: usize) -> Option<usize> {
+        let mut k = start;
+        while k < start + 2 && matches!(self.peek_n(k), Tok::Op("?" | "??")) {
             k += 1;
         }
         k = self.base_end(k)?;
@@ -720,11 +721,15 @@ impl<'a> Parser<'a> {
         if self.is_op("(") {
             let open = self.pos();
             self.bump();
-            name.push('(');
-            if !self.type_top(name, nested) || !self.close(open, ")") {
+            let mut inner = String::new();
+            if !self.type_top(&mut inner, nested) || !self.close(open, ")") {
                 return false;
             }
-            name.push(')');
+            // only `!E` needs the parentheses; `[](?int)` is `[]?int`
+            if inner.contains('!') {
+                inner = format!("({inner})");
+            }
+            name.push_str(&inner);
             return true;
         }
         if self.is_op("?") || self.is_op("??") {

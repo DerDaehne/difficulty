@@ -60,6 +60,13 @@ fn types_of_part_2c() {
 }
 
 #[test]
+fn redundant_parens_in_types() {
+    ok(&in_main("[](?int) a = []\n[]?int b = a\na = b\nmap[str](?int) c = {}\nmap[(str)]([]int) d = {}\n[3]([]int) e = [[1], [2], [3]]\nprint(\"{a}{b}{c}{d}{e}\")"));
+    // nested optionals stay S1, parenthesized or not
+    assert_eq!(diags("void f(?(?int) a) {\n}\n").len(), 1);
+}
+
+#[test]
 fn literals() {
     ok(&in_main("rune a = 'a'\nrune b = '\\n'\nrune c = '\\''\nrune d = '\\u{1F600}'\nrune e = 'é'\nrune f = '\"'\nprint(\"{a}{b}{c}{d}{e}{f}\")"));
     ok(&in_main("f64 a = 1.5\nf64 b = 1e3\nf64 c = 0.0\nf64 d = 5\nf64 e = 1_000.5e-2\nprint(\"{a}{b}{c}{d}{e}\")"));
