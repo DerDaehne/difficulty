@@ -9,6 +9,8 @@ pub enum Tok {
     Kw(&'static str),
     Int(u128),
     Float(String),
+    /// A rune literal: one Unicode code point (§1.4).
+    Rune(u32),
     Str(Vec<StrPart>),
     Op(&'static str),
     Semi,
@@ -21,6 +23,15 @@ pub enum StrPart {
     Lit(String),
     /// Tokens of an interpolation `{expr}`, ending with `Eof`.
     Expr(Vec<Token>),
+    /// `{expr:format}`.
+    Fmt(Vec<Token>, Fmt),
+}
+
+/// The format of an interpolation (§1.4): `g` or `.Nf` with `N` up to 20.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Fmt {
+    G,
+    Fixed(u8),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -183,6 +194,7 @@ impl<'a> Lexer<'a> {
                 }
                 '/' if self.peek_at(1) == Some('*') => self.block_comment(),
                 '"' => self.string(),
+                '\'' => self.rune(),
                 '0'..='9' => self.number(),
                 c if c.is_alphabetic() || c == '_' => self.ident(),
                 ';' => {
@@ -374,6 +386,14 @@ impl<'a> Lexer<'a> {
         if self.bad_tail(p, "decimal") {
             return;
         }
+        if self.peek() == Some('.')
+            && matches!(self.peek_at(1), Some(c) if c.is_alphabetic() || c == '_')
+        {
+            let raw: String = self.chars[start..self.i].iter().map(|&(_, c)| c).collect();
+            let hint = format!("put the number in parentheses: ({raw}).abs()");
+            let msg = "a method on a number literal needs parentheses";
+            self.err("L8", p, msg, Some(&hint));
+        }
         if float {
             self.push(Tok::Float(text), p);
             return;
@@ -478,8 +498,10 @@ impl<'a> Lexer<'a> {
                     if !lit.is_empty() {
                         parts.push(StrPart::Lit(std::mem::take(&mut lit)));
                     }
-                    if let Some(toks) = self.interpolation() {
-                        parts.push(StrPart::Expr(toks));
+                    match self.interpolation() {
+                        Some((toks, Some(f))) => parts.push(StrPart::Fmt(toks, f)),
+                        Some((toks, None)) => parts.push(StrPart::Expr(toks)),
+                        None => {}
                     }
                 }
                 Some('}') => {
@@ -504,6 +526,47 @@ impl<'a> Lexer<'a> {
         self.push(Tok::Str(parts), p);
     }
 
+    /// `'a'`, `'\n'`, `'\u{1F600}'`: one code point (§1.4, L9).
+    fn rune(&mut self) {
+        let p = self.pos();
+        self.adv();
+        let mut lit = String::new();
+        let mut empty = false;
+        match self.peek() {
+            None | Some('\n') => {}
+            Some('\'') => empty = true,
+            Some('\\') => self.escape(&mut lit),
+            Some(c) => {
+                lit.push(c);
+                self.adv();
+            }
+        }
+        if self.peek() == Some('\'') {
+            self.adv();
+            if empty {
+                let hint = "write a character between the quotes: 'a'";
+                let msg = "a rune literal holds exactly one character";
+                self.err("L9", p, msg, Some(hint));
+            }
+        } else if self.rest_of_line_has('\'') {
+            while self.peek() != Some('\'') {
+                self.adv();
+            }
+            self.adv();
+            let hint = "use a string for more than one character: \"ab\"";
+            let msg = "a rune literal holds exactly one character";
+            self.err("L9", p, msg, Some(hint));
+        } else {
+            while !matches!(self.peek(), None | Some('\n')) {
+                self.adv();
+            }
+            let msg = "rune literal is not closed";
+            self.err("L9", p, msg, Some("add ' at the end"));
+        }
+        let v = lit.chars().next().map_or(0, |c| c as u32);
+        self.push(Tok::Rune(v), p);
+    }
+
     fn escape(&mut self, lit: &mut String) {
         let p = self.pos();
         self.adv();
@@ -512,7 +575,7 @@ impl<'a> Lexer<'a> {
             Some('t') => '\t',
             Some('r') => '\r',
             Some('0') => '\0',
-            Some(c @ ('\\' | '"' | '{' | '}')) => c,
+            Some(c @ ('\\' | '"' | '\'' | '{' | '}')) => c,
             Some('u') if self.peek_at(1) == Some('{') => {
                 self.adv();
                 self.adv();
@@ -526,8 +589,7 @@ impl<'a> Lexer<'a> {
                     match u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
                         Some(c) => lit.push(c),
                         None => {
-                            let msg = format!("`\\u{{{hex}}}` is not a valid character");
-                            self.err("L6", p, msg, None);
+                            self.err("L6", p, "not a Unicode character", None);
                         }
                     }
                 } else {
@@ -552,7 +614,7 @@ impl<'a> Lexer<'a> {
                     "L6",
                     p,
                     "unknown escape sequence",
-                    Some("known escapes: \\n \\t \\r \\\\ \\\" \\{ \\} \\0 \\u{…}"),
+                    Some("known escapes: \\n \\t \\r \\\\ \\\" \\' \\{ \\} \\0 \\u{…}"),
                 );
                 return;
             }
@@ -562,7 +624,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Lexes `{expr}` into its own token list (§1.4).
-    fn interpolation(&mut self) -> Option<Vec<Token>> {
+    fn interpolation(&mut self) -> Option<(Vec<Token>, Option<Fmt>)> {
         let open = self.pos();
         self.adv();
         let start = self.pos();
@@ -604,14 +666,29 @@ impl<'a> Lexer<'a> {
         let b = self.chars[self.i].0;
         let mut text = &self.src[a..b];
         self.adv();
+        let mut fmt = None;
         if let Some(k) = text.find(':') {
             let q = Pos {
                 line: start.line,
-                col: start.col + text[..k].chars().count() as u32,
-                offset: start.offset + k as u32,
+                col: start.col + text[..k].chars().count() as u32 + 1,
+                offset: start.offset + k as u32 + 1,
             };
-            let msg = "format specifications like `{x:.2f}` are not available yet";
-            self.err("S1", q, msg, None);
+            let spec = &text[k + 1..];
+            let digits = spec.strip_prefix('.').and_then(|r| r.strip_suffix('f'));
+            match (spec, digits) {
+                ("g", _) => fmt = Some(Fmt::G),
+                (_, Some(d)) if !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()) => {
+                    match d.parse::<u8>().ok().filter(|&n| n <= 20) {
+                        Some(n) => fmt = Some(Fmt::Fixed(n)),
+                        None => self.err("S1", q, "precision at most 20", None),
+                    }
+                }
+                _ => {
+                    let msg = format!("unknown format `{spec}`");
+                    let hint = "formats are g and .Nf, e.g. {x:.2f}";
+                    self.err("S1", q, msg, Some(hint));
+                }
+            }
             text = &text[..k];
             if text.trim().is_empty() {
                 return None;
@@ -629,7 +706,7 @@ impl<'a> Lexer<'a> {
         let mut sub = Lexer::new(text, start, true);
         sub.run();
         self.diags.extend(sub.diags);
-        Some(sub.toks)
+        Some((sub.toks, fmt))
     }
 
     fn op(&mut self) {

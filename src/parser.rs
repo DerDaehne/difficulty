@@ -38,6 +38,9 @@ const FOREIGN_FUNC: &[&str] = &["def", "fn", "function", "func"];
 
 const FOREIGN_VAR: &[&str] = &["var", "let", "auto"];
 
+/// Standard modules: `io.IoErr` is a type name with a dot (R16).
+const MODULES: &[&str] = &["io", "os"];
+
 fn level(op: &str) -> Option<u8> {
     Some(match op {
         "??" => 1,
@@ -400,21 +403,63 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Number of tokens of a type written here (`T`, `?T`, `T!E`, `?T!E`), 0 if none.
-    /// Only looks; `type_ref` reads (and reports malformed types).
+    /// Number of tokens of a type written here (`T`, `?T`, `T!E`, `[]T`, `[N]T`,
+    /// `map[K]V`, …), 0 if none. Only looks; `type_ref` reads (and reports malformed types).
     fn type_len(&self) -> usize {
-        let mut k = 0;
+        self.type_end(0).unwrap_or(0)
+    }
+
+    fn type_end(&self, mut k: usize) -> Option<usize> {
         while k < 2 && matches!(self.peek_n(k), Tok::Op("?" | "??")) {
             k += 1;
         }
-        if !matches!(self.peek_n(k), Tok::Ident(_) | Tok::Kw("void")) {
-            return 0;
+        k = self.base_end(k)?;
+        while *self.peek_n(k) == Tok::Op("!") {
+            match self.base_end(k + 1) {
+                Some(e) => k = e,
+                None => break,
+            }
         }
-        k += 1;
-        while *self.peek_n(k) == Tok::Op("!") && matches!(self.peek_n(k + 1), Tok::Ident(_)) {
-            k += 2;
+        Some(k)
+    }
+
+    fn base_end(&self, k: usize) -> Option<usize> {
+        match self.peek_n(k) {
+            Tok::Op("[") => {
+                let mut j = k + 1;
+                if matches!(self.peek_n(j), Tok::Int(_) | Tok::Ident(_)) {
+                    j += 1;
+                }
+                if *self.peek_n(j) != Tok::Op("]") {
+                    return None;
+                }
+                self.elem_end(j + 1)
+            }
+            Tok::Ident(m) if m == "map" && *self.peek_n(k + 1) == Tok::Op("[") => {
+                let j = self.elem_end(k + 2)?;
+                if *self.peek_n(j) != Tok::Op("]") {
+                    return None;
+                }
+                self.elem_end(j + 1)
+            }
+            Tok::Ident(m) if MODULES.contains(&m.as_str()) && self.qualified_at(k) => Some(k + 3),
+            Tok::Ident(_) | Tok::Kw("void") => Some(k + 1),
+            _ => None,
         }
-        k
+    }
+
+    fn elem_end(&self, k: usize) -> Option<usize> {
+        if *self.peek_n(k) == Tok::Op("(") {
+            let j = self.type_end(k + 1)?;
+            return (*self.peek_n(j) == Tok::Op(")")).then_some(j + 1);
+        }
+        let k = if matches!(self.peek_n(k), Tok::Op("?")) { k + 1 } else { k };
+        self.base_end(k)
+    }
+
+    /// `io.IoErr`: a module name, a dot and a name.
+    fn qualified_at(&self, k: usize) -> bool {
+        *self.peek_n(k + 1) == Tok::Op(".") && matches!(self.peek_n(k + 2), Tok::Ident(_))
     }
 
     /// `T name` at the start of a statement: a declaration.
@@ -460,6 +505,9 @@ impl<'a> Parser<'a> {
 
     fn decl(&mut self) -> Option<Decl> {
         let start = self.pos();
+        if self.is_kw("use") {
+            return self.use_decl().map(Decl::Use);
+        }
         if self.is_kw("const") {
             return self.var_decl(true).map(Decl::Const);
         }
@@ -537,65 +585,17 @@ impl<'a> Parser<'a> {
         self.skip_block();
     }
 
-    /// `T`, `?T`, `T!E`, `?T!E`; the text of the type without spaces is its name.
+    /// A type: `T`, `?T`, `T!E`, `[]T`, `[N]T`, `map[K]V`, `[](T!E)`; the text of the
+    /// type without spaces is its name.
     fn type_ref(&mut self) -> TypeRef {
         let p = self.pos();
         let mut name = String::new();
         let mut nested = false;
-        if self.is_op("?") || self.is_op("??") {
-            nested = self.is_op("??");
-            self.bump();
-            name.push('?');
-            if self.is_op("?") || self.is_op("??") {
-                nested = true;
-                self.bump();
-            }
-        }
-        let base = match self.peek() {
-            Tok::Ident(n) => Some(n.clone()),
-            Tok::Kw("void") => Some("void".to_string()),
-            _ => None,
-        };
-        let Some(base) = base else {
-            let msg = format!("expected a type, found {}", describe(self.peek()));
-            self.err("S1", self.pos(), msg, None);
+        if !self.type_top(&mut name, &mut nested) {
             return TypeRef {
                 name: "?".into(),
                 pos: p,
             };
-        };
-        self.bump();
-        name.push_str(&base);
-        while self.is_op("!") {
-            let at = self.pos();
-            self.bump();
-            match self.peek() {
-                Tok::Ident(_) | Tok::Kw("void") if !name.contains('!') => {
-                    let e = if let Tok::Ident(e) = self.peek() {
-                        e.as_str()
-                    } else {
-                        "void"
-                    };
-                    name.push('!');
-                    name.push_str(e);
-                    self.bump();
-                }
-                Tok::Ident(_) | Tok::Kw("void") => {
-                    nested = true;
-                    self.bump();
-                }
-                other => {
-                    let msg = format!(
-                        "expected the error type after `!`, found {}",
-                        describe(other)
-                    );
-                    self.err("S1", at, msg, None);
-                    return TypeRef {
-                        name: "?".into(),
-                        pos: p,
-                    };
-                }
-            }
         }
         if nested {
             let hint = "a type has at most one ? and one !E".to_string();
@@ -603,6 +603,125 @@ impl<'a> Parser<'a> {
             name = "?".into();
         }
         TypeRef { name, pos: p }
+    }
+
+    fn type_top(&mut self, name: &mut String, nested: &mut bool) -> bool {
+        if self.is_op("?") || self.is_op("??") {
+            *nested |= self.is_op("??");
+            self.bump();
+            name.push('?');
+            if self.is_op("?") || self.is_op("??") {
+                *nested = true;
+                self.bump();
+            }
+        }
+        if !self.base_type(name, nested) {
+            return false;
+        }
+        let mut errs = 0;
+        while self.is_op("!") {
+            let at = self.pos();
+            self.bump();
+            if !matches!(self.peek(), Tok::Ident(_) | Tok::Kw("void") | Tok::Op("[")) {
+                let msg = format!(
+                    "expected the error type after `!`, found {}",
+                    describe(self.peek())
+                );
+                self.err("S1", at, msg, None);
+                return false;
+            }
+            errs += 1;
+            let mut e = String::new();
+            if !self.base_type(&mut e, nested) {
+                return false;
+            }
+            if errs == 1 {
+                name.push('!');
+                name.push_str(&e);
+            } else {
+                *nested = true;
+            }
+        }
+        true
+    }
+
+    fn base_type(&mut self, name: &mut String, nested: &mut bool) -> bool {
+        match self.peek() {
+            Tok::Op("[") => {
+                self.bump();
+                name.push('[');
+                match self.peek() {
+                    Tok::Int(v) => {
+                        name.push_str(&v.to_string());
+                        self.bump();
+                    }
+                    Tok::Ident(n) => {
+                        name.push_str(n);
+                        self.bump();
+                    }
+                    _ => {}
+                }
+                if !self.expect_op("]") {
+                    return false;
+                }
+                name.push(']');
+                self.elem_type(name, nested)
+            }
+            Tok::Ident(m) if m == "map" && *self.peek_n(1) == Tok::Op("[") => {
+                self.bump();
+                self.bump();
+                name.push_str("map[");
+                if !self.elem_type(name, nested) || !self.expect_op("]") {
+                    return false;
+                }
+                name.push(']');
+                self.elem_type(name, nested)
+            }
+            Tok::Ident(n) => {
+                name.push_str(n);
+                let qualified = MODULES.contains(&n.as_str()) && self.qualified_at(0);
+                self.bump();
+                if qualified {
+                    self.bump();
+                    if let Tok::Ident(q) = self.peek() {
+                        name.push('.');
+                        name.push_str(q);
+                    }
+                    self.bump();
+                }
+                true
+            }
+            Tok::Kw("void") => {
+                name.push_str("void");
+                self.bump();
+                true
+            }
+            other => {
+                let msg = format!("expected a type, found {}", describe(other));
+                self.err("S1", self.pos(), msg, None);
+                false
+            }
+        }
+    }
+
+    /// The element type of a list, array or map: `?T`, `T` or `(type)`.
+    fn elem_type(&mut self, name: &mut String, nested: &mut bool) -> bool {
+        if self.is_op("(") {
+            let open = self.pos();
+            self.bump();
+            name.push('(');
+            if !self.type_top(name, nested) || !self.close(open, ")") {
+                return false;
+            }
+            name.push(')');
+            return true;
+        }
+        if self.is_op("?") || self.is_op("??") {
+            *nested |= self.is_op("??");
+            self.bump();
+            name.push('?');
+        }
+        self.base_type(name, nested)
     }
 
     fn func(&mut self) -> Option<Func> {
@@ -1285,7 +1404,9 @@ impl<'a> Parser<'a> {
                 }
                 Tok::Op("[") => {
                     self.bump();
+                    let header = std::mem::replace(&mut self.header, false);
                     let idx = self.expr();
+                    self.header = header;
                     self.close(open, "]");
                     ExprKind::Index(Box::new(e), Box::new(idx))
                 }
@@ -1320,6 +1441,9 @@ impl<'a> Parser<'a> {
         let kind = match self.peek() {
             Tok::Int(v) => ExprKind::Int(*v),
             Tok::Float(s) => ExprKind::Float(s.clone()),
+            Tok::Rune(c) => ExprKind::Rune(*c),
+            Tok::Op("[") => return self.list_lit(),
+            Tok::Op("{") if !self.header => return self.map_lit(),
             Tok::Kw("true") => ExprKind::Bool(true),
             Tok::Kw("false") => ExprKind::Bool(false),
             Tok::Ident(_) if *self.peek_n(1) == Tok::Op("{") && self.literal_here() => {
@@ -1378,7 +1502,7 @@ impl<'a> Parser<'a> {
         for part in parts {
             match part {
                 StrPart::Lit(s) => segs.push(StrSeg::Lit(s.clone())),
-                StrPart::Expr(toks) => {
+                StrPart::Expr(toks) | StrPart::Fmt(toks, _) => {
                     let mut sub = Parser::new(self.src, toks, Vec::new());
                     sub.reserved = self.reserved.clone();
                     let e = sub.expr();
@@ -1393,7 +1517,10 @@ impl<'a> Parser<'a> {
                     for d in sub.out {
                         self.report(d);
                     }
-                    segs.push(StrSeg::Expr(e));
+                    segs.push(match part {
+                        StrPart::Fmt(_, f) => StrSeg::Fmt(e, *f),
+                        _ => StrSeg::Expr(e),
+                    });
                 }
             }
         }
@@ -1938,12 +2065,17 @@ impl<'a> Parser<'a> {
                 self.bump();
                 Some(Pattern::Int(v, p))
             }
+            Tok::Rune(c) => {
+                let c = *c;
+                self.bump();
+                Some(Pattern::Rune(c, p))
+            }
             Tok::Str(parts) => {
                 let mut text = String::new();
                 for part in parts {
                     match part {
                         StrPart::Lit(s) => text.push_str(s),
-                        StrPart::Expr(_) => {
+                        StrPart::Expr(_) | StrPart::Fmt(..) => {
                             let hint = "write \\{ and \\} for literal braces".to_string();
                             self.err("S1", p, "a case value is a plain string", Some(hint));
                             return None;
@@ -1955,10 +2087,16 @@ impl<'a> Parser<'a> {
             }
             Tok::Kw("ok" | "err" | "some" | "none") => self.result_pattern(),
             Tok::Ident(ty) if *self.peek_n(1) == Tok::Op(".") => {
-                let ty = ty.clone();
+                let mut ty = ty.clone();
                 self.bump();
                 self.bump();
-                let (name, _) = self.name()?;
+                let (mut name, _) = self.name()?;
+                // `io.IoErr.NotFound`: the type of a standard module
+                if MODULES.contains(&ty.as_str()) && self.is_op(".") {
+                    self.bump();
+                    ty = format!("{ty}.{name}");
+                    name = self.name()?.0;
+                }
                 let mut binds = None;
                 if self.is_op("(") {
                     let open = self.pos();
@@ -2073,7 +2211,7 @@ impl<'a> Parser<'a> {
         for part in parts {
             match part {
                 StrPart::Lit(s) => text.push_str(s),
-                StrPart::Expr(_) => plain = false,
+                StrPart::Expr(_) | StrPart::Fmt(..) => plain = false,
             }
         }
         (text, plain)
@@ -2156,6 +2294,93 @@ impl<'a> Parser<'a> {
     }
 }
 
+/// Part 2c: list and map literals, `use std.…`.
+impl<'a> Parser<'a> {
+    /// `[a, b, c]`, also over several lines (R5).
+    fn list_lit(&mut self) -> Expr {
+        let p = self.pos();
+        self.bump(); // [
+        let header = std::mem::replace(&mut self.header, false);
+        let mut items = Vec::new();
+        while !self.is_op("]") && *self.peek() != Tok::Eof {
+            items.push(self.expr());
+            if !self.is_op(",") {
+                break;
+            }
+            self.bump(); // a trailing comma is allowed
+        }
+        self.header = header;
+        self.close(p, "]");
+        Expr {
+            kind: ExprKind::ListLit(items),
+            pos: p,
+            end: self.last_end,
+        }
+    }
+
+    /// `{k: v, …}` (R30); like a struct literal it may span lines.
+    fn map_lit(&mut self) -> Expr {
+        let p = self.pos();
+        self.bump(); // {
+        let header = std::mem::replace(&mut self.header, false);
+        self.skip_nl();
+        let mut entries = Vec::new();
+        while !self.is_op("}") && *self.peek() != Tok::Eof {
+            let k = self.expr();
+            if !self.expect_op(":") {
+                break;
+            }
+            let v = self.expr();
+            entries.push((k, v));
+            self.skip_nl();
+            if !self.is_op(",") {
+                break;
+            }
+            self.bump();
+            self.skip_nl();
+        }
+        self.skip_nl();
+        self.header = header;
+        if !self.is_op("}") {
+            let found = describe(self.peek());
+            let msg = format!("expected `}}` to close `{{`, found {found}");
+            self.err("S1", p, msg, None);
+        } else {
+            self.bump();
+        }
+        Expr {
+            kind: ExprKind::MapLit(entries),
+            pos: p,
+            end: self.last_end,
+        }
+    }
+
+    /// `use std.io` (R16); the other forms of `use` come with modules.
+    fn use_decl(&mut self) -> Option<UseDecl> {
+        let pos = self.pos();
+        self.bump(); // use
+        let std = matches!(self.peek(), Tok::Ident(n) if n == "std");
+        if !std || *self.peek_n(1) != Tok::Op(".") || !matches!(self.peek_n(2), Tok::Ident(_)) {
+            let msg = format!("expected `std.name` after `use`, found {}", describe(self.peek()));
+            self.err("S1", self.pos(), msg, Some("use std.io".into()));
+            return None;
+        }
+        self.bump();
+        self.bump();
+        let name_pos = self.pos();
+        let Tok::Ident(module) = self.peek() else {
+            return None;
+        };
+        let module = module.clone();
+        self.bump();
+        Some(UseDecl {
+            module,
+            name_pos,
+            pos,
+        })
+    }
+}
+
 fn can_start_stmt(t: &Tok) -> bool {
     matches!(
         t,
@@ -2191,6 +2416,7 @@ fn describe(t: &Tok) -> String {
         Tok::Op(o) => format!("`{o}`"),
         Tok::Int(v) => format!("number `{v}`"),
         Tok::Float(f) => format!("number `{f}`"),
+        Tok::Rune(_) => "a rune".into(),
         Tok::Str(_) => "a string".into(),
         Tok::Semi => "`;`".into(),
         Tok::Nl => "end of line".into(),

@@ -15,6 +15,18 @@ pub enum Decl {
     Struct(StructDecl),
     Enum(EnumDecl),
     Test(TestDecl),
+    Use(UseDecl),
+}
+
+/// `use std.io` (R16).
+#[derive(Debug, Clone)]
+pub struct UseDecl {
+    /// The module after `std.`.
+    pub module: String,
+    /// Position of that name.
+    pub name_pos: Pos,
+    /// Position of the word `use`.
+    pub pos: Pos,
 }
 
 /// `test "name" [panics "text"] { … }` (R18).
@@ -98,6 +110,7 @@ pub enum Pattern {
     /// An integer literal, already negated for `-5`.
     Int(i128, Pos),
     Str(String, Pos),
+    Rune(u32, Pos),
     /// A `const` name, or an unqualified variant (an error the checker reports).
     Name(String, Pos),
     /// `E.V`, or `E.V(T a, _)` with bindings (`None` is `_`).
@@ -198,6 +211,8 @@ pub struct Expr {
 pub enum ExprKind {
     Int(u128),
     Float(String),
+    /// A rune literal: one code point.
+    Rune(u32),
     Bool(bool),
     Str(Vec<StrSeg>),
     Ident(String),
@@ -225,6 +240,10 @@ pub enum ExprKind {
     OkVal(Option<Box<Expr>>),
     /// `try x`, or `try x or e` with the position of `or`.
     Try(Box<Expr>, Option<(Pos, Box<Expr>)>),
+    /// `[a, b]`
+    ListLit(Vec<Expr>),
+    /// `{k: v, …}`
+    MapLit(Vec<(Expr, Expr)>),
     /// Placeholder after an error that was already reported.
     Missing,
 }
@@ -233,4 +252,6 @@ pub enum ExprKind {
 pub enum StrSeg {
     Lit(String),
     Expr(Expr),
+    /// `{x:g}` or `{x:.2f}`.
+    Fmt(Expr, crate::lexer::Fmt),
 }
