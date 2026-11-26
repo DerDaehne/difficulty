@@ -18,9 +18,18 @@ fn run(name: &str, src: &str) -> (String, String, i32) {
     std::fs::write(&c_file, c).unwrap();
     let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
     let out = Command::new(cc)
-        .args(["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-o"])
+        .args([
+            "-std=c11",
+            "-O2",
+            "-ffp-contract=off",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-o",
+        ])
         .arg(&exe)
         .arg(&c_file)
+        .arg("-lm")
         .output()
         .expect("a C compiler (cc) is needed for these tests");
     assert!(

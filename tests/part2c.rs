@@ -567,16 +567,13 @@ fn results_of_optional_type() {
 }
 
 #[test]
-fn part_2c_programs_are_not_built_yet() {
+fn part_2c_programs_compile_to_c() {
     let c = dif::compile(
         "main.dif",
         b"void main() {\n    []int xs = [1]\n    print(xs)\n}\n",
     )
     .unwrap();
-    assert!(c.starts_with("#error"), "{c}");
-    // a program of parts 1 to 2b still compiles to real C
-    let c = dif::compile("main.dif", b"void main() {\n    print(1)\n}\n").unwrap();
-    assert!(c.contains("int main("), "{c}");
+    assert!(c.contains("int main(") && !c.contains("#error"), "{c}");
 }
 
 #[test]

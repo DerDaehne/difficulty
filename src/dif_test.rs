@@ -270,9 +270,16 @@ fn build(cc: &str, dir: &Path, i: usize, c: &str) -> Result<PathBuf, String> {
     std::fs::write(&c_file, c)
         .map_err(|e| format!("dif: cannot write {}: {e}", c_file.display()))?;
     let r = Command::new(cc)
-        .args(["-std=c11", "-O1", "-fno-strict-aliasing", "-o"])
+        .args([
+            "-std=c11",
+            "-O1",
+            "-fno-strict-aliasing",
+            "-ffp-contract=off",
+            "-o",
+        ])
         .arg(&exe)
         .arg(&c_file)
+        .arg("-lm")
         .output()
         .map_err(|e| format!("dif: cannot run the C compiler `{cc}`: {e}"))?;
     if r.status.success() {

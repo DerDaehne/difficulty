@@ -149,9 +149,17 @@ fn compile(file: &str, out: &Path) -> Result<(), ExitCode> {
         ExitCode::from(2)
     })?;
     let result = Command::new(&cc)
-        .args(["-std=c11", "-O2", "-fno-strict-aliasing", "-s", "-o"])
+        .args([
+            "-std=c11",
+            "-O2",
+            "-fno-strict-aliasing",
+            "-ffp-contract=off",
+            "-s",
+            "-o",
+        ])
         .arg(out)
         .arg(&c_file)
+        .arg("-lm")
         .output();
     let _ = std::fs::remove_file(&c_file);
     match result {

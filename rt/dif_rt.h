@@ -734,13 +734,17 @@ DIF_FN dif_str dif_arr_join(const dif_str *d, int64_t n, dif_str sep) {
 }
 
 // Read-only list methods are the array functions applied to the data of the list.
-#define dif_list_eq(et, a, b) dif_arr_eq(et, dif_list_data(a), dif_list_len(a), dif_list_data(b), dif_list_len(b))
-#define dif_list_put(et, b, l) dif_arr_put(et, b, dif_list_data(l), dif_list_len(l))
-#define dif_list_contains(et, l, x) dif_arr_contains(et, dif_list_data(l), dif_list_len(l), x)
-#define dif_list_index_of(et, l, x) dif_arr_index_of(et, dif_list_data(l), dif_list_len(l), x)
-#define dif_list_count(et, l, x) dif_arr_count(et, dif_list_data(l), dif_list_len(l), x)
-#define dif_list_slice(et, l, a, b, ln, c) dif_arr_slice(et, dif_list_data(l), dif_list_len(l), a, b, ln, c)
-#define dif_list_join(l, sep) dif_arr_join((const dif_str *)dif_list_data(l), dif_list_len(l), sep)
+DIF_FN bool dif_list_eq(const dif_ty *et, const dif_list *a, const dif_list *b) {
+    return dif_arr_eq(et, dif_list_data(a), dif_list_len(a), dif_list_data(b), dif_list_len(b));
+}
+DIF_FN void dif_list_put(const dif_ty *et, dif_buf *b, const dif_list *l) { dif_arr_put(et, b, dif_list_data(l), dif_list_len(l)); }
+DIF_FN bool dif_list_contains(const dif_ty *et, const dif_list *l, const void *x) { return dif_arr_contains(et, dif_list_data(l), dif_list_len(l), x); }
+DIF_FN int64_t dif_list_index_of(const dif_ty *et, const dif_list *l, const void *x) { return dif_arr_index_of(et, dif_list_data(l), dif_list_len(l), x); }
+DIF_FN int64_t dif_list_count(const dif_ty *et, const dif_list *l, const void *x) { return dif_arr_count(et, dif_list_data(l), dif_list_len(l), x); }
+DIF_FN dif_list *dif_list_slice(const dif_ty *et, const dif_list *l, int64_t a, int64_t b, int ln, int c) {
+    return dif_arr_slice(et, dif_list_data(l), dif_list_len(l), a, b, ln, c);
+}
+DIF_FN dif_str dif_list_join(const dif_list *l, dif_str sep) { return dif_arr_join((const dif_str *)dif_list_data(l), dif_list_len(l), sep); }
 
 // Descriptors of list and array types: `DIF_LIST_TY(&elem)`, `DIF_ARRAY_TY(&elem, N)`.
 DIF_FN void dif_list_inc_t(const dif_ty *t, const void *p) { (void)t; dif_list_inc(*(dif_list *const *)p); }
@@ -794,7 +798,7 @@ DIF_FN dif_list *dif_str_lines(dif_str s) {
     while (i < s.n) {
         const char *q = memchr(s.p + i, '\n', (size_t)(s.n - i));
         int64_t end = q ? q - s.p : s.n, e = end;
-        if (q && e > i && s.p[e - 1] == '\r') e--;
+        if (e > i && s.p[e - 1] == '\r') e--; // also in the last line (no \n)
         dif_str line = dif_str_sub(s, i, e);
         dif_list_push(&dif_ty_str, &r, &line);
         i = end + 1;
@@ -1434,13 +1438,10 @@ DIF_FN int dif_io_read_line(dif_str *out, dif_ioerr *e) {
     dif_buf b = dif_buf_new();
     char t[256];
     int k = 0, ch;
-    bool any = false, nl = false;
+    bool any = false;
     while ((ch = getc(stdin)) != EOF) {
         any = true;
-        if (ch == '\n') {
-            nl = true;
-            break;
-        }
+        if (ch == '\n') break;
         t[k++] = (char)ch;
         if (k == (int)sizeof t) dif_put(&b, t, k), k = 0;
     }
@@ -1451,7 +1452,7 @@ DIF_FN int dif_io_read_line(dif_str *out, dif_ioerr *e) {
         return dif_ioerr_errno(e, path, errno), clearerr(stdin), -1;
     }
     if (!any) return dif_buf_free(&b), 0;
-    if (nl && b.n > 0 && b.p[b.n - 1] == '\r') b.n--;
+    if (b.n > 0 && b.p[b.n - 1] == '\r') b.n--; // also in a last line without \n
     if (!dif_utf8_valid(b.p, b.n)) {
         dif_buf_free(&b);
         return dif_ioerr_set(e, DIF_IO_INVALID_UTF8, path, NULL), -1;

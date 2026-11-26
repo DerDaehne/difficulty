@@ -15,10 +15,23 @@ fn run(name: &str, src: &str) -> (String, String, i32) {
     let (c_file, exe) = (dir.join("main.c"), dir.join("main"));
     std::fs::write(&c_file, c).unwrap();
     let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
+    // `DIF_SAN=1`: every program runs under AddressSanitizer and UBSan, leaks included
+    let san: &[&str] = if std::env::var_os("DIF_SAN").is_some() {
+        &[
+            "-fsanitize=address,undefined",
+            "-fno-sanitize-recover=undefined",
+            "-g",
+        ]
+    } else {
+        &["-Werror"]
+    };
     let out = Command::new(cc)
-        .args(["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-o"])
+        .args(["-std=c11", "-O2", "-ffp-contract=off", "-Wall", "-Wextra"])
+        .args(san)
+        .arg("-o")
         .arg(&exe)
         .arg(&c_file)
+        .arg("-lm")
         .output()
         .expect("a C compiler (cc) is needed for these tests");
     assert!(
@@ -120,16 +133,7 @@ fn readme_examples() {
 
 /// Sections of the spec whose examples are checked but not built and run;
 /// a section is listed here only while its backend is missing.
-const CHECK_ONLY: &[&str] = &[
-    "### 1.4 ",
-    "### R5, Teil 2c",
-    "### R8, Teil 2c",
-    "### R11, Teil 2c",
-    "### R29, Teil 2c",
-    "### R30 ",
-    "### R31 ",
-    "### 4.",
-];
+const CHECK_ONLY: &[&str] = &[];
 
 /// Sections of part 2d (function literals, block argument, list methods with a function argument):
 /// their examples need the compiler of part 2d and are skipped until it exists; the compiler
