@@ -24,7 +24,7 @@ A solution is a program that reads stdin and writes stdout. A test passes when s
 For every language x model x task the runner:
 
 1. builds the prompt: `llms.txt` (difficulty only) + `task.md` + the answer format (one fenced code block);
-2. calls `claude -p --model <model> --output-format json` with a replaced system prompt (`--system-prompt`), without tools, session storage or slash commands, without locally configured MCP servers (`--strict-mcp-config`), user settings with their hooks and plugins (`--setting-sources project`) and dynamic system prompt sections, so the context is only `llms.txt` + task; in an empty directory; reads the token counts from the JSON;
+2. calls `claude -p --model <model> --output-format json` with a replaced system prompt (`--system-prompt`), without tools, session storage or slash commands, without locally configured MCP servers (`--strict-mcp-config`), user and local settings with their hooks and plugins (`--setting-sources project`) and dynamic system prompt sections, so the context is only `llms.txt` + task; in an empty directory; reads the token counts from the JSON;
 3. extracts the last fenced block;
 4. difficulty: `dif check --json`, then `dif build`, then all tests. Python: all tests. A failure produces feedback: the diagnostics, the build error, or the test name, exit code or the first 500 characters of the program's own output for the first failing test (expected output and test input stay hidden);
 5. on failure, asks again with the previous solution and the feedback, up to 5 rounds in total.
