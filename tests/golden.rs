@@ -16,12 +16,8 @@ fn unique_dir(name: &str) -> std::path::PathBuf {
     dir
 }
 
-/// Builds and runs a program; returns (stdout, stderr, exit code).
-fn run(name: &str, src: &str) -> (String, String, i32) {
-    run_in(name, src, std::env::var_os("DIF_SAN").is_some())
-}
-
-/// Like `run`; `san` builds the program with AddressSanitizer and UBSan, leaks included.
+/// Builds and runs a program; returns (stdout, stderr, exit code). With `san` the program is
+/// built with AddressSanitizer and UBSan, leaks included.
 fn run_in(name: &str, src: &str, san: bool) -> (String, String, i32) {
     let c = dif::compile("main.dif", src.as_bytes()).unwrap_or_else(|d| panic!("{name}: {d:#?}"));
     let dir = unique_dir(name);

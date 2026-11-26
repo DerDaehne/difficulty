@@ -118,12 +118,14 @@ impl<'a> Emitter<'a> {
             return "NULL".into();
         }
         let (kt, vt) = self.info.maps[i as usize];
-        let mut c = String::from("({ dif_map *m_ = NULL; ");
+        let t = self.ty(e);
+        let m = self.mtemp(t);
+        let mut c = String::from("({ ");
         for (k, v) in entries {
             let (ko, vo) = (self.at(kt, k), self.at(vt, v));
             let _ = write!(
                 c,
-                "{{ {} k_ = {ko}; {} v_ = {vo}; dif_map_set(&{}, &{}, &m_, &k_, &v_, {}, {}); }} ",
+                "{{ {} k_ = {ko}; {} v_ = {vo}; dif_map_set(&{}, &{}, &{m}, &k_, &v_, {}, {}); }} ",
                 self.c_ty(kt),
                 self.c_ty(vt),
                 self.dty(kt),
@@ -132,7 +134,7 @@ impl<'a> Emitter<'a> {
                 k.pos.col
             );
         }
-        c.push_str("m_; })");
+        let _ = write!(c, "{}; }})", Self::take_temp(&m));
         c
     }
 

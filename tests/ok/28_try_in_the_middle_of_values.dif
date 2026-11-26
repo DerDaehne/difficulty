@@ -1,0 +1,47 @@
+enum E { Bad(str w) }
+
+str!E name(int i) {
+    if i % 2 == 0 {
+        return "n{i}"
+    }
+    return err(E.Bad("odd {i}"))
+}
+
+str join3(str a, str b, str c) {
+    return a + b + c
+}
+
+str!E f(str s, int i) {
+    return join3(s, try name(i), "!")
+}
+
+[]str!E lit(int i) {
+    return ["a", try name(i), "c"]
+}
+
+str!E interp(int i) {
+    return "x{try name(i)}y{i}"
+}
+
+str!E cat(str s, int i) {
+    str t = s + "-" + try name(i) + "-" + s
+    return t
+}
+
+map[str]int!E mp(int i) {
+    map[str]int m = {"a": 1, try name(i): 2}
+    return m
+}
+
+void main() {
+    print(f("s", 2))
+    print(f("s", 1))
+    print(lit(2))
+    print(lit(3))
+    print(interp(2))
+    print(interp(5))
+    print(cat("q", 4))
+    print(cat("q", 7))
+    print(mp(2))
+    print(mp(1))
+}

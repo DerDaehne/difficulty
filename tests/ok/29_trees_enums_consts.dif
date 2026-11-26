@@ -1,0 +1,116 @@
+const []int PRIMES = [2, 3, 5, 7]
+const str GREETING = "hi " + "there"
+const map[str]int LIMITS = {"a": 1, "b": 2}
+
+struct Tree {
+    int value
+    []Tree kids = []
+    ?str label = none
+}
+
+int Tree.total() {
+    int sum = self.value
+    for Tree k in self.kids {
+        sum += k.total()
+    }
+    return sum
+}
+
+void Tree.grow(int n) {
+    if n == 0 {
+        return
+    }
+    self.kids.push(Tree{value: n, label: some("n{n}")})
+    self.kids[self.kids.len() - 1].grow(n - 1)
+}
+
+str Tree.names() {
+    str out = self.label ?? "root"
+    for Tree k in self.kids {
+        out += "(" + k.names() + ")"
+    }
+    return out
+}
+
+enum Shape {
+    Dot
+    Poly([]int xs, str name)
+    Named(?str n)
+}
+
+str describe(Shape s) {
+    switch s {
+    case Shape.Dot:
+        return "dot"
+    case Shape.Poly([]int xs, str name):
+        return "{name}:{xs.len()}"
+    case Shape.Named(?str n):
+        return n ?? "anon"
+    }
+}
+
+[]Shape shapes() {
+    return [Shape.Dot, Shape.Poly([1, 2, 3], "tri"), Shape.Named(none), Shape.Named(some("bob"))]
+}
+
+str pick(int i) {
+    switch GREETING {
+    case "hi there":
+        return if i > 0 { "yes {i}" } else { "no" }
+    default:
+        return "?"
+    }
+}
+
+[]int find_pair([]int xs, int target) {
+    for int i, int a in xs {
+        for int j, int b in xs {
+            if i < j && a + b == target {
+                []int found = [a, b]
+                return found
+            }
+        }
+    }
+    return []
+}
+
+str first_long([]str words) {
+    for str w in words {
+        str up = w.upper()
+        if w.len() > 3 {
+            return up
+        }
+    }
+    return "none"
+}
+
+void main() {
+    Tree t = Tree{value: 1}
+    t.grow(3)
+    print(t.total())
+    print(t.names())
+    Tree u = t
+    u.grow(1)
+    print(t.kids.len())
+    print(u.kids.len())
+    for Shape s in shapes() {
+        print(describe(s))
+    }
+    print(pick(2))
+    print(pick(0))
+    print(find_pair(PRIMES, 12))
+    print(find_pair(PRIMES, 100))
+    print(first_long(["ab", "abcd", "xyz12"]))
+    print(first_long([]))
+    print(LIMITS["b"])
+    for int p in PRIMES {
+        if p > 3 {
+            break
+        }
+        print(p)
+    }
+    []?str opts = [some("x"), none]
+    print(opts)
+    []?str opts2 = opts
+    print(opts2 == opts)
+}

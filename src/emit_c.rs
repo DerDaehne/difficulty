@@ -42,7 +42,24 @@ fn is_literal(e: &Expr) -> bool {
         | ExprKind::NoneVal => true,
         ExprKind::Str(segs) => segs.iter().all(|s| matches!(s, StrSeg::Lit(_))),
         ExprKind::Unary("-", x) | ExprKind::Paren(x) => is_literal(x),
-        _ => false,
+        // no `_` arm: a new expression kind must be classified here
+        ExprKind::Unary(..)
+        | ExprKind::Ident(_)
+        | ExprKind::Binary(..)
+        | ExprKind::Call(..)
+        | ExprKind::Index(..)
+        | ExprKind::Field(..)
+        | ExprKind::SelfRef
+        | ExprKind::StructLit(..)
+        | ExprKind::IfExpr(..)
+        | ExprKind::Mut(_)
+        | ExprKind::SomeVal(_)
+        | ExprKind::ErrVal(_)
+        | ExprKind::OkVal(_)
+        | ExprKind::Try(..)
+        | ExprKind::ListLit(_)
+        | ExprKind::MapLit(_)
+        | ExprKind::Missing => false,
     }
 }
 
@@ -1405,7 +1422,28 @@ impl<'a> Emitter<'a> {
                     _ => None,
                 }
             }
-            _ => None,
+            // no `_` arm: a new expression kind must be classified here
+            ExprKind::Ident(_)
+            | ExprKind::Field(..)
+            | ExprKind::Int(_)
+            | ExprKind::Float(_)
+            | ExprKind::Rune(_)
+            | ExprKind::Bool(_)
+            | ExprKind::Str(_)
+            | ExprKind::Unary(..)
+            | ExprKind::Binary(..)
+            | ExprKind::Call(..)
+            | ExprKind::StructLit(..)
+            | ExprKind::IfExpr(..)
+            | ExprKind::Mut(_)
+            | ExprKind::NoneVal
+            | ExprKind::SomeVal(_)
+            | ExprKind::ErrVal(_)
+            | ExprKind::OkVal(_)
+            | ExprKind::Try(..)
+            | ExprKind::ListLit(_)
+            | ExprKind::MapLit(_)
+            | ExprKind::Missing => None,
         }
     }
 
@@ -1449,7 +1487,27 @@ impl<'a> Emitter<'a> {
                 }
                 _ => unreachable!("an index that is not a place"),
             },
-            _ => self.place_ref(e).unwrap_or_else(|| "0".into()),
+            ExprKind::Ident(_) | ExprKind::SelfRef => self.place_ref(e).unwrap_or_default(),
+            // no `_` arm: a new expression kind must be classified here
+            ExprKind::Int(_)
+            | ExprKind::Float(_)
+            | ExprKind::Rune(_)
+            | ExprKind::Bool(_)
+            | ExprKind::Str(_)
+            | ExprKind::Unary(..)
+            | ExprKind::Binary(..)
+            | ExprKind::Call(..)
+            | ExprKind::StructLit(..)
+            | ExprKind::IfExpr(..)
+            | ExprKind::Mut(_)
+            | ExprKind::NoneVal
+            | ExprKind::SomeVal(_)
+            | ExprKind::ErrVal(_)
+            | ExprKind::OkVal(_)
+            | ExprKind::Try(..)
+            | ExprKind::ListLit(_)
+            | ExprKind::MapLit(_)
+            | ExprKind::Missing => unreachable!("the checker lets only places be written"),
         }
     }
 
@@ -1785,9 +1843,7 @@ impl<'a> Emitter<'a> {
     /// `T{f: v, …}`: written fields left to right, then the defaults of the missing
     /// ones in declaration order (R5).
     fn struct_lit(&mut self, name: &'a str, inits: &'a [FieldInit]) -> String {
-        let s = format!("l{}", self.uid);
-        self.uid += 1;
-        let mut c = format!("({{ d_{name} {s} = {{0}}; ");
+        let (s, mut c, end) = self.building(self.ty_named(name));
         for i in inits {
             let v = self.at(self.field_ty(name, &i.name), &i.value);
             let _ = write!(c, "{s}.f_{} = {v}; ", i.name);
@@ -1800,26 +1856,43 @@ impl<'a> Emitter<'a> {
                 }
             }
         }
-        let _ = write!(c, "{s}; }})");
+        c.push_str(&end);
         c
+    }
+
+    /// A value that is built piece by piece: the name it lives under, the start of the
+    /// statement expression and its end. A value with counted parts lives in a temporary, so a
+    /// `try` that leaves the function in the middle releases what is there so far.
+    fn building(&mut self, t: Ty) -> (String, String, String) {
+        if self.managed(t) {
+            let m = self.mtemp(t);
+            (
+                m.clone(),
+                "({ ".into(),
+                format!("{}; }})", Self::take_temp(&m)),
+            )
+        } else {
+            let s = format!("l{}", self.uid);
+            self.uid += 1;
+            let start = format!("({{ {} {s} = {{0}}; ", self.c_ty(t));
+            (s.clone(), start, format!("{s}; }})"))
+        }
     }
 
     /// `E.V` or `E.V(a, b)`.
     fn variant(&mut self, eid: u32, name: &str, args: &'a [Expr]) -> String {
         let k = self.variant_index(eid, name);
-        let t = self.c_ty(Ty::Named(eid));
         if args.is_empty() {
-            return format!("(({t}){{.tag = {k}}})");
+            return format!("(({}){{.tag = {k}}})", self.c_ty(Ty::Named(eid)));
         }
-        let s = format!("l{}", self.uid);
-        self.uid += 1;
-        let mut c = format!("({{ {t} {s} = {{0}}; {s}.tag = {k}; ");
+        let (s, mut c, end) = self.building(Ty::Named(eid));
+        let _ = write!(c, "{s}.tag = {k}; ");
         let fields = self.variant_fields(eid, k);
         for (j, a) in args.iter().enumerate() {
             let v = self.at(fields[j], a);
             let _ = write!(c, "{s}.u.v{k}.f{j} = {v}; ");
         }
-        let _ = write!(c, "{s}; }})");
+        c.push_str(&end);
         c
     }
 
@@ -2104,7 +2177,26 @@ impl<'a> Emitter<'a> {
                 s.push(Step::Index(self.int_value(i), i));
                 Some((r, s))
             }
-            _ => None,
+            // no `_` arm: a new expression kind must be classified here
+            ExprKind::Int(_)
+            | ExprKind::Float(_)
+            | ExprKind::Rune(_)
+            | ExprKind::Bool(_)
+            | ExprKind::Str(_)
+            | ExprKind::Unary(..)
+            | ExprKind::Binary(..)
+            | ExprKind::Call(..)
+            | ExprKind::StructLit(..)
+            | ExprKind::IfExpr(..)
+            | ExprKind::Mut(_)
+            | ExprKind::NoneVal
+            | ExprKind::SomeVal(_)
+            | ExprKind::ErrVal(_)
+            | ExprKind::OkVal(_)
+            | ExprKind::Try(..)
+            | ExprKind::ListLit(_)
+            | ExprKind::MapLit(_)
+            | ExprKind::Missing => None,
         }
     }
 

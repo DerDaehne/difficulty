@@ -2,8 +2,8 @@
 
 > A compiled language that writes like a more pleasant C: C-like syntax, Python-like simplicity,
 > one way to write each thing, no silent fallbacks, diagnostics that say how to fix them.
-> This file covers parts 1 ("Hallo, nativ"), 2a (values, methods) and 2b (errors, tests). The binding description
-> is docs/spec.md; error codes are rule numbers (R1–R31) or lexical/syntax codes (L, S).
+> This file covers parts 1 (basics), 2a (values, methods), 2b (errors, tests) and 2c (numbers,
+> lists, maps, text, io). The binding description is docs/spec.md; error codes are rule numbers (R1–R31) or lexical/syntax codes (L, S).
 
 ## Tools
 
@@ -14,7 +14,8 @@ dif build main.dif -o prog     # native program (needs cc, gcc or clang; or set 
 dif test [path] [filter] [--json]   # run the `test` blocks, see part 2b
 ```
 
-Exit codes: 0 ok, 1 diagnostics (or an error from `void!E main`), 2 usage error or a panic of the program.
+Exit codes: 0 ok, 1 diagnostics (or an error from `void!E main`), 2 usage error, no C compiler or a
+panic of the program, 3 internal error (the C compiler rejects the generated C: a bug in dif).
 A diagnostic: `main.dif:3:11: error[R9]: condition is int, not bool` plus `hint: …`.
 Columns count characters. Each mistake gives exactly one diagnostic; fix the first, rerun.
 
@@ -58,11 +59,10 @@ Loop variables too: `for int i in range(n)`.
 
 **Names (R4).** A name lives until the end of its block, including inner blocks, and is
 never declared again there (no shadowing, also not as parameter or loop variable).
-Sibling blocks may reuse a name. `const` is never assigned. Predefined names
-(`print range int bool str` …) and keywords cannot be names; `ok`, `err`, `none`,
-`some`, `test` are reserved. Names use ASCII letters, digits and `_`.
+Sibling blocks may reuse a name. `const` is never assigned. Predefined names and keywords cannot
+be names; `ok err none some test` are reserved. Names use ASCII letters, digits and `_`.
 
-**Types (R8).** `int` (64 bit), `bool`, `str`, `void`. Types never mix:
+**Types (R8).** `int` (64 bit), `bool`, `str`, `void`; more in part 2c. Types never mix:
 `"a" + 1` is an error; build text with interpolation `"{a}{b}"`.
 
 | operator | operands | result |
@@ -92,11 +92,10 @@ statement, is an error; use the value or discard it explicitly: `_ = f(x)`.
 
 **Numbers (R29, R14).** Overflow of `+ - *` and unary `-` aborts; `+% -% *%` wrap
 modulo 2^64. `/` rounds toward 0, `%` has the sign of the dividend (`-7 / 2 == -3`,
-`-7 % 3 == -1`). Division by 0 and `INT_MIN / -1` abort; `INT_MIN % -1` is 0.
-Shifts take 0 … 63 places, `>>` keeps the sign. Operands and arguments are evaluated
-left to right. Literals: `1_000`, `0xff`, `0b1010`; no leading zeros, no `0X`.
-Expressions of literals and `const` are computed exactly at compile time; only the
-result must fit (`-9223372036854775808` is fine); a certain abort there (`1 / 0`) is R14.
+`-7 % 3 == -1`). Division by 0 and `INT_MIN / -1` abort. Shifts take 0 … 63 places, `>>`
+keeps the sign. Operands and arguments are evaluated left to right. Literals: `1_000`,
+`0xff`, `0b1010`, no leading zeros. Literals and `const` are computed exactly at compile
+time; only the result must fit; a certain abort there (`1 / 0`) is R14.
 
 **Text.** `"…"` on one line. Escapes `\n \t \r \\ \" \{ \} \0 \u{1F600}`.
 `{expr}` inserts any int, bool or str; no strings or braces inside `{ }`;
@@ -180,26 +179,22 @@ Output: `Point{x: 1, y: 2} Point{x: 12, y: 4} Point{x: 13, y: 4} 9 Shape.Rect(3,
 - **`enum` (R5).** `enum Seat { Free, Taken }`; variants may carry values
   (`NoSuchSeat(int row, int seat)`). Always written with the type: `Seat.Free`,
   `BookErr.NoSuchSeat(3, 5)`. Values are read only through `switch`.
-- **`mut` (R6).** A function that changes an argument takes it as `mut T p` and the
-  caller writes `mut`: `shift(mut b, 5)`. `mut` takes variables, fields (`mut s.player`).
-  A `mut` parameter that is never changed, a change that is never read afterwards (also
-  to a copy: a parameter without `mut`) and one place passed changeable twice in a call
-  are R6. An argument without `mut` that reads the same place sees the value from
-  before the call.
+- **`mut` (R6).** A function that changes an argument takes `mut T p`, the caller writes
+  `mut`: `shift(mut b, 5)`; places are variables, fields, elements. R6: a `mut` parameter
+  never changed, a change never read afterwards (also to a copy), one place passed
+  changeable twice in a call. An argument without `mut` sees the value from before the call.
 - **Methods (R7).** `R Type.name(params)`; `self` is the place before the dot and may
   be changed. `a.scale(2)` needs a variable or field when the method changes `self`;
   methods that only read work on any expression: `fresh().total()`. No `mut` at the call.
-- **`switch` (R10).** Over `int`, `str` or `enum`; values are literals, `const` names or
-  `E.V`; `case 1, 2:` lists values; bindings `case E.V(int w, _):` (one value per
-  entry, `_` skips). No fall-through; `continue` and `return` work inside, `break` is not
-  used directly in a `switch`. Every variant is handled or there is a `default`; over
-  `int`/`str` `default` is required. Statements of a case start on the next line.
+- **`switch` (R10).** Over numbers, `rune`, `str` or `enum`; values are literals, `const`
+  names or `E.V`; `case 1, 2:` lists values; bindings `case E.V(int w, _):` (`_` skips).
+  No fall-through; `continue` and `return` work inside, `break` not directly. Every variant
+  is handled or there is a `default`; over other types `default` is required.
 - **`if` as a value (R15).** `str s = if n < 0 { "neg" } else { "pos" }`; `else` is
   required, each branch ends with an expression (statements may come before it), only the
   chosen branch runs, all branches have one type.
-- **Equality and text (R28).** `==` compares structs field by field and enums by variant
-  and values; text looks like the literal, `str` inside is quoted:
-  `Person{name: "Ada", age: 36}`, `BookErr.NoSuchSeat(3, 5)`. `<` does not exist for them.
+- **Equality and text (R28).** `==` compares field by field and by variant; text looks like
+  the literal, `str` inside is quoted: `Person{name: "Ada", age: 36}`. `<` does not exist.
 
 ```dif error R6
 struct Point {
@@ -259,19 +254,16 @@ void main() {
 
 Output: `some(4)`, `-1`, `err(AgeErr.Negative)`, `ok 8`
 
-- **Types (R12).** `?T` is a `T` or `none`; `T!E` is a `T` or an error `E` (any type:
-  `enum`, `struct`, `str`); `void!E` is nothing or an error. Success is returned plainly:
-  `return n`; failure is `return none` or `return err(AgeErr.Negative)`. `none` and
-  `err(e)` take their type from the place they stand in (declaration, assignment,
-  argument, `return`, the other side of `==`); alone (`print(none)`) it is R12. `some(x)`
-  builds a `?T` for comparing: `x == some(3)`; `x == 3` is R8. `ok(x)` exists only as a
-  pattern.
+- **Types (R12).** `?T` is a `T` or `none`; `T!E` is a `T` or an error `E` (any type);
+  `void!E` is nothing or an error. Success is returned plainly: `return n`; failure is
+  `return none` or `return err(AgeErr.Negative)`. `none` and `err(e)` take their type from
+  the place they stand in (declaration, argument, `return`, the other side of `==`); alone
+  it is R12. `some(x)` builds a `?T` for comparing: `x == some(3)`; `x == 3` is R8. `ok(x)`
+  exists only as a pattern.
 - **`try x`** (functions and tests only): the value of `x`, or the function returns at
-  once with the same error (`T!E` in a `U!E` function) or `none` (`?T` in a `?U`
-  function). `try x or E.V(…)` turns the error into the function's own error type;
-  `or` runs only on failure. A different error type without `or` is R12. `try` binds like a
-  sign: `try f(a) + try f(b)` is `(try f(a)) + (try f(b))`; left to right, the first failure
-  returns. As a statement `try f()` is the call.
+  once with the same error or `none`. `try x or E.V(…)` turns the error into the
+  function's own error type (`or` runs only on failure); a different error type without
+  `or` is R12. `try` binds like a sign: `try f(a) + try f(b)`; as a statement `try f()`.
 - **`a ?? b`**: `a` if it has a value, else `b` (evaluated only then); `a` is `?T` or `T!E`.
 - **`switch` (R10)** over `T!E`: `case ok(int n):` and `case err(E e):`; over `?T`:
   `case some(int n):` and `case none:`; `ok` without parentheses for `void!E`; `_` skips the
@@ -306,16 +298,10 @@ void!HallErr main() {
 `dif run` and `dif build` skip them. `test "name" panics "text" { … }` passes only with a
 panic whose message contains `text`. `try` in a test fails the test with `try failed: …`.
 
-```
-dif test [path] [filter] [--json]   # every test in its own process; filter needs a path
-```
-
-`path` is a file or a directory (all `.dif` files below it, default `.`); `filter` selects
-tests whose name contains it. Per test one line `ok`/`FAIL` with `file:line`; a failure
-shows the reason, the value of every non-literal operand of the condition, and what the
-test printed; last line `test result: 1 passed, 1 failed`. Exit code 0 all passed,
-1 a test failed or none was selected, 2 files do not compile or wrong call. `--json` gives
-one JSON object on one line (docs/spec.md R18).
+`dif test [path] [filter] [--json]` runs every test in its own process; `path` is a file or
+directory (default `.`), `filter` selects tests whose name contains it. A failure shows the
+reason, the value of every non-literal operand, and what the test printed. Exit code 0 all
+passed, 1 a test failed or none was selected, 2 files do not compile. `--json`: docs/spec.md R18.
 
 ```dif test
 int add(int a, int b) {
@@ -340,16 +326,83 @@ FAIL main.dif:9 test "wrong sum"
 test result: 1 passed, 1 failed
 ```
 
-```dif error R12
-enum E { Bad }
+## Part 2c: numbers, text, lists, maps, `io`
 
-int!E parse(int n) {
-    return n
+```dif
+use std.io
+
+struct Task {
+    str title
+    []str tags = []
 }
 
-int twice(int n) {
-    return try parse(n) * 2
+f64 mean([]int xs) {
+    int sum = 0
+    for int x in xs {
+        sum += x
+    }
+    return f64(sum) / f64(xs.len())
 }
+
+void!io.IoErr main() {
+    []int xs = [3, 1, 2]
+    xs.push(4)
+    xs.sort()
+    map[str]int counts = {}
+    for str w in "to be or to be".split(" ") {
+        counts[w] = (counts[w] ?? 0) + 1
+    }
+    Task t = Task{title: " Write "}
+    t.tags.push("doc")
+    t.title = t.title.trim().upper()
+    print("{xs} {xs[0]} {counts} {t}")
+    print("{mean(xs):.2f} {u8(200) +% 100} {int((2.7).round())}")
+    for str line in try io.lines() {
+        print(line.len())
+    }
+}
+```
+
+Output: `[1, 2, 3, 4] 1 {"to": 2, "be": 2, "or": 1} Task{title: "WRITE", tags: ["doc"]}`, `2.50 44 3`
+
+- **Numbers (R8, R29).** `int i8 i16 i32 u8 u16 u32 u64 f64 rune`; they never mix, also not
+  `int` and `i32`. A literal takes the type of its place (`u8 b = 200`, `f64 x = 3`); a float
+  literal only `f64`. Each width aborts on overflow; `+% -% *%` wrap. `f64` is IEEE (`1.0 / 0.0`
+  is `inf`, `NaN != NaN`, `%` is fmod); text is the shortest digits that read back (`22.5`,
+  `1e21`); `{x:.2f}`, `{x:g}` format only `f64`.
+- **Conversions (R31).** `T(x)` is exact or aborts (`u8(300)`: `300 does not fit in u8`;
+  `int(2.5)`: `2.5 is not an exact int`): between ints, `f64(n)`, `int(x.round())`, `rune(n)`,
+  `str(r)`. `n.to_u8()` gives `?u8`. Nothing converts by itself, `str` and numbers never.
+- **`str` and `rune`.** `'a'` is a `rune`; no `s[i]`: `s.slice(a, b)` counts bytes, `s.runes()`,
+  `len()`. Methods: `split lines trim trim_start trim_end lower upper contains starts_with
+  ends_with find replace repeat parse_int parse_f64 is_empty`; `rune`: `is_digit is_letter is_space`.
+- **Lists `[]T` and arrays `[N]T` (R5).** Values: `ys = xs` copies, a write to one never shows
+  in the other (copy-on-write inside, `push` is O(1)). `xs[i]` is checked (abort, R14);
+  `xs[i] = v`, `xs[i].f = v`, `normalize(mut xs[i])` write. Methods: `len is_empty push pop insert
+  remove first last contains index_of count sort reverse slice join`; `pop first last index_of`
+  give `?T`. `[]` and `{}` need a place that gives the type. `repeat(0, n)`. Arrays have no
+  `push pop insert remove`.
+- **Maps `map[K]V` (R30).** `m[k]` is `?V` (`m[k] ?? 0`), `m[k] = v` sets; `m[k] += 1` is R8.
+  `len has remove keys values`; entries keep insertion order. `m[k]` is not a place: no
+  `m[k].f = v`, no `mut m[k]` (R30).
+- **Loops (R11).** `for T x in xs`, `for int i, T x in xs`, `for K k, V v in m` run over the
+  value at the start; writes to `xs` in the body do not show. `for T x in try rs` unpacks a
+  list of `T!E` like `try`.
+- **`io`, `os` (R16).** `use std.io` / `use std.os` first in the file. `io.lines()` (only as
+  `for str l in try io.lines()`), `io.read_line()`, `io.read_file(p)`, `io.write_file(p, s)`,
+  `io.eprint(x)`, `os.args()`, `os.env(name)`, `os.exit(code)`. Errors are `io.IoErr`:
+  `NotFound(path)`, `NoPermission(path)`, `InvalidUtf8(path)`, `Other(path, reason)`. A line
+  loses a trailing `\r`. A `str` is always valid UTF-8.
+- **Text (R28).** `[1, 2]`, `["a"]`, `{"k": 1}`, `['a']`: `str` and `rune` inside are quoted;
+  `==` works on all, `<` only on numbers, `rune`, `str`.
+- **Aborts (R14).** Index or slice out of range, `T(x)` inexact, negative `repeat`, empty `split`
+  separator, `NaN` as a map key, two `mut` elements with the same index, `assert(false)`.
+  `out of memory` has no line.
+
+```dif panic "index 3 out of bounds for length 3"
+[]int xs = [1, 2, 3]
+int i = 3
+print(xs[i])
 ```
 
 ## Habits from other languages and their fixes
@@ -358,25 +411,15 @@ int twice(int n) {
 |---|---|---|
 | `var x = 5`, `let x = 5`, `auto x = 5` | R2 | `int x = 5` |
 | `def f():`, `fn f(a: int) -> int`, `function f()` | R2 | `int f(int a) { … }` |
-| `x: int` in parameters, `-> int` | R2 | `int f(int x) {` |
 | `for i in range(10)` | R2 | `for int i in range(10)` |
 | `for (int i = 0; i < n; i++)` | R11 | `for int i in range(n)` |
 | `elif`, `elsif` | R3 | `} else if … {` |
-| `{` on the next line | R3 | `if x > 0 {` |
-| `if x > 0 print(x)` | R3 | `if x > 0 { print(x) }` on separate lines |
-| `x = 1;` | L3 | `x = 1` |
-| `i++`, `--i` | L7 | `i += 1`, `i -= 1` |
-| `/* … */` | L2 | `// …` |
-| `010` | L8 | `10` |
-| `if x = 1 {` | S1 | `if x == 1 {` |
 | `while n {` | R9 | `while n != 0 {` |
 | `"n = " + n` | R8 | `"n = {n}"` |
 | `f(x)` result unused | R13 | `int y = f(x)` or `_ = f(x)` |
-| `int n` without value | R2 | `int n = 0` |
 | `shift(b, 5)` when `shift` takes `mut` | R6 | `shift(mut b, 5)` |
 | `case Free:` in a `switch` over an enum | R10 | `case Seat.Free:` |
 | assignment to an undeclared name | R2 | declare it: `int x = …` |
-| `void main(void)` | S1 | `void main()` |
 
 ```dif error R2
 void main() {
@@ -397,10 +440,10 @@ void main() {
 
 ## Limits
 
-Nesting deeper than 256 levels or more than 1024 operators in one expression is S1;
-a chain of more than 256 `const` using each other is R4. Split the code.
+Nesting deeper than 256 levels or 1024 operators in one expression is S1. Split the code.
 
 ## Not yet
 
-Floating point and other number types, lists, maps, modules, C import, handles and
-sharing. They follow in later parts (see PLAN.md); using them gives an error that says so.
+Function literals and `filter`, `map`, `sort_by`, `any`, `all` (part 2d), modules of your own, C
+import, handles and sharing. They follow in later parts (see PLAN.md); using them gives an error
+that says so.
