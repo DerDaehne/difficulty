@@ -42,7 +42,7 @@ static int t_fail = 0, t_count = 0;
 static int t_pipe[2];
 // Runs the statements in a child whose stdout and stderr go to one pipe; the child is
 // expected to abort with exit code 2 and exactly `expected` as output.
-static int t_child_begin(void) {
+__attribute__((unused)) static int t_child_begin(void) {
     fflush(stdout);
     fflush(stderr);
     if (pipe(t_pipe) != 0) abort();
@@ -57,7 +57,7 @@ static int t_child_begin(void) {
     close(t_pipe[1]);
     return (int)pid;
 }
-static void t_child_end(int pid, const char *expected, int code, const char *file, int line) {
+__attribute__((unused)) static void t_child_end(int pid, const char *expected, int code, const char *file, int line) {
     char out[4096];
     size_t n = 0;
     ssize_t r;

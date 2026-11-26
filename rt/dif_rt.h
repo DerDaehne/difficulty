@@ -404,4 +404,411 @@ DIF_FN dif_str dif_str_replace(dif_str s, dif_str from, dif_str to, int l, int c
     return dif_take(&b);
 }
 
+// ---------------------------------------------------------------------------------------
+// 4. Type descriptors. The generic containers know their element type only through a
+//    `dif_ty`: size plus functions for the operations that depend on the type. The backend
+//    emits one `static const dif_ty` per element type; composite types need no code:
+//    `DIF_LIST_TY(&dif_ty_int)`, `DIF_MAP_TY(&dif_ty_str, &dif_ty_int)`, `DIF_ARRAY_TY(E, N)`.
+//    Only struct and enum types need generated functions (inc/dec/eq/put/hash).
+//    A NULL inc/dec means "plain bytes". Each function gets the descriptor first, so one
+//    function serves all lists (`t->elem`).
+// ---------------------------------------------------------------------------------------
+
+typedef struct dif_ty dif_ty;
+struct dif_ty {
+    size_t size;
+    const dif_ty *elem; // list/array/map: element (map: value) type
+    const dif_ty *key;  // map: key type
+    int64_t len;        // array: N
+    void (*inc)(const dif_ty *, const void *);
+    void (*dec)(const dif_ty *, void *);
+    bool (*eq)(const dif_ty *, const void *, const void *);
+    void (*put)(const dif_ty *, dif_buf *, const void *); // text form inside a collection
+    int (*cmp)(const dif_ty *, const void *, const void *); // NULL: not ordered
+    uint64_t (*hash)(const dif_ty *, const void *);         // NULL: not hashable
+};
+#define DIF_CONST static const __attribute__((unused))
+
+DIF_FN void dif_inc(const dif_ty *t, const void *p) {
+    if (t->inc) t->inc(t, p);
+}
+DIF_FN void dif_dec(const dif_ty *t, void *p) {
+    if (t->dec) t->dec(t, p);
+}
+
+// hashing: equal values hash equal (0.0 and -0.0 are the same key). A NaN anywhere in a
+// key sets `dif_nan_seen`; the map functions turn that into the abort of R14.
+static int dif_nan_seen __attribute__((unused));
+DIF_FN uint64_t dif_hash_u64(uint64_t x) {
+    x ^= x >> 30; x *= 0xbf58476d1ce4e5b9ULL;
+    x ^= x >> 27; x *= 0x94d049bb133111ebULL;
+    return x ^ (x >> 31);
+}
+DIF_FN uint64_t dif_hash_mix(uint64_t h, uint64_t v) { return dif_hash_u64(h * 31 + v + 0x9e3779b97f4a7c15ULL); }
+DIF_FN uint64_t dif_hash_bytes(const char *p, int64_t n) {
+    uint64_t h = 0xcbf29ce484222325ULL;
+    for (int64_t i = 0; i < n; i++) h = (h ^ (unsigned char)p[i]) * 0x100000001b3ULL;
+    return dif_hash_u64(h);
+}
+
+// Numbers, bool and str. `dif_ty_int` is int (int64_t), then i8 ... u64, bool; f64 and
+// rune follow in their sections.
+#define DIF_NUM_TY(N, T, SIGNED, PUTFN)                                                             \
+    DIF_FN bool dif_teq_##N(const dif_ty *t, const void *a, const void *b) {                         \
+        (void)t;                                                                                    \
+        return *(const T *)a == *(const T *)b;                                                      \
+    }                                                                                               \
+    DIF_FN int dif_tcmp_##N(const dif_ty *t, const void *a, const void *b) {                         \
+        (void)t;                                                                                    \
+        T x = *(const T *)a, y = *(const T *)b;                                                     \
+        return (x > y) - (x < y);                                                                   \
+    }                                                                                               \
+    DIF_FN void dif_tput_##N(const dif_ty *t, dif_buf *b, const void *p) {                           \
+        (void)t;                                                                                    \
+        PUTFN(b, (SIGNED) * (const T *)p);                                                          \
+    }                                                                                               \
+    DIF_FN uint64_t dif_thash_##N(const dif_ty *t, const void *p) {                                  \
+        (void)t;                                                                                    \
+        return dif_hash_u64((uint64_t) * (const T *)p);                                             \
+    }                                                                                               \
+    DIF_CONST dif_ty dif_ty_##N = {sizeof(T), NULL, NULL, 0, NULL, NULL, dif_teq_##N, dif_tput_##N, \
+                                   dif_tcmp_##N, dif_thash_##N};
+DIF_NUM_TY(int, int64_t, int64_t, dif_put_i64)
+DIF_NUM_TY(i8, int8_t, int64_t, dif_put_i64)
+DIF_NUM_TY(i16, int16_t, int64_t, dif_put_i64)
+DIF_NUM_TY(i32, int32_t, int64_t, dif_put_i64)
+DIF_NUM_TY(u8, uint8_t, uint64_t, dif_put_u64)
+DIF_NUM_TY(u16, uint16_t, uint64_t, dif_put_u64)
+DIF_NUM_TY(u32, uint32_t, uint64_t, dif_put_u64)
+DIF_NUM_TY(u64, uint64_t, uint64_t, dif_put_u64)
+DIF_FN void dif_put_boolp(dif_buf *b, int64_t v) { dif_put_bool(b, v != 0); }
+DIF_NUM_TY(bool, bool, int64_t, dif_put_boolp)
+
+DIF_FN void dif_str_inc_t(const dif_ty *t, const void *p) { (void)t; dif_str_inc(*(const dif_str *)p); }
+DIF_FN void dif_str_dec_t(const dif_ty *t, void *p) { (void)t; dif_str_dec(*(const dif_str *)p); }
+DIF_FN bool dif_str_eq_t(const dif_ty *t, const void *a, const void *b) {
+    (void)t;
+    return dif_eq(*(const dif_str *)a, *(const dif_str *)b);
+}
+DIF_FN int dif_str_cmp_t(const dif_ty *t, const void *a, const void *b) {
+    (void)t;
+    return dif_cmp(*(const dif_str *)a, *(const dif_str *)b);
+}
+DIF_FN void dif_str_put_t(const dif_ty *t, dif_buf *b, const void *p) { (void)t; dif_put_quoted(b, *(const dif_str *)p); }
+DIF_FN uint64_t dif_str_hash_t(const dif_ty *t, const void *p) {
+    (void)t;
+    return dif_hash_bytes(((const dif_str *)p)->p, ((const dif_str *)p)->n);
+}
+DIF_CONST dif_ty dif_ty_str = {sizeof(dif_str), NULL, NULL, 0, dif_str_inc_t, dif_str_dec_t, dif_str_eq_t,
+                               dif_str_put_t, dif_str_cmp_t, dif_str_hash_t};
+
+// ---------------------------------------------------------------------------------------
+// 5. Arrays: `n` elements at `d`, of type `et`. [N]T lives inline in the generated C; the
+//    list functions below call these with the data of the list.
+// ---------------------------------------------------------------------------------------
+
+DIF_FN void dif_arr_inc(const dif_ty *et, const void *d, int64_t n) {
+    if (et->inc)
+        for (int64_t i = 0; i < n; i++) et->inc(et, (const char *)d + (size_t)i * et->size);
+}
+DIF_FN void dif_arr_dec(const dif_ty *et, void *d, int64_t n) {
+    if (et->dec)
+        for (int64_t i = 0; i < n; i++) et->dec(et, (char *)d + (size_t)i * et->size);
+}
+#define DIF_AT(et, d, i) ((char *)(d) + (size_t)(i) * (et)->size)
+// checked index (R14): `arr[dif_idx(i, N, l, c)]`
+DIF_FN int64_t dif_idx(int64_t i, int64_t n, int l, int c) {
+    if (i < 0 || i >= n) dif_panicf(l, c, "index %" PRId64 " out of bounds for length %" PRId64, i, n);
+    return i;
+}
+DIF_FN bool dif_arr_eq(const dif_ty *et, const void *a, int64_t na, const void *b, int64_t nb) {
+    if (na != nb) return false;
+    for (int64_t i = 0; i < na; i++)
+        if (!et->eq(et, DIF_AT(et, a, i), DIF_AT(et, b, i))) return false;
+    return true;
+}
+DIF_FN void dif_arr_put(const dif_ty *et, dif_buf *b, const void *d, int64_t n) {
+    dif_put(b, "[", 1);
+    for (int64_t i = 0; i < n; i++) {
+        if (i) dif_put(b, ", ", 2);
+        et->put(et, b, DIF_AT(et, d, i));
+    }
+    dif_put(b, "]", 1);
+}
+DIF_FN int64_t dif_arr_index_of(const dif_ty *et, const void *d, int64_t n, const void *x) {
+    for (int64_t i = 0; i < n; i++)
+        if (et->eq(et, DIF_AT(et, d, i), x)) return i;
+    return -1;
+}
+DIF_FN bool dif_arr_contains(const dif_ty *et, const void *d, int64_t n, const void *x) {
+    return dif_arr_index_of(et, d, n, x) >= 0;
+}
+DIF_FN int64_t dif_arr_count(const dif_ty *et, const void *d, int64_t n, const void *x) {
+    int64_t k = 0;
+    for (int64_t i = 0; i < n; i++) k += et->eq(et, DIF_AT(et, d, i), x);
+    return k;
+}
+DIF_FN void dif_arr_reverse(const dif_ty *et, void *d, int64_t n) {
+    char tmp[256];
+    char *t = et->size <= sizeof tmp ? tmp : dif_alloc(et->size);
+    for (int64_t i = 0, j = n - 1; i < j; i++, j--) {
+        memcpy(t, DIF_AT(et, d, i), et->size);
+        memcpy(DIF_AT(et, d, i), DIF_AT(et, d, j), et->size);
+        memcpy(DIF_AT(et, d, j), t, et->size);
+    }
+    if (t != tmp) free(t);
+}
+// stable merge sort; `et->cmp` must exist (R28)
+DIF_FN void dif_arr_sort(const dif_ty *et, void *d, int64_t n) {
+    if (n < 2) return;
+    size_t sz = et->size;
+    char *tmp = dif_alloc(dif_bytes(n, sz, 0)), *src = d, *dst = tmp;
+    for (int64_t w = 1; w < n; w *= 2) {
+        for (int64_t i = 0; i < n; i += 2 * w) {
+            int64_t mid = i + w < n ? i + w : n, hi = i + 2 * w < n ? i + 2 * w : n;
+            int64_t a = i, b = mid, k = i;
+            while (a < mid && b < hi) {
+                bool right = et->cmp(et, DIF_AT(et, src, b), DIF_AT(et, src, a)) < 0;
+                memcpy(DIF_AT(et, dst, k++), DIF_AT(et, src, right ? b++ : a++), sz);
+            }
+            if (a < mid) memcpy(DIF_AT(et, dst, k), DIF_AT(et, src, a), (size_t)(mid - a) * sz);
+            if (b < hi) memcpy(DIF_AT(et, dst, k), DIF_AT(et, src, b), (size_t)(hi - b) * sz);
+        }
+        char *s = src;
+        src = dst;
+        dst = s;
+    }
+    if (src != (char *)d) memcpy(d, src, (size_t)n * sz);
+    free(tmp);
+}
+
+// ---------------------------------------------------------------------------------------
+// 6. Lists `[]T`: `dif_list *`, NULL is the empty list (no allocation). Block: header,
+//    then the elements. Every mutator takes the address of the variable and first makes the
+//    block unshared and large enough (copy-on-write).
+// ---------------------------------------------------------------------------------------
+
+typedef struct { int64_t rc, len, cap; } dif_list;
+#define DIF_LDATA(l) ((char *)(l) + sizeof(dif_list))
+
+DIF_FN int64_t dif_list_len(const dif_list *l) { return l ? l->len : 0; }
+DIF_FN void *dif_list_data(const dif_list *l) { return l ? DIF_LDATA(l) : NULL; }
+DIF_FN dif_list *dif_list_inc(dif_list *l) {
+    if (l) l->rc++;
+    return l;
+}
+DIF_FN void dif_list_dec(const dif_ty *et, dif_list *l) {
+    if (l && --l->rc == 0) {
+        dif_arr_dec(et, DIF_LDATA(l), l->len);
+        free(l);
+    }
+}
+DIF_FN dif_list *dif_list_alloc(const dif_ty *et, int64_t cap) {
+    dif_list *l = dif_alloc(dif_bytes(cap, et->size, sizeof(dif_list)));
+    l->rc = 1;
+    l->len = 0;
+    l->cap = cap;
+    return l;
+}
+// make *lp unshared with room for `extra` more elements (copy-on-write, growth)
+DIF_FN void dif_list_own(const dif_ty *et, dif_list **lp, int64_t extra) {
+    dif_list *l = *lp;
+    if (!l) {
+        *lp = dif_list_alloc(et, extra > 4 ? extra : 4);
+    } else if (l->rc > 1) {
+        int64_t cap = l->len + extra;
+        dif_list *n = dif_list_alloc(et, cap > 4 ? cap : 4);
+        memcpy(DIF_LDATA(n), DIF_LDATA(l), (size_t)l->len * et->size);
+        n->len = l->len;
+        dif_arr_inc(et, DIF_LDATA(n), n->len);
+        l->rc--;
+        *lp = n;
+    } else if (l->len + extra > l->cap) {
+        int64_t cap = l->cap * 2 > l->len + extra ? l->cap * 2 : l->len + extra;
+        l = dif_realloc(l, dif_bytes(cap, et->size, sizeof(dif_list)));
+        l->cap = cap;
+        *lp = l;
+    }
+}
+// literal `[a, b, c]`: the elements at `elems` move into the new list
+DIF_FN dif_list *dif_list_from(const dif_ty *et, const void *elems, int64_t n) {
+    if (n == 0) return NULL;
+    dif_list *l = dif_list_alloc(et, n);
+    memcpy(DIF_LDATA(l), elems, (size_t)n * et->size);
+    l->len = n;
+    return l;
+}
+// takes *x (the bytes move into the list)
+DIF_FN void dif_list_push(const dif_ty *et, dif_list **lp, const void *x) {
+    if (!*lp || (*lp)->rc > 1 || (*lp)->len == (*lp)->cap) dif_list_own(et, lp, 1);
+    dif_list *l = *lp;
+    memcpy(DIF_AT(et, DIF_LDATA(l), l->len), x, et->size);
+    l->len++;
+}
+// moves the last element to *out; false if the list is empty
+DIF_FN bool dif_list_pop(const dif_ty *et, dif_list **lp, void *out) {
+    if (dif_list_len(*lp) == 0) return false;
+    dif_list_own(et, lp, 0);
+    dif_list *l = *lp;
+    memcpy(out, DIF_AT(et, DIF_LDATA(l), --l->len), et->size);
+    return true;
+}
+DIF_FN void dif_list_insert(const dif_ty *et, dif_list **lp, int64_t i, const void *x, int line, int col) {
+    int64_t n = dif_list_len(*lp);
+    if (i < 0 || i > n)
+        dif_panicf(line, col, "insert index %" PRId64 " out of bounds for length %" PRId64, i, n);
+    dif_list_own(et, lp, 1);
+    dif_list *l = *lp;
+    char *d = DIF_LDATA(l);
+    memmove(DIF_AT(et, d, i + 1), DIF_AT(et, d, i), (size_t)(n - i) * et->size);
+    memcpy(DIF_AT(et, d, i), x, et->size);
+    l->len++;
+}
+// moves element i to *out
+DIF_FN void dif_list_remove(const dif_ty *et, dif_list **lp, int64_t i, void *out, int line, int col) {
+    dif_idx(i, dif_list_len(*lp), line, col);
+    dif_list_own(et, lp, 0);
+    dif_list *l = *lp;
+    char *d = DIF_LDATA(l);
+    memcpy(out, DIF_AT(et, d, i), et->size);
+    memmove(DIF_AT(et, d, i), DIF_AT(et, d, i + 1), (size_t)(l->len - i - 1) * et->size);
+    l->len--;
+}
+// read: borrowed pointer to element i
+DIF_FN const void *dif_list_at(const dif_ty *et, const dif_list *l, int64_t i, int line, int col) {
+    dif_idx(i, dif_list_len(l), line, col);
+    return DIF_AT(et, DIF_LDATA(l), i);
+}
+// write access (`xs[i].f = v`, `xs[i] += v`): unshared pointer to element i
+DIF_FN void *dif_list_wat(const dif_ty *et, dif_list **lp, int64_t i, int line, int col) {
+    dif_idx(i, dif_list_len(*lp), line, col);
+    dif_list_own(et, lp, 0);
+    return DIF_AT(et, DIF_LDATA(*lp), i);
+}
+// `xs[i] = v`: takes *x, releases the old element
+DIF_FN void dif_list_set(const dif_ty *et, dif_list **lp, int64_t i, const void *x, int line, int col) {
+    void *p = dif_list_wat(et, lp, i, line, col);
+    dif_dec(et, p);
+    memcpy(p, x, et->size);
+}
+// first()/last(): borrowed pointer or NULL
+DIF_FN const void *dif_list_first(const dif_ty *et, const dif_list *l) {
+    (void)et;
+    return dif_list_len(l) ? DIF_LDATA(l) : NULL;
+}
+DIF_FN const void *dif_list_last(const dif_ty *et, const dif_list *l) {
+    return dif_list_len(l) ? DIF_AT(et, DIF_LDATA(l), l->len - 1) : NULL;
+}
+DIF_FN void dif_list_sort(const dif_ty *et, dif_list **lp) {
+    if (dif_list_len(*lp) < 2) return;
+    dif_list_own(et, lp, 0);
+    dif_arr_sort(et, DIF_LDATA(*lp), (*lp)->len);
+}
+DIF_FN void dif_list_reverse(const dif_ty *et, dif_list **lp) {
+    if (dif_list_len(*lp) < 2) return;
+    dif_list_own(et, lp, 0);
+    dif_arr_reverse(et, DIF_LDATA(*lp), (*lp)->len);
+}
+// slice(a, b) of a list or array: a new list with copies of the elements
+DIF_FN dif_list *dif_arr_slice(const dif_ty *et, const void *d, int64_t n, int64_t a, int64_t b, int l, int c) {
+    if (a < 0 || a > b || b > n)
+        dif_panicf(l, c, "slice %" PRId64 "..%" PRId64 " out of bounds for length %" PRId64, a, b, n);
+    if (a == b) return NULL;
+    dif_list *r = dif_list_from(et, DIF_AT(et, d, a), b - a);
+    dif_arr_inc(et, DIF_LDATA(r), r->len);
+    return r;
+}
+// repeat(x, n): x is borrowed
+DIF_FN dif_list *dif_list_repeat(const dif_ty *et, const void *x, int64_t n, int l, int c) {
+    if (n < 0) dif_panicf(l, c, "repeat count %" PRId64 " is negative", n);
+    if (n == 0) return NULL;
+    dif_list *r = dif_list_alloc(et, n);
+    for (int64_t i = 0; i < n; i++) {
+        memcpy(DIF_AT(et, DIF_LDATA(r), i), x, et->size);
+        dif_inc(et, x);
+    }
+    r->len = n;
+    return r;
+}
+// join of a list/array of str
+DIF_FN dif_str dif_arr_join(const dif_str *d, int64_t n, dif_str sep) {
+    dif_buf b = dif_buf_new();
+    for (int64_t i = 0; i < n; i++) {
+        if (i) dif_put_str(&b, sep);
+        dif_put_str(&b, d[i]);
+    }
+    return dif_take(&b);
+}
+
+// Read-only list methods are the array functions applied to the data of the list.
+#define dif_list_eq(et, a, b) dif_arr_eq(et, dif_list_data(a), dif_list_len(a), dif_list_data(b), dif_list_len(b))
+#define dif_list_put(et, b, l) dif_arr_put(et, b, dif_list_data(l), dif_list_len(l))
+#define dif_list_contains(et, l, x) dif_arr_contains(et, dif_list_data(l), dif_list_len(l), x)
+#define dif_list_index_of(et, l, x) dif_arr_index_of(et, dif_list_data(l), dif_list_len(l), x)
+#define dif_list_count(et, l, x) dif_arr_count(et, dif_list_data(l), dif_list_len(l), x)
+#define dif_list_slice(et, l, a, b, ln, c) dif_arr_slice(et, dif_list_data(l), dif_list_len(l), a, b, ln, c)
+#define dif_list_join(l, sep) dif_arr_join((const dif_str *)dif_list_data(l), dif_list_len(l), sep)
+
+// Descriptors of list and array types: `DIF_LIST_TY(&elem)`, `DIF_ARRAY_TY(&elem, N)`.
+DIF_FN void dif_list_inc_t(const dif_ty *t, const void *p) { (void)t; dif_list_inc(*(dif_list *const *)p); }
+DIF_FN void dif_list_dec_t(const dif_ty *t, void *p) { dif_list_dec(t->elem, *(dif_list **)p); }
+DIF_FN bool dif_list_eq_t(const dif_ty *t, const void *a, const void *b) {
+    return dif_list_eq(t->elem, *(const dif_list *const *)a, *(const dif_list *const *)b);
+}
+DIF_FN void dif_list_put_t(const dif_ty *t, dif_buf *b, const void *p) {
+    dif_list_put(t->elem, b, *(const dif_list *const *)p);
+}
+DIF_FN uint64_t dif_arr_hash(const dif_ty *et, const void *d, int64_t n) {
+    uint64_t h = (uint64_t)n;
+    for (int64_t i = 0; i < n; i++) h = dif_hash_mix(h, et->hash(et, DIF_AT(et, d, i)));
+    return h;
+}
+DIF_FN uint64_t dif_list_hash_t(const dif_ty *t, const void *p) {
+    const dif_list *l = *(const dif_list *const *)p;
+    return dif_arr_hash(t->elem, dif_list_data(l), dif_list_len(l));
+}
+#define DIF_LIST_TY(E) {sizeof(dif_list *), (E), NULL, 0, dif_list_inc_t, dif_list_dec_t, dif_list_eq_t, dif_list_put_t, NULL, dif_list_hash_t}
+
+DIF_FN void dif_array_inc_t(const dif_ty *t, const void *p) { dif_arr_inc(t->elem, p, t->len); }
+DIF_FN void dif_array_dec_t(const dif_ty *t, void *p) { dif_arr_dec(t->elem, p, t->len); }
+DIF_FN bool dif_array_eq_t(const dif_ty *t, const void *a, const void *b) { return dif_arr_eq(t->elem, a, t->len, b, t->len); }
+DIF_FN void dif_array_put_t(const dif_ty *t, dif_buf *b, const void *p) { dif_arr_put(t->elem, b, p, t->len); }
+DIF_FN uint64_t dif_array_hash_t(const dif_ty *t, const void *p) { return dif_arr_hash(t->elem, p, t->len); }
+// the size of an array type is N times the element size, so the backend passes both
+#define DIF_ARRAY_TY(E, N, SIZE) {(SIZE), (E), NULL, (N), dif_array_inc_t, dif_array_dec_t, dif_array_eq_t, dif_array_put_t, NULL, dif_array_hash_t}
+
+// ---------------------------------------------------------------------------------------
+// 7. str methods that return lists
+// ---------------------------------------------------------------------------------------
+
+DIF_CONST dif_ty dif_ty_list_str = DIF_LIST_TY(&dif_ty_str);
+
+DIF_FN dif_list *dif_str_split(dif_str s, dif_str sep, int l, int c) {
+    if (sep.n == 0) dif_panic("split needs a non-empty separator", l, c);
+    dif_list *r = NULL;
+    int64_t i = 0;
+    for (;;) {
+        dif_str rest = {s.p + i, s.n - i, NULL};
+        int64_t k = dif_find(rest, sep);
+        int64_t end = k < 0 ? s.n : i + k;
+        dif_str part = dif_str_sub(s, i, end);
+        dif_list_push(&dif_ty_str, &r, &part);
+        if (k < 0) return r;
+        i = end + sep.n;
+    }
+}
+DIF_FN dif_list *dif_str_lines(dif_str s) {
+    dif_list *r = NULL;
+    int64_t i = 0;
+    while (i < s.n) {
+        const char *q = memchr(s.p + i, '\n', (size_t)(s.n - i));
+        int64_t end = q ? q - s.p : s.n, e = end;
+        if (q && e > i && s.p[e - 1] == '\r') e--;
+        dif_str line = dif_str_sub(s, i, e);
+        dif_list_push(&dif_ty_str, &r, &line);
+        i = end + 1;
+    }
+    return r;
+}
+
 #endif // DIF_RT_H
