@@ -722,8 +722,7 @@ ui.tile("0.3", label: "release notes", on_press: Msg.OpenNotes)
 []Person adults = people.filter(bool(Person p) { return p.age >= 18 })
 people.sort_by(bool(Person a, Person b) { return a.age < b.age })
 
-int total = 0
-xs.each(void(int x) { total += x })
+bool found = xs.any(bool(int x) { return x > 3 })
 
 void!DbErr transfer(db.Conn conn, int from, int to, int amount) {
     try conn.transaction() {

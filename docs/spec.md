@@ -211,7 +211,8 @@ expr     = binary ;
 binary   = unary { binop unary } ;          (* geordnet nach der Tabelle *)
 unary    = { "-" | "!" | "~" } ( try_expr | postfix ) ;
 try_expr = "try" postfix [ "or" postfix ] ;          (* R12 *)
-postfix  = primary { "(" [ args ] ")" | "[" expr "]" | "." IDENT } [ block ] ;   (* block: Block-Argument, R26; nur direkt hinter ")" *)
+suffix   = "(" [ args ] ")" | "[" expr "]" | "." IDENT ;
+postfix  = primary { suffix } | primary { suffix } "(" [ args ] ")" block ;   (* zweite Form: Block-Argument, R26 *)
 args     = arg { "," arg } [ "," ] ;
 arg      = [ "mut" ] expr | func_lit ;               (* nach mut steht ein Ort (place, R3); R6; func_lit: R26 *)
 primary  = INT | FLOAT | STRING | RUNE | "true" | "false" | IDENT | "self" | "(" expr ")"
@@ -323,8 +324,8 @@ discard     = "_" "=" expr ;
 - Jeder Block steht in `{ }`, auch bei einer einzigen Anweisung: `if x > 0 print(x)` ist `R3`, Hinweis `put the body in braces: if x > 0 { … }`.
 - Das `{` eines Blocks steht in derselben Zeile wie seine Kopfzeile; `}` und `else` stehen in einer Zeile (`} else {`).
 - Zwei Anweisungen in einer Zeile sind `R3`, Hinweis `put each statement on its own line`. Folgt einer Anweisung ein Token, das keine Anweisung beginnen kann (`)`, `=`), ist das `S1`.
-- Die Kopfzeile endet am ersten `{` auf Klammerebene 0. Darum ist `if hall.is_full() { … }` immer eine Bedingung mit Rumpf, nie ein Aufruf mit Block-Argument (R26). Ein Struct-Literal oder ein `if`-Ausdruck in einer Kopfzeile steht deshalb in Klammern: `if p == (Point{x: 0, y: 0}) {`. Ein Struct-Literal ohne Klammern dort ist `S1` am Typnamen, Meldung `a struct literal in a header needs parentheses`, Hinweis mit der geklammerten Kopfzeile. Ein Map-Literal (R30) steht dort ebenso in Klammern; ungeklammert ist es `S1` an seinem `{`, Meldung `a map literal in a header needs parentheses`. Ein Listen-Literal braucht keine Klammern: `for int x in [1, 2, 3] {`. Ein Funktionsliteral steht in den Klammern seines Aufrufs und beendet die Kopfzeile nicht; ein Aufruf mit Block-Argument steht in einer Kopfzeile nur in Klammern (R26).
-- Klammern um die Bedingung sind erlaubt (`if (x > 0) {` ist ein Klammerausdruck); `dif fmt` entfernt sie.
+- Die Kopfzeile endet am ersten `{` auf Klammerebene 0. Darum ist `if hall.is_full() { … }` immer eine Bedingung mit Rumpf, nie ein Aufruf mit Block-Argument (R26). Ein Struct-Literal oder ein `if`-Ausdruck in einer Kopfzeile steht deshalb in Klammern: `if p == (Point{x: 0, y: 0}) {`. Ein Struct-Literal ohne Klammern dort ist `S1` am Typnamen, Meldung `a struct literal in a header needs parentheses`, Hinweis mit der geklammerten Kopfzeile. Ein Map-Literal (R30) steht dort ebenso in Klammern; ungeklammert ist es `S1` an seinem `{`, Meldung `a map literal in a header needs parentheses`. Ein Listen-Literal braucht keine Klammern: `for int x in [1, 2, 3] {`. Ein Funktionsliteral steht in den Klammern seines Aufrufs und beendet die Kopfzeile nicht; ein Block-Argument im Kopf braucht Klammern um den Aufruf (R26).
+- Klammern um die Bedingung sind erlaubt (`if (x > 0) {` ist ein Klammerausdruck); `dif fmt` entfernt nur Klammern, die nichts bewirken, nicht die, ohne die ein `{` in der Kopfzeile den Kopf beenden würde (um ein Struct- oder Map-Literal, um einen Aufruf mit Block-Argument, R26).
 - `elif` (Python) und `elsif` (Ruby, Perl) sind `R3`, Hinweis `use else if`, auch direkt nach `}`; der Zweig wird danach wie `else if` gelesen.
 - `=` in einer Bedingung (`if x = 1 {`) ist `S1`, Hinweis `if x == 1 {`.
 - Eine Anweisung, die weder Aufruf noch Zuweisung noch Deklaration ist (z. B. `x + 1` allein), ist `S4`.
@@ -634,7 +635,7 @@ Teil 2a legt fest:
   - sonst: `` `x` is changed but never read afterwards ``, Hinweis `use the value, or remove the change`.
   
   Gemeldet wird pro Wurzel die erste verlorene Änderung. Der Anfangswert einer Deklaration ist keine Änderung: `int x = 0` gefolgt von `x = 1; x = 2; print(x)` meldet `x = 1`.
-- **Keine Aliase.** In einem Aufruf geht ein Ort höchstens einmal veränderbar hinein: als `self` einer Methode, die `self` ändert, oder als `mut`-Argument. Zwei solche Orte dürfen sich nicht überlappen (`a` und `a.x`, oder zweimal `a.x`), sonst `R6` am zweiten, Meldung `` `p` goes into this call changeable twice ``, Hinweis `pass it changeable only once`. Liest der Aufruf denselben Ort zusätzlich als Argument ohne `mut`, bekommt dieses Argument den Wert von vor dem Aufruf. Ein Aufruf im Argument eines anderen ist ein eigener Aufruf: `f(mut a, g(mut a))` ist erlaubt, `g` ist fertig, bevor `f` beginnt.
+- **Keine Aliase.** In einem Aufruf geht ein Ort höchstens einmal veränderbar hinein: als `self` einer Methode, die `self` ändert, als `mut`-Argument oder über ein Funktionsliteral, das ihn ändert (R26). Zwei solche Orte dürfen sich nicht überlappen (`a` und `a.x`, oder zweimal `a.x`), sonst `R6` am zweiten, Meldung `` `p` goes into this call changeable twice ``, Hinweis `pass it changeable only once`. Liest der Aufruf denselben Ort zusätzlich als Argument ohne `mut`, bekommt dieses Argument den Wert von vor dem Aufruf. Ein Aufruf im Argument eines anderen ist ein eigener Aufruf: `f(mut a, g(mut a))` ist erlaubt, `g` ist fertig, bevor `f` beginnt.
 
 Teil 2c ergänzt Elemente:
 
@@ -644,8 +645,8 @@ Teil 2c ergänzt Elemente:
 Teil 2d ergänzt Funktionsliterale und Blöcke (R26):
 
 - **Ein Literal ändert.** Ändert der Rumpf eines Literals oder Blocks einen Ort der Umgebung, so ändert der Aufruf, in dem das Literal steht, diesen Ort: das zählt wie ein `mut`-Argument, auch wenn am Literal kein `mut` steht (die Änderung steht im Text des Arguments). Alle Änderungen eines Literals an Orten mit derselben Wurzel bilden *einen* Weg in den Aufruf: ein Literal, das `p.x` und `p.y` ändert, geht mit `p` einmal hinein. Die Änderung eines inneren Literals gehört auch dem äußeren. In einer Methode ändert ein Literal, das `self` ändert, `self` der Methode (R7).
-- **Aliasregel.** Ein Ort geht höchstens einmal veränderbar in einen Aufruf: als `self`, als `mut`-Argument oder über ein Literal. Zwei Wege mit überlappenden Orten (`xs.sort_by(…)` mit einem Literal, das `xs` ändert; zwei Literale, die dieselbe Variable ändern; `f(mut a, …)` mit einem Literal, das `a.x` ändert) sind `R6` wie oben, Meldung `` `xs` goes into this call changeable twice ``, am zweiten Weg in Quelltext-Reihenfolge (`self` steht vor den Argumenten); ist das ein Literal, an seiner ersten Änderung des Ortes darin.
-- **Schnappschuss.** Liest der Aufruf einen Ort, den er auf einem Weg ändert, auf einem anderen (als `self`, als Argument oder in einem anderen Literal), sieht dieser Teil den Wert von vor dem Aufruf: `xs.filter(…)` läuft über `xs` wie vor dem Aufruf, auch wenn das Literal `xs` ändert. Das Literal, das den Ort ändert, liest ihn live und sieht seine eigenen Änderungen (`total += x` rechnet mit dem Wert des vorigen Durchlaufs).
+- **Aliasregel.** Es gilt „Keine Aliase“ oben; ein Literal ist ein Weg in den Aufruf. Überlappen zwei Wege (`xs.sort_by(…)` mit einem Literal, das `xs` ändert; zwei Literale, die dieselbe Variable ändern; `f(mut a, …)` mit einem Literal, das `a.x` ändert), ist es `R6` am zweiten in Quelltext-Reihenfolge (`self` steht vor den Argumenten), bei einem Literal an seiner ersten Änderung des Ortes darin.
+- **Schnappschuss.** „Keine Aliase“ gilt auch für Literale: `xs.filter(…)` läuft über `xs` wie vor dem Aufruf, auch wenn das Literal `xs` ändert. Das Literal, das den Ort ändert, liest ihn live und sieht seine eigenen Änderungen (`total += x` rechnet mit dem Wert des vorigen Durchlaufs).
 - **Verlorene Änderung.** Der Rumpf eines Literals zählt wie ein Schleifenrumpf (siehe oben), der Aufruf als die Stelle, an der er läuft; was ein Literal liest, gilt als am Aufruf gelesen. Eine Änderung im Literal an einem Ort der Umgebung ist verloren, wenn danach weder im Literal (nächster Durchlauf, später im Rumpf) noch nach dem Aufruf ihre Wurzel gelesen wird, bevor sie ganz neu zugewiesen wird oder die Funktion endet. Sie ist `R6` an der Änderung im Literal, mit den Meldungen oben; an einem Parameter ohne `mut` (der umgebenden Funktion oder des Literals) lautet sie `` the change to `p` is lost: `p` is a copy ``, bei einem Parameter des Literals ohne Hinweis, weil sein Typ vom Aufruf kommt. Ein `mut`-Parameter der umgebenden Funktion gilt an deren Ende als gelesen, auch wenn nur ein Literal ihn ändert.
 - **Überflüssiges `mut`** zählt Änderungen in Literalen mit.
 
@@ -1502,6 +1503,32 @@ main.dif:6:5: error[R13]: result of `square(3)` is never used
   hint: use it, or discard it explicitly with `_ = square(3)`
 ```
 
+### R13, Teil 2d — Wirkung eines Aufrufs mit Literal
+
+Die Regeln stehen bei R13 oben (Teil 2d). Ein Literal mit Wirkung macht den Aufruf als Anweisung gültig; ohne sie bleibt der Aufruf `R13`.
+
+```dif snippet
+[]int xs = [1, 2, 3]
+xs.any(bool(int x) {
+    print(x)
+    return x == 2
+})
+```
+
+Ausgabe: `1`, `2`.
+
+```dif error R13
+void main() {
+    []int xs = [1, 2, 3]
+    xs.filter(bool(int x) { return x > 1 })
+}
+```
+
+```
+main.dif:3:5: error[R13]: result of `xs.filter(bool(int x) { return x > 1 })` is never used
+  hint: use it, or discard it explicitly with `_ = xs.filter(bool(int x) { return x > 1 })`
+```
+
 ### R14 — Abbruch bei Programmierfehlern
 
 **Regel.** Programmierfehler brechen mit Meldung und Position ab: Index außerhalb, Überlauf, Division durch 0, ungenaue Umwandlung, `assert`. Immer, auch im Release.
@@ -1786,10 +1813,10 @@ main.dif:5:6: error[R18]: test "sum" is declared twice
 
 ### R26 — Funktionswerte und Blöcke
 
-**Regel.** Ein Funktionswert hat den Typ `R(T1, T2)` und wird geschrieben wie eine Funktion ohne Namen: `R(T1 a, T2 b) { … }`. Ein Literal steht nur direkt als Argument eines Aufrufs (nie in einer Variable, einem struct, einer Liste, in `spawn` oder als Typargument) und lebt nur während dieses Aufrufs: es darf ringsum lesen und ändern. Ein Literal ohne Parameter darf als Block `{ … }` direkt hinter der schließenden Klammer stehen; `return` und `try` darin beenden den Block. Benannte Funktionen und Varianten-Konstruktoren haben keine Umgebung und sind gewöhnliche Werte, die man speichern darf. Ändert ein Funktionswert einen Parameter, steht `mut` in seinem Typ.
+**Regel.** Ein Funktionswert hat den Typ `R(T1, T2)` und wird geschrieben wie eine Funktion ohne Namen: `R(T1 a, T2 b) { … }`. Ein Literal steht nur direkt als Argument eines Aufrufs (nie in einer Variable, einem struct, einer Liste, in `spawn` oder als Typargument) und lebt nur während dieses Aufrufs: es darf ringsum lesen und ändern. Ein Literal ohne Parameter darf als Block `{ … }` direkt hinter der schließenden Klammer stehen; `return` und `try` darin beenden den Block. Benannte Funktionen und Varianten-Konstruktoren haben keine Umgebung; ab M3 sind sie gewöhnliche Werte, die man speichern darf, in M2 gehen sie nur als Argument an einen Funktionstyp. Ändert ein Funktionswert einen Parameter, steht `mut` in seinem Typ.
 
 ```ebnf
-func_type   = type "(" [ ftype_param { "," ftype_param } ] ")" ;   (* nur als Typ eines Parameters, R2 *)
+func_type   = type "(" [ ftype_param { "," ftype_param } [ "," ] ] ")" ;   (* nur als Typ eines Parameters, R2 *)
 ftype_param = [ "mut" ] type ;
 func_lit    = type "(" [ lit_param { "," lit_param } [ "," ] ] ")" block ;   (* nur als arg, §2 *)
 lit_param   = [ "mut" ] type IDENT ;
@@ -1797,11 +1824,11 @@ lit_param   = [ "mut" ] type IDENT ;
 
 **Grammatik:** `func_type`, `func_lit` hier; `param` (R2), `arg` und das Block-Argument am Ende von `postfix` (§2), `block` (R3).
 
-Teil 2d legt fest, was zu M2 gehört: Literale und Blöcke an Aufrufen, Funktionstypen als Typ eines Parameters, die Methoden aus §4.7. Benannte Funktionen und Varianten-Konstruktoren als Werte, benannte Parameter (R25) und eigene Generics (R27) folgen mit M3; bis dahin ist ein Literal der einzige Wert, der an einen Funktionstyp passt.
+Teil 2d legt fest, was zu M2 gehört: Literale und Blöcke an Aufrufen, Funktionstypen als Typ eines Parameters, die Methoden aus §4.7. Speichern von Funktionen in Variablen, Feldern und Listen, benannte Parameter (R25) und eigene Generics (R27) folgen mit M3; Funktionstypen in `extern`-Deklarationen und C-Callbacks (R24) mit einer späteren Scheibe. Bis dahin passt an einen Funktionstyp ein Literal, eine benannte Funktion oder ein Varianten-Konstruktor.
 
 **Literal.**
 
-- Ein Literal hat den Rückgabetyp vorn (R2), dann Parameter wie eine Funktion (ohne Funktionstypen unter ihnen) und einen Rumpf: `bool(Person p) { return p.age >= 18 }`. Es ist kein Wert, den man ablegen kann: es steht nur als Argument. Ein Argument ist ein Literal, wenn es mit einem Typ beginnt, auf den `(` folgt, und in den Klammern entweder `Typ Name` oder gleich `)` mit einem `{` in derselben Zeile steht; `T(x)` ist dagegen die Umwandlung (R31).
+- Ein Literal hat den Rückgabetyp vorn (R2), dann Parameter wie eine Funktion (ohne Funktionstypen unter ihnen) und einen Rumpf: `bool(Person p) { return p.age >= 18 }`. Es ist kein Wert, den man ablegen kann: es steht nur als Argument. **Erkennung:** Ein Argument ist ein Literal, wenn es mit einem `type` (R2) und `(` beginnt und danach eines von dreien folgt: `mut`, ein `type` und ein Name (`int x`, `mut int x`), oder `)` und `{` in derselben Zeile. `T(x)` (R31) hat dort einen Ausdruck, der nie so beginnt, und ist die Umwandlung; `f(a)(b)` und `x.y(z)` beginnen nicht mit einem `type` und `(`, weil ein Name oder `.` folgt, sind also Aufrufe.
 - Sein Typ ist `R(T1, T2)`; er muss dem Funktionstyp des Parameters genau gleichen: Rückgabetyp, Parametertypen und `mut` (Namen zählen nicht). Sonst `R8` am Literal, Meldung `` expected bool(int), found int(int) ``, ohne Hinweis. In Meldungen stehen Funktionstypen so: `bool(int)`, `void(mut App, Msg)`, `int!ParseErr(int)`.
 - **Außerhalb eines Arguments** ist ein Literal `R26` an seinem ersten Zeichen, Meldung `` a function literal can only be an argument of a call ``, Hinweis `pass it directly as an argument of a call`; sein Rumpf wird dann nicht weiter geprüft. Das gilt für jede Stelle: Initialwert, Zuweisung, `return`, Operand, Listen- oder Struct-Literal, `_ =`.
 - Der Rumpf ist ein eigener Funktionsrumpf (R3, R8): `return` verlässt nur das Literal und liefert einen `R`; ein Literal mit Rückgabetyp endet auf jedem Weg mit `return` und Wert, sonst `R8` am ersten Zeichen des Literals, Meldung `` the literal does not return a value on every path ``, Hinweis `end it with return, e.g. return false` (wie bei Funktionen mit `0`, `false`, `""` oder `…`). `try` gilt für das Literal wie für eine Funktion (R12): es ist `R12`, wenn der Rückgabetyp `R` kein `T!E` oder `?T` ist; ein Fehler beendet nur das Literal, nicht die Funktion ringsum. `break` und `continue` sehen keine Schleife außerhalb des Literals: sie sind dort `R11` (`` `break` outside a loop ``), auch wenn das Literal in einer Schleife steht.
@@ -1810,22 +1837,22 @@ Teil 2d legt fest, was zu M2 gehört: Literale und Blöcke an Aufrufen, Funktion
 **Funktionstypen als Parameter.**
 
 - Ein Funktionstyp `R(T1, mut T2)` steht nur als Typ eines Parameters einer Funktion oder Methode: `void times(int n, void() body)`. Überall sonst (Variable, Feld, Rückgabetyp, Elementtyp, Typ eines Literal-Parameters) ist er `R26` am Typ, Meldung `` a function type is only allowed for a parameter ``, ohne Hinweis. Ein `?` oder `!E` vor der Klammer gehört zum Rückgabetyp `R`; `void` darf der Rückgabetyp sein.
-- Im Rumpf ist ein solcher Parameter ein Name, der nur aufgerufen oder als Argument weitergereicht wird: `body()`, `f(x)`, `each(xs, f)`. Aufruf und Argumente folgen den Regeln für Funktionen (R6, R8): `` `f` takes 1 argument, found 2 ``, `mut` am Argument genau dort, wo der Typ es verlangt. Jede andere Benutzung (zuweisen, vergleichen, zurückgeben, in ein struct legen) ist `R26` am Namen, Meldung `` `f` is a function and can only be called or passed as an argument ``, ohne Hinweis. Darum kann nichts über das Ende des Aufrufs hinaus leben: ein Literal wird nie gespeichert oder zurückgegeben, es gibt keine Captures, keine Zyklen und keinen GC.
-- Ein Funktionsname oder Varianten-Konstruktor an der Stelle eines Funktionstyps (`xs.filter(big)`) ist `R26` am Namen, Meldung `` `big` is a function, not a literal ``, Hinweis `write a literal that calls it`; sie werden erst mit M3 zu Werten.
+- Im Rumpf ist ein solcher Parameter ein Name, der nur aufgerufen oder als Argument weitergereicht wird: `body()`, `f(x)`, `each(xs, f)`. Aufruf und Argumente folgen den Regeln für Funktionen (R6, R8): `` `f` takes 1 argument, found 2 ``, `mut` am Argument genau dort, wo der Typ es verlangt; ein `mut` im Funktionstyp zählt für R6 als Änderung des Orts, auch wenn kein Rumpf zu sehen ist. Jede andere Benutzung (zuweisen, vergleichen, zurückgeben, in ein struct legen) ist `R26` am Namen, Meldung `` `f` is a function and can only be called or passed as an argument ``, ohne Hinweis. Darum kann nichts über das Ende des Aufrufs hinaus leben: ein Literal wird nie gespeichert oder zurückgegeben, es gibt keine Captures, keine Zyklen und keinen GC.
+- **Benannte Funktionen und Konstruktoren.** An der Stelle eines Funktionstyps darf statt eines Literals der Name einer Funktion oder ein Varianten-Konstruktor stehen (`xs.filter(is_even)`, `xs.map(Shape.Box)`); sein Typ ist der der Deklaration (`bool(int)`, `Shape(int)`, mit `mut` wie dort) und muss genau passen (`R8` wie beim Literal). Für die Wirkung (R13) zählt die übergebene Funktion wie ein Literal. Eine Funktion ist sonst kein Wert: jede andere Benutzung ihres Namens als der Aufruf (`_ = is_even`, Zuweisung, `return`, Feld) ist `R26` am Namen, mit derselben Meldung wie bei einem Funktionsparameter, `` `is_even` is a function and can only be called or passed as an argument ``, ohne Hinweis. Speichern in Variablen, Feldern und Listen kommt mit M3.
 - Ein Aufruf eines Funktionsparameters hat selbst keine Wirkung (R13): ein Ergebnis, das nicht `void` ist, wird verwendet oder mit `_ =` verworfen.
 
 **Block-Argument.**
 
-- Ein Block steht direkt hinter der `)` eines Aufrufs, mit dem `{` in derselben Zeile: `times(3) { … }`, `ui.tiles() { … }`, `str body = try net.retry(3) { … }`. Er ist ein Literal ohne Parameter und zugleich das **letzte Argument**: sein Typ ist der Typ des letzten Parameters der Funktion, der `R()` sein muss. Die Klammern bleiben, auch wenn sie leer sind. Nach dem schließenden `}` endet der Ausdruck; ein weiteres `.name` oder `(` ist `S1`.
+- Ein Block steht direkt hinter der `)` eines Aufrufs, mit dem `{` in derselben Zeile: `times(3) { … }`, `ui.tiles() { … }`, `str body = try net.retry(3) { … }`. Er ist ein Literal ohne Parameter und zugleich das **letzte Argument**: sein Typ ist der Typ des letzten Parameters der Funktion, der `R()` sein muss. Die Klammern bleiben, auch wenn sie leer sind. Ein Block steht nur hinter einer `)`; `a.b { … }` ist `S1`. Nach dem schließenden `}` endet der Ausdruck (die Kette `postfix`, §2); ein weiteres `.name` oder `(` ist `S1`.
 - Der Block zählt als Argument: hat der Aufruf dann zu viele, ist es `R8` (`` `times` takes 2 arguments, found 3 ``). Ist der letzte Parameter kein `R()` (ein Parameter anderen Typs oder ein Funktionstyp mit Parametern), ist es `R26` am `{`, Meldung `` `filter` cannot take a block: its last parameter has type bool(int) `` (bei `[]int.push` mit Typ `int`), Hinweis bei einem Funktionstyp `a block has no parameters; pass a literal instead`, sonst keiner; der Block wird dann nicht weiter geprüft. Typen im Block (`return`) prüft R8 mit dem `R` des Parameters.
 - Steht das `{` erst in der nächsten Zeile, ist das `R3` an der Stelle direkt hinter der `)`, Meldung `` the block argument of `times` must start on the same line ``, Hinweis: die Zeile mit `{` am Ende; der Block wird danach gelesen wie ein Block-Argument, es folgt keine Meldung über die Argumente.
-- **Kopfzeilen** (R3): die Kopfzeile von `if`, `while`, `for` und `switch` endet am ersten `{` auf Klammerebene 0. Ein Literal steht in den Klammern seines Aufrufs und beendet sie darum nie; `if xs.any(bool(int x) { return x > 1 }) {` ist eine Bedingung mit Rumpf. Ein Block-Argument hinter einem Aufruf auf Ebene 0 ist nie möglich: `if f() {` ist Bedingung und Rumpf. Soll eine Bedingung einen Aufruf mit Block enthalten, steht dieser in Klammern oder in den Klammern eines anderen Aufrufs.
-- **Kanonisch.** Ein Literal ohne Parameter als letztes Argument ist dasselbe wie ein Block (`times(3, void() { … })` und `times(3) { … }`); der Compiler nimmt beides an, `dif fmt` schreibt den Block. Ausnahme ohne Meldung: in einer Kopfzeile auf Ebene 0 bleibt das Literal, weil der Block dort die Kopfzeile beenden würde. Ein Rumpf aus genau einer Anweisung steht einzeilig, wenn die Zeile dann höchstens 100 Zeichen lang ist, sonst mehrzeilig; mehrere Anweisungen stehen immer mehrzeilig, ein Block immer.
+- **Kopfzeilen** (R3): im Kopf von `if`, `while`, `for` und `switch` beendet ein `{` außerhalb von Klammern den Kopf, wie beim Struct-Literal. Ein Literal steht in den Klammern seines Aufrufs und ist darum im Kopf überall erlaubt: `if xs.any(bool(int x) { return x > 1 }) {`. Ein Block-Argument im Kopf braucht Klammern um den ganzen Aufruf: `if (ready() { … }) {`; ohne sie ist das `{` der Rumpf, und der Aufruf hat ein Argument zu wenig (`R8`, Hinweis siehe Beispiel).
+- **Kanonisch.** Ein Literal ohne Parameter als letztes Argument ist dasselbe wie ein Block (`times(3, void() { … })` und `times(3) { … }`); der Compiler nimmt beides an, `dif fmt` schreibt den Block, in einer Kopfzeile dagegen das Literal (eine Regel ohne Tiefe: der Kopf enthält nie einen Block). Klammern, die dadurch nichts mehr bewirken, entfernt `dif fmt` (R3); notwendige bleiben, es entfernt nie nur Klammern, die ein Struct- oder Map-Literal oder einen Block im Kopf schützen. Ein Rumpf aus genau einer Anweisung ohne eigenen Block steht einzeilig, wenn die Zeile dann höchstens 100 Zeichen lang ist, sonst mehrzeilig; mehrere Anweisungen oder eine Anweisung mit eigenem Block (`if`, `for` …) stehen mehrzeilig, ein Block immer.
 
 **Umgebung, Lesen und Ändern (R6).**
 
-- Ein Literal sieht alle Namen, die an seiner Stelle gelten, und in einer Methode `self` der Methode (nicht ein eigenes). Es **liest live**: den Wert, den der Ort hat, wenn das Literal läuft; eine Kopie wird nicht angelegt.
-- Ein Literal darf Orte der Umgebung **ändern**, ohne `mut`: der Aufrufer sieht die Änderung im Text des Arguments, das Literal steht ja im Aufruf. Es gilt R6 unverändert, mit dem Literal als Quelle der Änderung: eine `const`-Wurzel ist `R4`; ein Ort der Umgebung wird wie ein `mut`-Argument des Aufrufs behandelt (Teil 2d bei R6); ein Parameter ohne `mut` der umgebenden Funktion ist eine Kopie, seine Änderung im Literal ist darum verloren, wenn sie niemand liest.
+- Ein Literal sieht alle Namen, die an seiner Stelle gelten, und in einer Methode `self` der Methode (nicht ein eigenes). Es **liest live**: den Wert, den der Ort hat, wenn das Literal läuft; das gilt, solange der Aufruf den Ort nicht auf anderem Weg ändert (dann der Schnappschuss, R6 „Keine Aliase“).
+- Ein Literal darf Orte der Umgebung **ändern**, ohne `mut`: der Aufrufer sieht die Änderung im Text des Arguments, das Literal steht ja im Aufruf. Es gilt R6 unverändert, mit dem Literal als Quelle der Änderung: eine `const`-Wurzel ist `R4`; ein Ort der Umgebung geht wie ein `mut`-Argument in den Aufruf (R6, Teil 2d); ein Parameter ohne `mut` der umgebenden Funktion ist eine Kopie, seine Änderung im Literal ist darum verloren, wenn sie niemand liest.
 - Die Parameter des Literals sind Kopien wie bei Funktionen (R5, R6); `mut` steht nur, wo der Funktionstyp es verlangt.
 - **Wirkung** (R13): ein Literal hat eine Wirkung, wenn sein Rumpf eine hat (Ort der Umgebung ändern, `print`, Aufruf mit Wirkung); ein Aufruf hat sie, wenn die Funktion oder eines seiner Literale sie hat. So darf `xs.any(bool(int x) { print(x) … })` als Anweisung stehen, `xs.filter(bool(int x) { return x > 1 })` nicht.
 - **Lebendigkeit** (R6): der Rumpf eines Literals zählt wie ein Schleifenrumpf, der Aufruf als Stelle, an der er läuft. Eine Änderung im Literal ist nicht verloren, wenn der Ort danach gelesen wird: nach dem Aufruf, im nächsten Durchlauf (`total += x` liest den Wert des vorigen) oder später im Literal. Sonst ist sie `R6` an der Änderung im Literal, mit den Meldungen von R6.
@@ -1918,20 +1945,70 @@ main.dif:2:9: error[R26]: a function literal can only be an argument of a call
   hint: pass it directly as an argument of a call
 ```
 
-```dif error R26
-bool big(int x) {
-    return x > 1
+```dif
+enum Shape {
+    Dot
+    Box(int size)
+}
+
+bool is_even(int n) {
+    return n % 2 == 0
 }
 
 void main() {
-    []int xs = [1, 2, 3]
-    print(xs.filter(big))
+    []int xs = [1, 2, 3, 4]
+    print(xs.filter(is_even))
+    print(xs.map(Shape.Box))
+}
+```
+
+Ausgabe: `[2, 4]`, `[Shape.Box(1), Shape.Box(2), Shape.Box(3), Shape.Box(4)]`.
+
+```dif error R26
+bool is_even(int n) {
+    return n % 2 == 0
+}
+
+void main() {
+    _ = is_even
 }
 ```
 
 ```
-main.dif:7:21: error[R26]: `big` is a function, not a literal
-  hint: write a literal that calls it
+main.dif:6:9: error[R26]: `is_even` is a function and can only be called or passed as an argument
+```
+
+Ein Funktionstyp mit `mut`: das Literal trägt es ebenfalls, der Aufruf `f(mut x)` ändert `x`:
+
+```dif
+void apply_to(mut int x, void(mut int) f) {
+    f(mut x)
+}
+
+void main() {
+    int n = 1
+    apply_to(mut n, void(mut int v) { v += 10 })
+    print(n)
+}
+```
+
+Ausgabe: `11`.
+
+```dif error R8
+bool ready(bool() check) {
+    return check()
+}
+
+void main() {
+    if ready() {
+        print("go")
+    }
+}
+```
+
+```
+main.dif:6:8: error[R8]: `ready` takes 1 argument, found 0
+  hint: a block in a header needs parentheses around the call: if (ready() { … }) {
 ```
 
 ```dif error R8
@@ -2659,13 +2736,13 @@ Für eine Liste oder ein Array `[]T`. Der Funktionstyp des Arguments steht in de
 |---|---|---|
 | `[]T [].filter(bool(T) f)` | eine neue Liste aus den Elementen, für die `f` `true` liefert, in der alten Reihenfolge; `f` läuft einmal je Element, von vorn nach hinten | |
 | `[]R []T.map(R(T) f)` | eine neue Liste gleicher Länge aus den Ergebnissen von `f`; `f` läuft einmal je Element, von vorn nach hinten | |
-| `void []T.sort_by(bool(T, T) less)` | sortiert nach `less(a, b)` („`a` steht echt vor `b`“); stabil: Elemente, bei denen weder `less(a, b)` noch `less(b, a)` gilt, behalten ihre Reihenfolge | ändert |
+| `void []T.sort_by(bool(T, T) less)` | sortiert nach `less(a, b)` („`a` steht echt vor `b`“); stabil: Elemente, bei denen weder `less(a, b)` noch `less(b, a)` gilt, behalten ihre Reihenfolge; Verfahren und Reihenfolge der Aufrufe sind festgelegt (unten) | ändert |
 | `bool [].any(bool(T) f)` | `true`, wenn `f` für ein Element `true` liefert; hört beim ersten Treffer auf; leere Liste: `false` | |
 | `bool [].all(bool(T) f)` | `true`, wenn `f` für jedes Element `true` liefert; hört beim ersten `false` auf; leere Liste: `true` | |
 
 - **`map` ohne eigene Generics.** `R` ist der Rückgabetyp des Literals; er ist jeder Typ außer `void`, auch `?U` und `U!E` (Ergebnis: `[](int!E)`, R12). Das Ergebnis hat den Typ `[]R`; verlangt die Stelle einen anderen, ist es `R8` am Namen `map`, Meldung `` expected []int, found []str ``. Ist `R` `void`, ist es `R8` am Literal, Meldung `` `map` needs a literal that returns a value, found void(int) ``, Hinweis `use a for loop to do something for each element`. Der Ergebnistyp aus dem Literal ist eine Eigenschaft dieser eingebauten Methode (wie bei `repeat`, §4.1); für eigene Funktionen gibt es ihn erst mit Generics (R27, M3).
 - **Schnappschuss.** `filter`, `map`, `any` und `all` laufen über den Wert der Liste vor dem Aufruf (R5, R6); ändert das Literal die Liste, sieht der Aufruf davon nichts. Die Elemente gehen als Kopien in `f` (R5).
-- **`sort_by`.** Sinnvoll ist eine strenge Ordnung (`<`, nie `<=`). Das Verfahren ist ein stabiles Sortieren durch Mischen; Reihenfolge und Anzahl der Aufrufe von `less` sind nicht festgelegt, ein Literal mit Wirkung (R13) ist darum fehleranfällig, aber kein Fehler. Liefert `less` keine Ordnung (etwa bei `NaN`), ist das Ergebnis eine Umordnung derselben Elemente, die bei jedem Lauf gleich ausfällt; nichts bricht ab. `sort_by` ändert `self` und braucht einen Ort vor dem Punkt (R7); ändert das Literal dieselbe Liste, ist das `R6` (Aliasregel). `T` muss nicht `ordered` sein: die Ordnung kommt vom Literal.
+- **`sort_by`.** Sinnvoll ist eine strenge Ordnung (`<`, nie `<=`). Das Verfahren ist festgelegt, damit auch ein Literal mit Wirkung (R13) ein reproduzierbares Programm ergibt: Mergesort von oben nach unten. Eine Liste mit höchstens einem Element ruft `less` nie auf. Sonst wird sie bei `mid = len / 2` (abgerundet) geteilt, erst die linke Hälfte `[0, mid)`, dann die rechte `[mid, len)` sortiert und zusammengeführt: solange beide Hälften Elemente haben, ruft das Mischen `less(r, l)` mit den vordersten Elementen `r` der rechten und `l` der linken Hälfte auf und nimmt `r`, wenn es `true` liefert, sonst `l`; ist eine Hälfte leer, folgt der Rest der anderen. Das ergibt Stabilität, und auch eine inkonsistente `less` (etwa bei `NaN`) liefert bei jedem Lauf dieselbe Umordnung derselben Elemente; nichts bricht ab. `sort_by` ändert `self` und braucht einen Ort vor dem Punkt (R7); ändert das Literal dieselbe Liste, ist das `R6` (Aliasregel). `T` muss nicht `ordered` sein: die Ordnung kommt vom Literal.
 - **Randfälle.** Eine leere Liste ruft `f` nie auf: `filter` und `map` liefern `[]`, `any` `false`, `all` `true`, `sort_by` ändert nichts. Ein Abbruch (R14) im Literal beendet das Programm wie überall. `try` im Literal gehört zum Literal (R26): `map` mit `int!E` liefert eine Liste von Ergebnissen, die man mit `for T x in try rs` entpackt (R11).
 
 ```dif
@@ -2692,18 +2769,6 @@ void main() {
 
 Ausgabe: `Ada, Cy, Di`, `Bo Ada Di Cy`, `true`, `false`.
 
-`any` hört beim ersten Treffer auf; ein Literal mit Wirkung zeigt das, und der Aufruf ist als Anweisung erlaubt:
-
-```dif snippet
-[]int xs = [1, 2, 3]
-xs.any(bool(int x) {
-    print(x)
-    return x == 2
-})
-```
-
-Ausgabe: `1`, `2`.
-
 ```dif error R8
 void main() {
     []int xs = [1, 2, 3]
@@ -2716,14 +2781,13 @@ main.dif:3:18: error[R8]: `map` needs a literal that returns a value, found void
   hint: use a for loop to do something for each element
 ```
 
-```dif error R13
+```dif error R8
 void main() {
-    []int xs = [1, 2, 3]
-    xs.filter(bool(int x) { return x > 1 })
+    []str names = ["a", "b"]
+    []int xs = names.map(str(str n) { return n })
 }
 ```
 
 ```
-main.dif:3:5: error[R13]: result of `xs.filter(bool(int x) { return x > 1 })` is never used
-  hint: use it, or discard it explicitly with `_ = xs.filter(bool(int x) { return x > 1 })`
+main.dif:3:22: error[R8]: expected []int, found []str
 ```
