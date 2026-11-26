@@ -598,3 +598,31 @@ fn pop_and_remove_are_changes_like_any_other() {
     bad("[]int xs = [1]\nprint(xs.remove(0))", "3:11 R6 `xs` is changed but never read afterwards | use xs[0] if the list is not needed afterwards");
     ok(&in_main("[]int xs = [1]\nprint(xs.pop())\nprint(xs)"));
 }
+
+#[test]
+fn negative_array_length_is_r5() {
+    bad(
+        "[-1]int a = [1]",
+        "2:5 R5 the length of an array is a constant of at least 1",
+    );
+}
+
+#[test]
+fn file_cut_off_gives_one_message() {
+    for (src, want) in [
+        (
+            "void main() {\n    [][][][",
+            "2:8 S1 expected an expression, found `]`",
+        ),
+        (
+            "void main() {\n    map[str",
+            "2:8 S1 `[` is never closed | add `]`",
+        ),
+        (
+            "void main() {\n  if true {\n    [3",
+            "3:5 S1 `[` is never closed | add `]`",
+        ),
+    ] {
+        assert_eq!(diags(src), [want], "{src}");
+    }
+}

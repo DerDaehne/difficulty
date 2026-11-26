@@ -427,6 +427,9 @@ impl<'a> Parser<'a> {
         match self.peek_n(k) {
             Tok::Op("[") => {
                 let mut j = k + 1;
+                if *self.peek_n(j) == Tok::Op("-") && matches!(self.peek_n(j + 1), Tok::Int(_)) {
+                    j += 1;
+                }
                 if matches!(self.peek_n(j), Tok::Int(_) | Tok::Ident(_)) {
                     j += 1;
                 }
@@ -654,6 +657,10 @@ impl<'a> Parser<'a> {
             Tok::Op("[") => {
                 self.bump();
                 name.push('[');
+                if self.is_op("-") && matches!(self.peek_n(1), Tok::Int(_)) {
+                    name.push('-');
+                    self.bump();
+                }
                 match self.peek() {
                     Tok::Int(v) => {
                         name.push_str(&v.to_string());
@@ -944,6 +951,7 @@ impl<'a> Parser<'a> {
         }
         self.bump(); // {
         self.skip_nl();
+        let mut cut = false; // the last statement was reported
         loop {
             let before = self.i;
             if self.is_op("}") {
@@ -951,12 +959,17 @@ impl<'a> Parser<'a> {
                 break;
             }
             if *self.peek() == Tok::Eof || self.func_start() {
-                self.never_closed(pos);
+                // a statement cut off by the end of the file was reported already
+                if !(cut && *self.peek() == Tok::Eof) {
+                    self.never_closed(pos);
+                }
                 break;
             }
+            let n = self.out.len();
             if let Some(s) = self.unit(|p| p.stmt()) {
                 stmts.push(s);
             }
+            cut = self.out.len() > n;
             if self.i == before {
                 self.bump(); // never loop without progress
             }

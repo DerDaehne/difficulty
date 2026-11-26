@@ -257,9 +257,9 @@ fn comments_and_strings_cut_cleanly() {
 
 #[test]
 fn no_crash_on_broken_input() {
-    // B1: `for (` at the end of the file (the block of main is not closed either)
-    assert_eq!(codes("void main() {\n    for ("), ["S1", "R11"]);
-    assert_eq!(codes("void main() {\n    for(/*"), ["S1", "R11", "L2"]);
+    // B1: `for (` at the end of the file (the cut-off statement is the one cause)
+    assert_eq!(codes("void main() {\n    for ("), ["R11"]);
+    assert_eq!(codes("void main() {\n    for(/*"), ["R11", "L2"]);
     assert_eq!(codes(&in_main("for (")), ["R11"]);
     for src in [
         "",

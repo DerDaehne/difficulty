@@ -65,7 +65,10 @@ fn run_all(tag: &str, cc: &str, flags: &[&str], perf: bool) {
             .output()
             .unwrap();
         if !cr.status.success() {
-            bad += &format!("[{tag}] {name}: compile failed\n{}\n", String::from_utf8_lossy(&cr.stderr));
+            bad += &format!(
+                "[{tag}] {name}: compile failed\n{}\n",
+                String::from_utf8_lossy(&cr.stderr)
+            );
             continue;
         }
         let rr = Command::new(&exe)
@@ -115,7 +118,11 @@ fn sanitizers() {
     run_all(
         "asan",
         &default_cc(),
-        &["-O1", "-fsanitize=address,undefined", "-fno-sanitize-recover=all"],
+        &[
+            "-O1",
+            "-fsanitize=address,undefined",
+            "-fno-sanitize-recover=all",
+        ],
         false,
     );
 }
@@ -126,7 +133,11 @@ fn sanitizers_clang() {
         run_all(
             "asan-clang",
             "clang",
-            &["-O1", "-fsanitize=address,undefined", "-fno-sanitize-recover=all"],
+            &[
+                "-O1",
+                "-fsanitize=address,undefined",
+                "-fno-sanitize-recover=all",
+            ],
             false,
         );
     } else {
