@@ -2593,7 +2593,7 @@ Für eine Liste `[]T`, in der `T` den Elementtyp meint. Ein Array `[N]T` hat all
 | `[]T [].slice(int a, int b)` | eine neue Liste aus den Elementen `a … b-1`; `0 ≤ a ≤ b ≤ len()` | |
 | `str []str.join(str sep)` | die Elemente mit `sep` dazwischen; nur für `[]str` | |
 
-`repeat(x, n)` (§4.1) baut Listen. `==` vergleicht Länge und Elemente (R28). Die leere Liste hat kein erstes Element: `pop`, `first` und `last` geben `none`. Ein `slice` ist eine Kopie, keine Sicht (R5).
+`repeat(x, n)` (§4.1) baut Listen. `==` vergleicht Länge und Elemente (R28). Die leere Liste hat kein erstes Element: `pop`, `first` und `last` geben `none`. Ein `slice` ist eine Kopie, keine Sicht (R5). `pop` und `remove` ändern die Liste wie jede andere Methode (R6): wird die Liste danach nie gelesen, ist das eine verlorene Änderung mit dem Hinweis `use xs.last() if the list is not needed afterwards` bzw. `use xs[i] if the list is not needed afterwards`.
 
 ```dif snippet
 []int xs = [5, 3, 8]
@@ -2614,11 +2614,12 @@ print("{removed} {xs.len()}")
 print(xs.count(3))
 []int empty = []
 print(empty.pop())
+print(empty)
 print(["b", "a"].join("-"))
 print(repeat(0, 3))
 ```
 
-Ausgabe: `[9, 5, 3, 8, 1]`, `[1, 3, 5, 8, 9]`, `some(9)`, `some(1)`, `some(3)`, `false`, `[3, 5]`, `[8, 5, 3, 1]`, `8 3`, `1`, `none`, `b-a`, `[0, 0, 0]`.
+Ausgabe: `[9, 5, 3, 8, 1]`, `[1, 3, 5, 8, 9]`, `some(9)`, `some(1)`, `some(3)`, `false`, `[3, 5]`, `[8, 5, 3, 1]`, `8 3`, `1`, `none`, `[]`, `b-a`, `[0, 0, 0]`.
 
 ```dif error R28
 struct P {

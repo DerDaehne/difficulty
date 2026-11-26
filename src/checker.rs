@@ -444,6 +444,8 @@ struct Checker<'a> {
     imports: Vec<&'a str>,
     /// The type of the place an expression is read for (a list literal, `repeat`).
     place_ty: Ty,
+    /// Hints for a lost change at a position (a `pop` whose list is never read again).
+    lost_hints: HashMap<u32, String>,
     /// Reading the place of an assignment (a map entry in it is R30).
     assigning: bool,
     /// A builtin method or function called last: does it have an effect (R13)?
@@ -492,6 +494,7 @@ impl<'a> Checker<'a> {
             uses_2c: false,
             imports: Vec::new(),
             place_ty: Ty::Err,
+            lost_hints: HashMap::new(),
             assigning: false,
             last_effect: None,
             lit_float: false,
@@ -1150,7 +1153,11 @@ impl<'a> Checker<'a> {
                 }
                 None => {
                     let msg = format!("`{root}` is changed but never read afterwards");
-                    let hint = "use the value, or remove the change".to_string();
+                    let hint = self
+                        .lost_hints
+                        .get(&pos.offset)
+                        .cloned()
+                        .unwrap_or_else(|| "use the value, or remove the change".to_string());
                     self.err("R6", pos, msg, Some(hint));
                 }
             }
@@ -3161,7 +3168,11 @@ impl<'a> Checker<'a> {
             for (root, pos) in live::lost(&t.body, &self.call_changes, &[]) {
                 if self.fn_locals.contains(&root) {
                     let msg = format!("`{root}` is changed but never read afterwards");
-                    let hint = "use the value, or remove the change".to_string();
+                    let hint = self
+                        .lost_hints
+                        .get(&pos.offset)
+                        .cloned()
+                        .unwrap_or_else(|| "use the value, or remove the change".to_string());
                     self.err("R6", pos, msg, Some(hint));
                 }
             }

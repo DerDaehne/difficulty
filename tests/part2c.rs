@@ -591,3 +591,10 @@ fn f64_text_form() {
         assert!(d.len() == 1 && d[0].contains(want), "{src}: {d:?}");
     }
 }
+
+#[test]
+fn pop_and_remove_are_changes_like_any_other() {
+    bad("[]int xs = [1]\nprint(xs.pop())", "3:11 R6 `xs` is changed but never read afterwards | use xs.last() if the list is not needed afterwards");
+    bad("[]int xs = [1]\nprint(xs.remove(0))", "3:11 R6 `xs` is changed but never read afterwards | use xs[0] if the list is not needed afterwards");
+    ok(&in_main("[]int xs = [1]\nprint(xs.pop())\nprint(xs)"));
+}

@@ -920,13 +920,22 @@ impl<'a> Checker<'a> {
             } else {
                 match self.root_of(base) {
                     Some((root, false)) if is_place(base) => {
-                        // a change that comes with a used result (`pop`, `remove`) is never
-                        // reported as lost: the spec example of §4.4 ends with `empty.pop()`
-                        if s.ret == Ty::Void {
-                            self.call_changes
-                                .entry((e.pos.offset, e.end))
-                                .or_default()
-                                .push((root, e.pos));
+                        self.call_changes
+                            .entry((e.pos.offset, e.end))
+                            .or_default()
+                            .push((root, e.pos));
+                        // the result alone is wanted: say how to get it without the change
+                        let text = self.text(base);
+                        let hint = match m {
+                            "pop" => Some(format!("use {text}.last() if the list is not needed afterwards")),
+                            "remove" if args.len() == 1 => Some(format!(
+                                "use {text}[{}] if the list is not needed afterwards",
+                                self.text(&args[0])
+                            )),
+                            _ => None,
+                        };
+                        if let Some(h) = hint {
+                            self.lost_hints.insert(e.pos.offset, h);
                         }
                         self.changed(base);
                         changeable = true;
