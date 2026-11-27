@@ -1,0 +1,12 @@
+void main() {
+    str a = `
+      x\y
+      `
+    print(a)
+    print(`
+      {q}
+      `.len())
+    print(`
+      z
+      `)
+}

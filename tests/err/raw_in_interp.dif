@@ -1,0 +1,4 @@
+// expect: error[S1] 3:15
+void main() {
+    print("v={`x\y`}")
+}

@@ -650,7 +650,11 @@ impl<'a> Lexer<'a> {
         let p = self.pos();
         self.adv();
         let mut text = String::new();
-        if self.peek() == Some('\n') {
+        if self.peek() == Some('\n') || (self.peek() == Some('\r') && self.peek_at(1) == Some('\n'))
+        {
+            if self.peek() == Some('\r') {
+                self.adv();
+            }
             self.adv();
             let Some(v) = self.raw_block(p) else {
                 self.push(Tok::Str(vec![]), p);
@@ -660,7 +664,7 @@ impl<'a> Lexer<'a> {
         } else {
             let mut closed = false;
             while let Some(c) = self.peek() {
-                if c == '\n' {
+                if c == '\n' || (c == '\r' && self.peek_at(1) == Some('\n')) {
                     break;
                 }
                 self.adv();
@@ -717,12 +721,18 @@ impl<'a> Lexer<'a> {
             }
             let at = self.pos();
             let mut line = String::new();
-            while let Some(c) = self.peek().filter(|&c| c != '\n') {
-                self.adv();
+            while let Some(c) = self.peek_at(line.chars().count()).filter(|&c| c != '\n') {
                 line.push(c);
             }
-            if let Some(ind) = line.strip_suffix('`') {
-                if ind.chars().all(|c| c == ' ' || c == '\t') {
+            let n = line.chars().count();
+            if line.ends_with('\r') {
+                line.pop();
+            }
+            // the closing backtick: only blanks before it; `.`, `)` or `,` may follow it
+            if let Some((ind, tail)) = line.split_once('`') {
+                if ind.chars().all(|c| c == ' ' || c == '\t')
+                    && (tail.is_empty() || tail.starts_with(['.', ')', ',']))
+                {
                     if ind.contains('\t') {
                         self.err(
                             "L10.raw_tab",
@@ -731,9 +741,17 @@ impl<'a> Lexer<'a> {
                             Some("indent with spaces"),
                         );
                     }
+                    let ind_len = ind.len();
+                    let tab = ind.contains('\t');
+                    for _ in 0..=ind.chars().count() {
+                        self.adv();
+                    }
                     // after a tab error the lines keep their indentation: one cause, one message
-                    break if ind.contains('\t') { 0 } else { ind.len() };
+                    break if tab { 0 } else { ind_len };
                 }
+            }
+            for _ in 0..n {
+                self.adv();
             }
             self.adv();
             lines.push((at, line));
@@ -875,12 +893,15 @@ impl<'a> Lexer<'a> {
                     );
                     return None;
                 }
-                Some(c @ ('"' | '{')) => {
+                Some(c @ ('"' | '{' | '`')) => {
                     let q = self.pos();
                     self.err(
                         "S1.interp_forbidden",
                         q,
-                        format!("`{c}` inside an interpolation"),
+                        format!(
+                            "`{}` inside an interpolation",
+                            if c == '`' { '"' } else { c }
+                        ),
                         Some("compute the value in a variable first"),
                     );
                     while !matches!(self.peek(), None | Some('\n') | Some('}')) {
@@ -1095,6 +1116,10 @@ mod tests {
         let lit = |s: &str| vec![Tok::Str(vec![StrPart::Lit(s.into())])];
         assert_eq!(kinds(r#"`a\"{b}`"#)[..1], lit(r#"a\"{b}"#)[..]);
         assert_eq!(kinds("`\n  a\n\n    b\n  `")[..1], lit("a\n\n  b\n")[..]);
+        assert_eq!(kinds("`\r\n  a\r\n\r\n  `")[..1], lit("a\n\n")[..]);
+        assert_eq!(kinds("`a\\b`\r\nx")[..1], lit("a\\b")[..]);
+        assert_eq!(kinds("`\n  a\n  `.len()")[..1], lit("a\n")[..]);
+        assert_eq!(codes("\"{`x\\y`}\""), ["S1"]);
         assert_eq!(codes("`abc`"), ["L10"]);
         assert_eq!(codes("`ab"), ["L10"]);
         assert_eq!(codes("`\n x\n   `"), ["L10"]);
