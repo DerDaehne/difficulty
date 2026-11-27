@@ -1700,8 +1700,6 @@ void main() {
 main.dif:3:33: error[R15]: this branch of if gives no value
 ```
 
-int x = if n >= 0 { n } else { return err(E.Neg) }
-
 ```dif error R15
 void main() {
     int n = 3
