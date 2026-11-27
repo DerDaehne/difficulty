@@ -88,7 +88,7 @@ void!io.IoErr main() {
         }
         switch parse_record(line) {
         case ok(Record r):
-            if seen[r.id] != none {  // seen.has(r.id) once #1929 is fixed
+            if seen.has(r.id) {
                 print("line {n}: duplicate id")
                 bad += 1
             } else {
