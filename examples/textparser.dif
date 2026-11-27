@@ -55,11 +55,8 @@ Value!ParseErr parse_value(int line, str text) {
     if text.len() >= 2 && text.starts_with("\"") && text.ends_with("\"") {
         return Value.Text(text.slice(1, text.len() - 1))
     }
-    ?int n = text.parse_int()
-    if n != none {
-        return Value.Int(n ?? 0)
-    }
-    return err(ParseErr.BadValue(line, text))
+    int n = try text.parse_int() or ParseErr.BadValue(line, text)
+    return Value.Int(n)
 }
 
 // `line` is not blank and not a comment.
