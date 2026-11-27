@@ -10,7 +10,7 @@ The machine has a credit in cents (starts at 0), a strike counter (starts at 0) 
 
 | Command | Behaviour |
 |---|---|
-| `coin V` | If locked: `error: locked`. If V is 10, 20, 50 or 100: add V to the credit, print `credit C` (the new credit). Any other V (including text that is not a number): print `rejected`, add one strike; on the third strike also print `locked` and lock the machine. |
+| `coin V` | If locked: `error: locked`. If V is written exactly as `10`, `20`, `50` or `100` (so `010` and `+10` are not): add V to the credit, print `credit C` (the new credit). Any other V (including text that is not a number): print `rejected`, add one strike; on the third strike also print `locked` and lock the machine. |
 | `select X` | If locked: `error: locked`. Unknown item: `error: unknown item X`. Credit below the price: `error: need P more` (P = missing cents). Otherwise the item is dispensed and all remaining credit is returned as change: print `vend X change C`; credit becomes 0. |
 | `refund` | If locked: `error: locked`. Otherwise print `refund C` with the whole credit; credit becomes 0. |
 | `unlock` | If locked: print `unlocked`, clear the lock and the strikes (credit is kept). Otherwise `error: not locked`. |

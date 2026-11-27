@@ -16,7 +16,9 @@ Rechner: x86_64, AMD Ryzen 7 7800X3D, Linux, gcc 16.2.0, `dif` als Release-Build
 | Compiler-Binary `dif` | ≤ 5 MB | 680 912 B (0,65 MB) | ja |
 | fib(38) gegen C `-O2` (ohne Prüfung) | ≤ 1,5× | gcc 16.2: 2 ms gegen 37 ms (Rekursionsumformung); clang 21: 140–154 ms gegen 84–93 ms = 1,6–1,8× | gcc ja, clang nein |
 | `kino`-Binary (`examples/kino.dif`, x86_64, dynamisch gegen libc, gestrippt) | ≤ 64 KB | 59 784 B (58,4 KB) | ja |
-| `push`, Alltags-Benchmark, `llms.txt`, Agenten-pass@1 | siehe PLAN.md | noch nicht messbar | – |
+| `llms.txt` | ≤ 24 KB | 21214 B | ja |
+| Agenten-pass@1 (Abschnitt „Agenten-Messung 1“) | ≥ Python | Haiku 4/5 gegen 4/5, Sonnet 4/5 gegen 5/5 | Haiku ja, Sonnet nein |
+| `push`, Alltags-Benchmark | siehe PLAN.md | noch nicht messbar | – |
 
 Befehle:
 
@@ -158,8 +160,9 @@ Beobachtungen:
   im ersten Versuch. Die Regelverstöße je Regel sind damit in diesem Lauf null.
 - Der einzige Fehlversuch in difficulty ist bei beiden Modellen dieselbe Aufgabe (`vending`, Test
   `strikes`, erste Abweichung in Zeile 12) mit identischer Ausgabe; Haiku brauchte für dieselbe Aufgabe
-  in Python vier Runden. Das spricht für eine Mehrdeutigkeit im Aufgabentext, nicht für die Sprache.
-  Beide reparierten es in der zweiten Runde.
+  in Python vier Runden. Ursache ist der Aufgabentext: Er sagte nicht, ob `coin 010` und `coin +10`
+  als 10 gelten; die Modelle nahmen 10 an, der Test erwartet `rejected`. Beide reparierten es in der
+  zweiten Runde. Der Aufgabentext sagt es seit diesem Lauf ausdrücklich.
 - Ziel aus PLAN §10 „pass@1 ≥ Python“: mit Haiku erreicht (4/5 gegen 4/5), mit Sonnet knapp nicht
   (4/5 gegen 5/5). Bei fünf Aufgaben ist ein Lauf der ganze Unterschied.
 - Kosten: Ein difficulty-Aufruf trägt `llms.txt` mit (etwa 10 500 Eingabetokens gegen 1 200 bei Python).
