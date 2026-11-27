@@ -1,0 +1,10 @@
+// expect: error[R28] 3:8
+void sort_it[T](mut []T xs) {
+    xs.sort()
+}
+
+void main() {
+    []int a = [3, 1]
+    sort_it(mut a)
+    print(a)
+}

@@ -97,6 +97,9 @@ impl<'a> Emitter<'a> {
     pub(super) fn fn_type_defs(&self) -> String {
         let mut c = String::new();
         for (i, (r, ps)) in self.info.ftys.iter().enumerate() {
+            if self.info.hidden.contains(&Ty::Func(i as u32)) {
+                continue;
+            }
             let mut p = vec!["void *".to_string()];
             p.extend(self.fn_params(ps));
             let _ = writeln!(
@@ -228,7 +231,7 @@ impl<'a> Emitter<'a> {
 
     /// A named function as a value: through a wrapper that ignores the environment.
     pub(super) fn fn_value(&mut self, f: &'a Func, fty: Ty) -> String {
-        let name = format!("dw_{}", f.name);
+        let name = format!("dw_{}", self.cname(f).trim_start_matches("d_"));
         if self.wrappers.insert(name.clone()) {
             let Ty::Func(fi) = fty else {
                 return String::new();
@@ -240,7 +243,7 @@ impl<'a> Emitter<'a> {
                 .zip(&names)
                 .map(|((t, m), n)| format!(", {}{}{n}", self.c_ty(*t), if *m { " *" } else { " " }))
                 .collect();
-            let call = format!("{}({})", Self::cname(f), names.join(", "));
+            let call = format!("{}({})", self.cname(f), names.join(", "));
             let body = if ret == Ty::Void {
                 format!("{call};")
             } else {
@@ -261,7 +264,7 @@ impl<'a> Emitter<'a> {
 
     /// A variant constructor `E.V` as a value.
     pub(super) fn ctor_value(&mut self, eid: u32, variant: &str, fty: Ty) -> String {
-        let name = format!("dwv_{}_{variant}", types::cid(self.tname(eid)));
+        let name = format!("dwv_{}_{variant}", self.tcid(eid));
         if self.wrappers.insert(name.clone()) {
             let k = self.variant_index(eid, variant);
             let fields = self.variant_fields(eid, k);
@@ -275,7 +278,11 @@ impl<'a> Emitter<'a> {
                 .collect();
             let ct = self.c_ty(Ty::Named(eid));
             let header = format!("static {ct} {name}(void *e_{params})");
-            let shown = self.tname(eid).rsplit('.').next().unwrap_or_default();
+            let shown = self.info.types[eid as usize]
+                .base
+                .rsplit('.')
+                .next()
+                .unwrap_or_default();
             self.static_env(&name, &format!("{shown}.{variant}"));
             let _ = writeln!(self.lit_protos, "{header};");
             let _ = writeln!(

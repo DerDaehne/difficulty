@@ -349,12 +349,12 @@ impl<'a> Checker<'a> {
     ) -> Option<String> {
         let last = params.last()?.0;
         let block = matches!(last, Ty::Func(i) if self.ftys[i as usize].1.is_empty());
-        let rest = self.src.get(e.end as usize..)?;
+        let rest = self.src.get(self.off(e.end)..)?;
         let line_end = rest.find('\n').unwrap_or(rest.len());
         if !block || found + 1 != params.len() || !rest.trim_start().starts_with('{') {
             return None;
         }
-        let before = &self.src[..e.pos.offset as usize];
+        let before = &self.src[..self.off(e.pos.offset)];
         let from = before.rfind('\n').map_or(0, |i| i + 1);
         Some(format!(
             "a block in a header needs parentheses around the call: {}({} {{ … }}){}",

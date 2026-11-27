@@ -1,0 +1,89 @@
+T max[ordered T](T a, T b) {
+    return if a < b { b } else { a }
+}
+
+bool same[T](T a, T b) {
+    return a == b
+}
+
+[]T empty[T]() {
+    return []
+}
+
+T first_of[T]([]T xs) {
+    return xs[0]
+}
+
+int size[K, V](map[K]V m) {
+    return m.len()
+}
+
+B fold[A, B]([]A xs, B start, B(B, A) f) {
+    B acc = start
+    for A x in xs {
+        acc = f(acc, x)
+    }
+    return acc
+}
+
+[]B convert[A, B]([]A xs, B(A) f) {
+    []B out = []
+    for A x in xs {
+        out.push(f(x))
+    }
+    return out
+}
+
+void append[T](mut []T xs, T x) {
+    xs.push(x)
+}
+
+T largest[ordered T]([]T xs) {
+    T best = xs[0]
+    for T x in xs {
+        best = max(best, x)
+    }
+    return best
+}
+
+int depth[T](T x, int n) {
+    if n == 0 {
+        return 0
+    }
+    return 1 + depth(x, n - 1)
+}
+
+void show_sorted[ordered T]([]T xs) {
+    []T ys = xs
+    ys.sort()
+    print(ys)
+}
+
+void main() {
+    print(max(3, 5))
+    print(max("a", "b"))
+    print(max(2.5, 1.5))
+    print(max('a', 'z'))
+    u8 small = 7
+    print(max(small, 200))
+    print(same(1, 1))
+    print(same("a", "b"))
+    print(same([1, 2], [1, 2]))
+    []str none_here = empty[str]()
+    print(none_here.len())
+    print(first_of(["x", "y"]))
+    map[str]int m = {"a": 1, "b": 2}
+    print(size(m))
+    print(fold([1, 2, 3], 0, int(int acc, int x) { return acc + x }))
+    print(fold(["a", "b"], "", str(str acc, str x) { return "{acc}{x}" }))
+    print(convert([1, 2, 3], str(int n) { return "n{n}" }))
+    []int xs = []
+    append(mut xs, 4)
+    append(mut xs, 9)
+    print(xs)
+    print(largest([3, 9, 4]))
+    print(largest(["pear", "apple"]))
+    print(depth("deep", 3))
+    show_sorted([3, 1, 2])
+    show_sorted(["b", "a"])
+}

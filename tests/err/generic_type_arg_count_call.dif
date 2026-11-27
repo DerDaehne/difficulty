@@ -1,0 +1,9 @@
+// expect: error[R27] 7:15
+[]T decode[T](str s) {
+    return []
+}
+
+void main() {
+    []int x = decode[int, str]("a")
+    print(x)
+}

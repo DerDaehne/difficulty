@@ -137,6 +137,8 @@ impl<'a> Checker<'a> {
             let id = self.types.len() as u32;
             self.type_ids.insert("io.IoErr", id);
             self.types.push(TypeInfo {
+                key: "io.IoErr",
+                opaque: None,
                 name: "io.IoErr",
                 pos: u.pos,
                 kind: Kind::Enum(variants),
@@ -191,7 +193,7 @@ impl<'a> Checker<'a> {
         r
     }
 
-    fn ty_top(&mut self, s: &mut &str, pos: Pos, ret: bool, top: bool) -> Ty {
+    pub(super) fn ty_top(&mut self, s: &mut &str, pos: Pos, ret: bool, top: bool) -> Ty {
         let opt = s.starts_with('?');
         if opt {
             *s = &s[1..];
@@ -299,10 +301,13 @@ impl<'a> Checker<'a> {
             return self.map(k, v);
         }
         let end = s
-            .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
+            .find(|c: char| !(c.is_alphanumeric() || matches!(c, '_' | '.' | '$')))
             .unwrap_or(s.len());
         let (n, rest) = s.split_at(end);
         *s = rest;
+        if let Some((&g, _)) = self.gen_types.get_key_value(n) {
+            return self.generic_application(g, s, pos);
+        }
         match n {
             "int" => Ty::Int,
             "bool" => Ty::Bool,
@@ -1045,7 +1050,7 @@ impl<'a> Checker<'a> {
                 None => Ty::Err,
             };
             s.params = vec![f];
-            let at = base.end + self.src[base.end as usize..].find(m).unwrap_or(0) as u32;
+            let at = base.end + self.src[self.off(base.end)..].find(m).unwrap_or(0) as u32;
             let pos = self.pos_at(at);
             self.name_pos.insert((e.pos.offset, e.end), pos);
             s.ret = match r {
@@ -1144,10 +1149,13 @@ impl<'a> Checker<'a> {
                 Ty::Arr(i) => self.arrs[i as usize].0,
                 _ => Ty::Err,
             };
-            let ordered = el.is_number() || matches!(el, Ty::Rune | Ty::Str | Ty::Err);
-            if !ordered {
+            if !self.is_ordered(el) {
                 let pos = self
-                    .pos_at(base.end + self.src[base.end as usize..].find(m).unwrap_or(0) as u32);
+                    .pos_at(base.end + self.src[self.off(base.end)..].find(m).unwrap_or(0) as u32);
+                if self.unordered_param(el) {
+                    self.ordered_needed(el, "sort", pos);
+                    return (Ty::Void, Val::Runtime);
+                }
                 let msg = format!(
                     "`sort` needs an ordered element type, found {}",
                     self.tn(el)
@@ -1183,8 +1191,9 @@ impl<'a> Checker<'a> {
     /// Line and column of a byte offset (for diagnostics only).
     pub(super) fn pos_at(&self, offset: u32) -> Pos {
         let (mut line, mut col) = (1, 1);
+        let real = offset % self.stride;
         for (i, c) in self.src.char_indices() {
-            if i as u32 >= offset {
+            if i as u32 >= real {
                 break;
             }
             if c == '\n' {

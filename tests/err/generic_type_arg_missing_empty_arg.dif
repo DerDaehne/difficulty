@@ -1,0 +1,8 @@
+// expect: error[R27] 7:11
+int count[T]([]T xs) {
+    return xs.len()
+}
+
+void main() {
+    print(count([]))
+}

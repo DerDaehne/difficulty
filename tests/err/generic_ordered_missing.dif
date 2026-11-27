@@ -1,0 +1,16 @@
+// expect: error[R28] 14:15
+struct Point {
+    int x
+}
+
+T max[ordered T](T a, T b) {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+void main() {
+    Point p = max(Point{x: 1}, Point{x: 2})
+    print(p.x)
+}

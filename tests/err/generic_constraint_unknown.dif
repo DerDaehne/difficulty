@@ -1,0 +1,8 @@
+// expect: error[R27] 2:11
+bool same[eq T](T a, T b) {
+    return a == b
+}
+
+void main() {
+    print(same(1, 2))
+}

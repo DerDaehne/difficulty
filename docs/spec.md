@@ -2,7 +2,7 @@
 
 Stand: 2026-11-25 · Version: v0, Teil 1 („Hallo, nativ“), Teil 2a (Daten), Teil 2b (Fehler und Tests), Teil 2c (Sammlungen, Zahlen, Text, Ein- und Ausgabe) und Teil 2d (Funktionsliterale, Block-Argument) · Begründungen und Fahrplan: [PLAN.md](../PLAN.md)
 
-Diese Spezifikation ist nach den Regeln R1–R31 gegliedert. Ausgearbeitet sind R1–R15, R18, R26, R28–R31 und von R16 die Zeilen `use std.…`. Alle übrigen stehen mit ihrem vollständigen Wortlaut da und werden mit den nächsten Teilen ausgearbeitet.
+Diese Spezifikation ist nach den Regeln R1–R31 gegliedert. Ausgearbeitet sind R1–R15, R18, R26–R31 und von R16 die Zeilen `use std.…`. Alle übrigen stehen mit ihrem vollständigen Wortlaut da und werden mit den nächsten Teilen ausgearbeitet.
 
 ## 0. Wie diese Spezifikation zu lesen ist
 
@@ -345,27 +345,23 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `R25.positional_default` | ja | `…` has a default and is passed by name |
 | `R26.block_not_accepted` |  | `…` cannot take a block: its last parameter has type … |
 | `R26.function_not_value` |  | `…` is a function and can only be called or passed as an argument |
+| `R27.constraint_every_type` | ja | `…` is not a constraint: every type has it |
+| `R27.constraint_unknown` |  | `…` is not a constraint |
+| `R27.infer_conflict` |  | `…` is … from `…`, found … |
+| `R27.instance_depth` |  | the instances of `…` nest deeper than … levels |
+| `R27.method_type_params` |  | a method has no type parameters of its own |
+| `R27.struct_needs_type` |  | the type arguments of `…` come from the place on the left |
+| `R27.type_arg_count` |  | `…` takes … type argument(s), found … |
+| `R27.type_arg_inferred` | ja | `…` is inferred from the arguments; remove `[…]` |
+| `R27.type_arg_inferred_variant` | ja | `…` is inferred from the values; remove `[…]` |
+| `R27.type_arg_missing` |  | cannot infer `…` for `…`: it only appears in the return type |
+| `R27.type_param_unused` |  | type parameter `…` is never used |
+| `R28.ordered_missing` |  | `…` needs `…` to be ordered, found … |
+| `R28.ordered_needed` | ja | `…` needs `…` to be ordered |
 | `R28.sort_unordered` |  | `sort` needs an ordered element type, found … |
 | `R30.duplicate_key` |  | duplicate key … |
 | `R30.map_entry_change` |  | a map entry is changed by assigning it |
 | `R31.convert` |  | cannot convert … to … |
-
-**Teil 3 (geplant, noch nicht im Compiler).** Diese IDs stehen hier ohne Backticks und gehören noch nicht zur Tabelle oben; mit dem Compiler wandern sie hinein. Bei „Fix: ja“ liefert `--json` einen `fix`.
-
-| ID | Fix | Meldung |
-|---|---|---|
-| R27.constraint_every_type | ja | `…` is not a constraint: every type has it |
-| R27.constraint_unknown |  | `…` is not a constraint |
-| R27.type_arg_inferred_variant | ja | `…` is inferred from the values; remove `[…]` |
-| R27.infer_conflict |  | `…` is … from `…`, found … |
-| R27.instance_depth |  | the instances of `…` nest deeper than … levels |
-| R27.struct_needs_type |  | the type arguments of `…` come from the place on the left |
-| R27.type_arg_count |  | `…` takes … type argument(s), found … |
-| R27.type_arg_inferred | ja | `…` is inferred from the arguments; remove `[…]` |
-| R27.type_arg_missing |  | cannot infer `…` for `…`: it only appears in the return type |
-| R27.type_param_unused |  | type parameter `…` is never used |
-| R28.ordered_missing |  | `…` needs `…` to be ordered, found … |
-| R28.ordered_needed | ja | `…` needs `…` to be ordered |
 
 ---
 
@@ -3057,18 +3053,18 @@ named_type  = IDENT [ "." IDENT ] [ targs ] ;                     (* ergänzt R2
 postfix     = … | IDENT targs "(" [ args ] ")" ;                  (* ergänzt §2: decode[Config](s) *)
 ```
 
-- **Wo.** Funktionen, `struct`, `enum`; Methoden bekommen die Typparameter ihres Typs über `recv` und keine eigenen (Vorschlag, offen: für eine generische Methode mit eigenem Typparameter schreibt man eine Funktion). Ein Typparameter ist ein Typname (R4) und gilt in der Deklaration; er darf keinen Namen verdecken (`R4`, `already declared`). Ein Typparameter, der nirgends vorkommt, ist `R27`, Meldung `` type parameter `T` is never used ``, Hinweis `remove it`. Der Name an `recv` darf von dem an der `struct` abweichen, die Zahl nicht (`R27`, Meldung `` `Pair` takes 2 type arguments, found 1 ``); Einschränkungen übernimmt die Methode von der `struct` und fügt keine hinzu.
+- **Wo.** Funktionen, `struct`, `enum`; Methoden bekommen die Typparameter ihres Typs über `recv` und keine eigenen. Ein Typparameter an einer Methode selbst (`A Pair[A, B].left[X]()`) ist `R27`, Meldung `` a method has no type parameters of its own ``, Hinweis `write a function with the type parameter instead`. Ein Typparameter ist ein Typname (R4) und gilt in der Deklaration; er darf keinen Namen verdecken (`R4`, `already declared`). Ein Typparameter, der nirgends vorkommt, ist `R27`, Meldung `` type parameter `T` is never used ``, Hinweis `remove it`. Der Name an `recv` darf von dem an der `struct` abweichen, die Zahl nicht (`R27`, Meldung `` `Pair` takes 2 type arguments, found 1 ``); Einschränkungen übernimmt die Methode von der `struct` und fügt keine hinzu.
 - **Einschränkung.** `ordered` ist die einzige: sie erlaubt `<`, `<=`, `>`, `>=` und die Operationen, die sie brauchen (`sort`, `min`, `max`). Alles andere hat jeder Typ nach R28: `==`, `!=`, Ausgabe und `"{x}"`, `contains`, `index_of`, `count` und der Schlüssel einer Map gehen an jedem Typparameter ohne Einschränkung. `equal`, `hashable` oder `text` vor einem Namen (`[equal T]`) sind `R27` am Wort, Meldung `` `equal` is not a constraint: every type has it ``, Hinweis `remove it: T same[T](T a, T b)` (per `dif fix`); jedes andere Wort vor dem Namen ist `R27` mit Meldung `` `eq` is not a constraint ``, Hinweis `the only constraint is ordered`. Mehrere Einschränkungen an einem Parameter gibt es nicht.
 - **Der Rumpf sieht nur, was `T` hat.** Ein Rumpf wird einmal gegen die Deklaration geprüft, nie gegen eine Instanz. Ein Wert vom Typ `T` darf, was jeder Typ darf (kopieren, `==`, Text, Schlüssel); `<` und was es braucht nur mit `ordered`; er hat nie Felder oder Methoden (`R8`, `has no field`). Sonst `R28` an der Operation, Meldung `` `>` needs `T` to be ordered ``, Hinweis `declare it: T biggest[ordered T](T a, T b)` (per `dif fix`).
 - **Ableitung.** Beim Aufruf einer generischen Funktion steht jeder Typparameter, der in einem Parameter vorkommt, nie in `[…]`: er wird aus den Typen der Argumente abgeleitet (Funktionsliterale haben ihren vollen Typ, R26, die Reihenfolge der Argumente ist gleichgültig). Ein Typparameter, der nur im Rückgabetyp vorkommt, steht immer; geschrieben stehen genau diese, in der Reihenfolge der Deklaration: `decode[Config](s)`. Ohne Aufruf (als Wert, R26) stehen alle. Es gibt keine Ableitung aus der Zielvariable, dem `return` oder dem Typ links.
 - **Meldungen der Ableitung.** Ein Typargument, das abgeleitet wird, ist `R27` am `[`, Meldung `` `T` is inferred from the arguments; remove `[int]` ``, Hinweis der Aufruf ohne (`max(3, 5)`, per `dif fix`). Ein Typparameter, der nur im Rückgabetyp steht und fehlt, ist `R27` am Namen der Funktion, Meldung `` cannot infer `T` for `empty`: it only appears in the return type ``, Hinweis `write it: empty[int]()` (der Typ aus dem Ziel, wenn es einen gibt, sonst `empty[…]()`). Dasselbe gilt, wenn ein Argument keinen eigenen Typ nennt (`[]`, `{}`, `none`) und `T` nirgends sonst vorkommt. Zwei Argumente, die `T` verschieden festlegen, sind `R27` am zweiten, Meldung `` `T` is int from `a`, found str ``, ohne Hinweis. Zu viele oder zu wenige Typargumente sind `R27`, Meldung `` `decode` takes 1 type argument, found 2 ``.
 - **Fähigkeit fehlt am Aufruf.** Ein Typargument ohne die verlangte Fähigkeit ist `R28` am Namen der Funktion, Meldung `` `max` needs `T` to be ordered, found Point ``, Hinweis wie bei `sort` (`only numbers, rune and str are ordered`). Der Aufruf prüft nur die Einschränkungen, nie den Rumpf.
-- **Instanzen.** Jede verschiedene Folge von Typargumenten ist ein eigener Typ und eigener Code (Monomorphisierung, ein C-Exemplar pro Instanz): `Pair[int, str]` und `Pair[str, int]` sind verschiedene Typen, zwei Schreibweisen derselben Argumente derselbe. Meldungen nennen immer die Deklaration und den Typ mit seinen Argumenten (`Pair[int, str]`), nie ein Exemplar oder einen Namen aus dem erzeugten C; weil der Rumpf gegen die Deklaration geprüft ist, gibt es keine Meldung „in der Instanz“. Instanzen, die Instanzen erzeugen, ohne zu enden (`f[T]` ruft `f[[]T]`), sind `R27`, Meldung `` the instances of `f` nest deeper than 16 levels ``, ohne Hinweis (Vorschlag, offen: die Grenze).
+- **Instanzen.** Jede verschiedene Folge von Typargumenten ist ein eigener Typ und eigener Code (Monomorphisierung, ein C-Exemplar pro Instanz): `Pair[int, str]` und `Pair[str, int]` sind verschiedene Typen, zwei Schreibweisen derselben Argumente derselbe. Meldungen nennen immer die Deklaration und den Typ mit seinen Argumenten (`Pair[int, str]`), nie ein Exemplar oder einen Namen aus dem erzeugten C; weil der Rumpf gegen die Deklaration geprüft ist, gibt es keine Meldung „in der Instanz“. Instanzen, die Instanzen erzeugen, ohne zu enden (`f[T]` ruft `f[[]T]`), sind `R27`, Meldung `` the instances of `f` nest deeper than 16 levels ``, ohne Hinweis. Die Grenze zählt Ebenen von Instanzen, die Instanzen verlangen; ein Typ wie `Pair[Pair[int, int], int]` ist eine Ebene.
 - **Fähigkeiten generischer Typen** (R28). Eine Instanz von `struct` und `enum` hat die Fähigkeiten, die alle Feld- und Variantentypen nach dem Einsetzen haben; `ordered` nie. Ein Typparameter ist `equal`, `text` und `hashable` wie jeder Typ, `ordered` nur mit der Einschränkung; also hat `Pair[A, B]` im Rumpf die ersten drei immer. `[]T` und `map[K]V` folgen Teil 2c. Ein Funktionswert (R26) ist ein Typargument wie jeder andere Typ.
 - **Struct-Literal.** Der Typ steht links: `Pair[int, str] p = Pair{first: 1, second: "a"}`; das Literal braucht einen Ort mit bekanntem Typ (Variable, Feld, `return`, Argument eines nicht generischen Parameters). Sonst `R27` am Literal, Meldung `` the type arguments of `Pair` come from the place on the left ``, Hinweis `store it in a variable first: Pair[int, str] p = Pair{…}`.
 - **Generische `enum`.** Varianten gehören zum Typ: `Tree.Leaf(3)` leitet `T` aus den Werten ab wie ein Aufruf; eine Variante ohne Werte oder ohne `T` in ihren Werten schreibt den Typ: `Tree[int].Empty`. `Tree[int].Leaf(3)` ist `R27` am `[`, Meldung `` `T` is inferred from the values; remove `[int]` ``, Hinweis `Tree.Leaf(3)` (per `dif fix`). In `case` stehen sie nie (der Typ ist der des `switch`, R10).
 
-```text
+```dif
 T max[ordered T](T a, T b) {
     if a > b {
         return a
@@ -3106,35 +3102,140 @@ void main() {
 }
 ```
 
-Fehlversuche, jeweils mit der Meldung des Compilers:
+Ausgabe: `5 1 Pair{first: "a", second: 1} ["n1", "n2", "n3"]`.
 
-```text
+Ein generischer `enum` und eine Methode mit dem Typparameter des Typs; `Tree.Leaf(3)` leitet `T` aus den Werten ab, eine Variante ohne Werte schreibt den Typ:
+
+```dif
+enum Tree[T] {
+    Empty
+    Leaf(T value)
+    Node(Tree[T] left, Tree[T] right)
+}
+
+int Tree[T].count() {
+    switch self {
+        case Tree.Empty:
+            return 0
+        case Tree.Leaf(T x):
+            return 1
+        case Tree.Node(Tree[T] l, Tree[T] r):
+            return l.count() + r.count()
+    }
+}
+
+void main() {
+    Tree[int] a = Tree.Leaf(3)
+    Tree[int] e = Tree[int].Empty
+    Tree[int] n = Tree.Node(a, e)
+    print(n.count())
+    print(n)
+}
+```
+
+Ausgabe: `1`, `Tree.Node(Tree.Leaf(3), Tree.Empty)`.
+
+Fehlversuche, jeweils mit der Meldung des Compilers. Ein abgeleitetes Typargument darf nicht stehen:
+
+```dif error R27
+T max[ordered T](T a, T b) {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+void main() {
+    int m = max[int](3, 5)
+    print(m)
+}
+```
+
+```
 main.dif:9:16: error[R27]: `T` is inferred from the arguments; remove `[int]`
   hint: max(3, 5)
 ```
 
-(für `    int m = max[int](3, 5)` in Zeile 9 von `main`, mit `max` wie oben)
+Ein Typparameter, der nur im Rückgabetyp steht, muss stehen:
 
-```text
+```dif error R27
+[]T empty[T]() {
+    return []
+}
+
+void main() {
+    []int xs = empty()
+    print(xs.len())
+}
+```
+
+```
 main.dif:6:16: error[R27]: cannot infer `T` for `empty`: it only appears in the return type
   hint: write it: empty[int]()
 ```
 
-(für `[]T empty[T]() { return [] }` und `    []int xs = empty()`)
+`<` braucht die Einschränkung am Typparameter:
 
-```text
+```dif error R28
+T biggest[T](T a, T b) {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+void main() {
+    print(biggest(1, 2))
+}
+```
+
+```
 main.dif:2:10: error[R28]: `>` needs `T` to be ordered
   hint: declare it: T biggest[ordered T](T a, T b)
 ```
 
-(für `T biggest[T](T a, T b)` mit `    if a > b {` in Zeile 2)
+Ein Typargument ohne die verlangte Fähigkeit:
 
-```text
+```dif error R28
+struct Point {
+    int x
+}
+
+T max[ordered T](T a, T b) {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+void main() {
+    Point p = max(Point{x: 1}, Point{x: 2})
+    print(p.x)
+}
+```
+
+```
 main.dif:13:15: error[R28]: `max` needs `T` to be ordered, found Point
   hint: only numbers, rune and str are ordered
 ```
 
-(für `    Point p = max(Point{x: 1}, Point{x: 2})` mit `struct Point { int x }` und `max` wie oben)
+Das Struct-Literal bekommt seine Typargumente vom Ort links:
+
+```dif error R27
+struct Pair[A, B] {
+    A first
+    B second
+}
+
+void main() {
+    print(Pair{first: 1, second: "a"})
+}
+```
+
+```
+main.dif:7:11: error[R27]: the type arguments of `Pair` come from the place on the left
+  hint: store it in a variable first: Pair[int, str] p = Pair{…}
+```
 
 ### R28 — Fähigkeiten
 

@@ -1,0 +1,12 @@
+// expect: error[R4] 6:11
+struct Item {
+    int x
+}
+
+Item keep[Item](Item a) {
+    return a
+}
+
+void main() {
+    print(keep(1))
+}

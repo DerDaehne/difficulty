@@ -1,0 +1,8 @@
+// expect: error[R27] 3:12
+int f[T](T x) {
+    return f([x])
+}
+
+void main() {
+    print(f(1))
+}

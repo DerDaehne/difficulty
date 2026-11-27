@@ -1,0 +1,18 @@
+1 Pair{first: "a", second: 1} true true
+some(2)
+2
+none
+Stack{items: ["x"]}
+2 1 0
+15
+2
+Tree.Node(Tree.Leaf(3), Tree.Node(Tree.Empty, Tree.Leaf(4)))
+Tree.Leaf("x")
+5
+9
+Pair{first: ["a"], second: Tree.Leaf(4)}
+true
+some("one-two")
+6
+2
+Pair{first: Pair{first: 1, second: 2}, second: Pair{first: 1, second: 2}}

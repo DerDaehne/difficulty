@@ -1,0 +1,13 @@
+// expect: error[R28] 11:5
+struct Sorted[ordered T] {
+    []T items
+}
+
+struct P {
+    int x
+}
+
+void main() {
+    Sorted[P] s = Sorted{items: []}
+    print(s.items.len())
+}

@@ -1,0 +1,9 @@
+// expect: error[R27] 8:11
+struct Pair[A, B] {
+    A first
+    B second
+}
+
+void main() {
+    print(Pair{first: 1, second: "a"})
+}

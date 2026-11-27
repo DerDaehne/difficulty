@@ -1,0 +1,11 @@
+// expect: error[R28] 3:10
+T biggest[T](T a, T b) {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+void main() {
+    print(biggest(1, 2))
+}

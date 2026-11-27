@@ -1,0 +1,9 @@
+// expect: error[R27] 7:16
+[]T empty[T]() {
+    return []
+}
+
+void main() {
+    []int xs = empty()
+    print(xs.len())
+}

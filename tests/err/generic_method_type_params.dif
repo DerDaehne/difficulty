@@ -1,0 +1,13 @@
+// expect: error[R27] 6:14
+struct Box[T] {
+    T value
+}
+
+T Box[T].get[X]() {
+    return self.value
+}
+
+void main() {
+    Box[int] b = Box{value: 3}
+    print(b.get())
+}

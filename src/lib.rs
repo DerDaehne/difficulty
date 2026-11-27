@@ -4,6 +4,7 @@ pub mod ast;
 pub mod checker;
 pub mod diag;
 pub mod emit_c;
+pub mod generics;
 pub mod lexer;
 pub mod live;
 pub mod parser;
@@ -57,15 +58,54 @@ fn front(file: &str, src: &str) -> Result<(ast::Module, checker::Info), Vec<Diag
     let (toks, mut diags) = lexer::lex(src);
     let (module, pdiags) = parser::parse(src, &toks, &diags);
     diags.extend(pdiags);
-    if diags.is_empty() {
-        let (cdiags, info) = checker::check(file, src, &module);
-        if cdiags.is_empty() {
-            return Ok((module, info));
-        }
-        diags = cdiags;
+    if !diags.is_empty() {
+        diags.sort_by_key(|d| d.pos.offset);
+        return Err(diags);
     }
-    diags.sort_by_key(|d| d.pos.offset);
-    Err(diags)
+    // Generic declarations are copied for every instance the checker asks for (R27, `generics.rs`);
+    // each round checks the module with the copies so far and may ask for more.
+    let (templates, mut module) = generics::split(module);
+    let stride = src.len() as u32 + 1;
+    module.decls.extend(templates.seed());
+    let mut done = std::collections::HashSet::new();
+    let mut serial = 0u32;
+    loop {
+        let (cdiags, mut info, requests) =
+            checker::check(file, src, &module, &templates.decls, stride);
+        let fresh: Vec<_> = requests
+            .into_iter()
+            .filter(|r| done.insert(r.key.clone()))
+            .collect();
+        if fresh.is_empty()
+            || !cdiags.is_empty()
+                && serial > 0
+                && cdiags.iter().any(|d| d.id == "R27.instance_depth")
+        {
+            let hints = std::mem::take(&mut info.hints);
+            info.hints = generics::map_diags(hints, stride);
+            let cdiags = generics::map_diags(cdiags, stride);
+            if cdiags.is_empty() {
+                return Ok((module, info));
+            }
+            return Err(cdiags);
+        }
+        for r in fresh {
+            serial += 1;
+            let Some(shift) = serial.checked_mul(stride) else {
+                let d = Diag::new(
+                    "R27.instance_depth",
+                    r.pos,
+                    format!(
+                        "the instances of `{}` nest deeper than {} levels",
+                        r.generic,
+                        generics::MAX_DEPTH
+                    ),
+                );
+                return Err(vec![d]);
+            };
+            module.decls.extend(templates.instance(&r, shift));
+        }
+    }
 }
 
 /// Parser, checker and emitter recurse once per nesting level (bounded by the

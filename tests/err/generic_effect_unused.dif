@@ -1,0 +1,8 @@
+// expect: error[R13] 7:5
+void nothing[T](T x) {
+    T y = x
+}
+
+void main() {
+    nothing(3)
+}

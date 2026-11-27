@@ -1,0 +1,144 @@
+struct Pair[A, B] {
+    A first
+    B second
+}
+
+A Pair[A, B].left() {
+    return self.first
+}
+
+Pair[B, A] Pair[A, B].swapped() {
+    return Pair{first: self.second, second: self.first}
+}
+
+struct Stack[T] {
+    []T items = []
+}
+
+void Stack[T].push_item(mut self, T x) {
+    self.items.push(x)
+}
+
+?T Stack[T].top() {
+    if self.items.len() == 0 {
+        return none
+    }
+    return self.items[self.items.len() - 1]
+}
+
+int Stack[T].size() {
+    return self.items.len()
+}
+
+struct Counter[K] {
+    map[K]int counts = {}
+}
+
+void Counter[K].add(mut self, K key) {
+    int n = self.counts[key] ?? 0
+    self.counts[key] = n + 1
+}
+
+int Counter[K].get(K key) {
+    return self.counts[key] ?? 0
+}
+
+struct Handler[T] {
+    T(T) apply
+    str label
+}
+
+T Handler[T].run(T x) {
+    return self.apply(x)
+}
+
+enum Tree[T] {
+    Empty
+    Leaf(T value)
+    Node(Tree[T] left, Tree[T] right)
+}
+
+int Tree[T].count() {
+    switch self {
+        case Tree.Empty:
+            return 0
+        case Tree.Leaf(T x):
+            return 1
+        case Tree.Node(Tree[T] l, Tree[T] r):
+            return l.count() + r.count()
+    }
+}
+
+enum Maybe[T] {
+    Nothing
+    Just(T value)
+}
+
+T Maybe[T].or_else(T other) {
+    switch self {
+        case Maybe.Just(T v):
+            return v
+        default:
+            return other
+    }
+}
+
+Maybe[T] wrap[T](T x) {
+    return Maybe.Just(x)
+}
+
+void main() {
+    Pair[int, str] p = Pair{first: 1, second: "a"}
+    Pair[str, int] q = p.swapped()
+    print("{p.left()} {q} {p == p} {q == q.swapped().swapped()}")
+
+    Stack[int] s = Stack{}
+    s.push_item(1)
+    s.push_item(2)
+    print(s.top())
+    print(s.size())
+    Stack[str] t = Stack{}
+    print(t.top())
+    t.push_item("x")
+    print(t)
+
+    Counter[str] c = Counter{}
+    c.add("a")
+    c.add("a")
+    c.add("b")
+    int ca = c.get("a")
+    int cb = c.get("b")
+    int cz = c.get("z")
+    print("{ca} {cb} {cz}")
+
+    Handler[int] h = Handler{apply: int(int n) { return n * 3 }, label: "triple"}
+    print(h.run(5))
+
+    Tree[int] a = Tree.Leaf(3)
+    Tree[int] e = Tree[int].Empty
+    Tree[int] n = Tree.Node(a, Tree.Node(e, Tree.Leaf(4)))
+    print(n.count())
+    print(n)
+    Tree[str] ts = Tree.Leaf("x")
+    print(ts)
+
+    Maybe[int] m = wrap(5)
+    print(m.or_else(9))
+    Maybe[int] none_m = Maybe[int].Nothing
+    print(none_m.or_else(9))
+
+    Pair[[]str, Tree[int]] deep = Pair{first: ["a"], second: Tree.Leaf(4)}
+    Pair[[]str, Tree[int]] deep2 = Pair{first: ["a"], second: Tree.Leaf(4)}
+    print(deep)
+    print(deep == deep2)
+    map[Pair[int, int]]str pm = {}
+    Pair[int, int] k = Pair{first: 1, second: 2}
+    pm[k] = "one-two"
+    print(pm[k])
+    Pair[int, int(int)] fp = Pair{first: 1, second: int(int v) { return v + 1 }}
+    print(fp.second(5))
+    []Pair[int, int] list = [k, k]
+    print(list.len())
+    Pair[Pair[int, int], Pair[int, int]] nested = Pair{first: k, second: k}
+    print(nested)
+}

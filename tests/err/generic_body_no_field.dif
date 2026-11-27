@@ -1,0 +1,13 @@
+// expect: error[R8] 7:12
+struct Box[T] {
+    T value
+}
+
+int Box[T].bad() {
+    return self.value.foo
+}
+
+void main() {
+    Box[int] b = Box{value: 3}
+    print(b.value)
+}

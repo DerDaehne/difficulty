@@ -60,6 +60,23 @@ pub struct Param {
     pub default: Option<Box<Expr>>,
 }
 
+/// A type parameter `[ordered T]` (R27): the word before the name is its constraint.
+#[derive(Debug, Clone)]
+pub struct TParam {
+    pub name: String,
+    pub pos: Pos,
+    pub bound: Option<(String, Pos)>,
+}
+
+/// What a generated copy of a generic declaration knows about itself (R27): how deep the
+/// instances nest, and whether it is the copy that stands for the declaration itself, whose
+/// diagnostics count. An ordinary declaration has depth 0.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Inst {
+    pub depth: u32,
+    pub primary: bool,
+}
+
 /// A function, or a method `R T.name(…)` when `recv` names the type.
 #[derive(Debug, Clone)]
 pub struct Func {
@@ -71,6 +88,9 @@ pub struct Func {
     pub mut_self: Option<Pos>,
     pub params: Vec<Param>,
     pub body: Block,
+    /// `[T, ordered U]` after the name (R27).
+    pub tparams: Vec<TParam>,
+    pub inst: Inst,
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +98,10 @@ pub struct StructDecl {
     pub name: String,
     pub pos: Pos,
     pub fields: Vec<Field>,
+    pub tparams: Vec<TParam>,
+    /// The name messages use for an instance (`Pair[int, str]`; `name` is its key).
+    pub display: Option<String>,
+    pub inst: Inst,
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +117,9 @@ pub struct EnumDecl {
     pub name: String,
     pub pos: Pos,
     pub variants: Vec<Variant>,
+    pub tparams: Vec<TParam>,
+    pub display: Option<String>,
+    pub inst: Inst,
 }
 
 #[derive(Debug, Clone)]
@@ -262,6 +289,8 @@ pub enum ExprKind {
     MapLit(Vec<(Expr, Expr)>),
     /// A function literal or a block argument (R26).
     FuncLit(Box<FuncLit>),
+    /// `max[int]`, `Tree[int]`: a generic name with its type arguments (R27).
+    TypeApp(Box<Expr>, Vec<TypeRef>),
     /// Placeholder after an error that was already reported.
     Missing,
 }

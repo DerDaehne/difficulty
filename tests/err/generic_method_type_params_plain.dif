@@ -1,0 +1,13 @@
+// expect: error[R27] 6:15
+struct Point {
+    int x
+}
+
+int Point.get[X]() {
+    return self.x
+}
+
+void main() {
+    Point p = Point{x: 3}
+    print(p.get())
+}

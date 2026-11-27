@@ -13,8 +13,34 @@ pub(super) fn cid(name: &str) -> String {
     name.replace('.', "_")
 }
 
+/// A name for use in C: every letter and digit stays, the rest is `_`.
+pub(super) fn sanitize(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
 impl<'a> Emitter<'a> {
     // ---- names ----
+
+    /// The name part of the C names of a type. An instance of a generic type starts with its
+    /// number, so no type of the program can have the same.
+    pub(super) fn tcid(&self, id: u32) -> String {
+        let name = &self.info.types[id as usize].name;
+        if name.contains('[') {
+            format!("{id}_{}", sanitize(name))
+        } else {
+            cid(name)
+        }
+    }
+
+    /// `tcid` of the type called `name`.
+    pub(super) fn type_cid(&self, name: &str) -> String {
+        match self.info.types.iter().position(|d| d.name == name) {
+            Some(id) => self.tcid(id as u32),
+            None => cid(name),
+        }
+    }
 
     pub(super) fn c_ty(&self, t: Ty) -> String {
         match t {
@@ -37,7 +63,7 @@ impl<'a> Emitter<'a> {
             Ty::List(_) => "dif_list *".into(),
             Ty::Map(_) => "dif_map *".into(),
             Ty::Arr(i) => format!("dif_a{i}"),
-            Ty::Named(id) => format!("d_{}", cid(&self.info.types[id as usize].name)),
+            Ty::Named(id) => format!("d_{}", self.tcid(id)),
             Ty::Opt(i) => format!("dif_o{i}"),
             Ty::Res(i) => format!("dif_r{i}"),
             Ty::Func(i) => format!("dfn_{i}"),
@@ -48,7 +74,7 @@ impl<'a> Emitter<'a> {
     /// Name part of the helpers (`dif_eq_…`, `dif_put_…`, `dif_print_…`) of a type.
     pub(super) fn sfx(&self, t: Ty) -> String {
         match t {
-            Ty::Named(id) => cid(&self.info.types[id as usize].name),
+            Ty::Named(id) => self.tcid(id),
             Ty::Opt(i) => format!("__o{i}"),
             Ty::Res(i) => format!("__r{i}"),
             Ty::List(i) => format!("__l{i}"),
@@ -231,6 +257,7 @@ impl<'a> Emitter<'a> {
             .chain((0..n.arrs.len() as u32).map(Ty::Arr))
             .chain((0..n.maps.len() as u32).map(Ty::Map))
             .chain((0..n.ftys.len() as u32).map(Ty::Func))
+            .filter(|t| !n.hidden.contains(t))
             .collect()
     }
 
@@ -609,7 +636,8 @@ impl<'a> Emitter<'a> {
                                 all.join(" && ")
                             };
                             let _ = writeln!(c, "    return {all};\n}}");
-                            let _ = writeln!(text, "    {}", Self::lit("b", &format!("{n}{{")));
+                            let shown = d.base.rsplit('.').next().unwrap_or(&d.base);
+                            let _ = writeln!(text, "    {}", Self::lit("b", &format!("{shown}{{")));
                             for (k, (f, t)) in fs.iter().enumerate() {
                                 let sep = if k == 0 { "" } else { ", " };
                                 let _ = writeln!(
@@ -650,7 +678,7 @@ impl<'a> Emitter<'a> {
                             }
                             let _ = writeln!(c, "    return true;\n}}");
                             // `io.IoErr` is written without its module in the text form (R28)
-                            let shown = d.name.rsplit('.').next().unwrap_or(&d.name);
+                            let shown = d.base.rsplit('.').next().unwrap_or(&d.base);
                             for (k, v) in vs.iter().enumerate() {
                                 let _ = writeln!(text, "    if (v.tag == {k}) {{");
                                 let _ = writeln!(

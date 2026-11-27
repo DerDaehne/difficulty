@@ -7,6 +7,8 @@
 //! lexical error that breaks the token stream (L1, L5) silences the parser error
 //! it causes in its unit.
 
+use std::collections::HashSet;
+
 use crate::ast::*;
 use crate::diag::{Diag, Pos};
 use crate::lexer::{StrPart, Tok, Token};
@@ -24,8 +26,60 @@ pub fn parse(src: &str, toks: &[Token], lex: &[Diag]) -> (Module, Vec<Diag>) {
         .map(|d| d.pos.offset)
         .collect();
     let mut p = Parser::new(src, toks, breaks);
+    p.generics = generic_names(toks);
     let m = p.module();
     (m, p.out)
+}
+
+/// The names of the generic declarations: `struct Name[`, `enum Name[` and a function header
+/// `T name[…](…) {` at the top level (R27). Found before parsing, because `a[i]` and `Pair[A, B]`
+/// read alike until the name is known.
+fn generic_names(toks: &[Token]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let mut depth = 0i32;
+    for (k, t) in toks.iter().enumerate() {
+        let at = |j: usize| toks.get(j).map(|t| &t.tok);
+        match &t.tok {
+            Tok::Op("{") => depth += 1,
+            Tok::Op("}") => depth -= 1,
+            Tok::Kw("struct" | "enum") if depth == 0 => {
+                if let (Some(Tok::Ident(n)), Some(Tok::Op("["))) = (at(k + 1), at(k + 2)) {
+                    out.insert(n.clone());
+                }
+            }
+            Tok::Ident(n) if depth == 0 && at(k + 1) == Some(&Tok::Op("[")) => {
+                // `name[` … `]` `(` … `)` `{`: a function header
+                let mut j = k + 2;
+                while !matches!(at(j), Some(Tok::Op("]") | Tok::Nl | Tok::Eof) | None) {
+                    j += 1;
+                }
+                if at(j) != Some(&Tok::Op("]")) || at(j + 1) != Some(&Tok::Op("(")) {
+                    continue;
+                }
+                let mut open = 0;
+                j += 1;
+                while let Some(tok) = at(j) {
+                    match tok {
+                        Tok::Op("(") => open += 1,
+                        Tok::Op(")") => {
+                            open -= 1;
+                            if open == 0 {
+                                break;
+                            }
+                        }
+                        Tok::Eof => break,
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                if at(j + 1) == Some(&Tok::Op("{")) {
+                    out.insert(n.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 const ASSIGN_OPS: &[&str] = &[
@@ -84,6 +138,9 @@ struct Parser<'a> {
     reserved: Vec<&'static str>,
     /// Reading the return type of a function literal: a `(` after it is its parameter list.
     no_fn: bool,
+    /// Names of the generic functions, structs and enums of the module (R27): after such a name
+    /// a `[` opens type arguments.
+    generics: HashSet<String>,
     out: Vec<Diag>,
 }
 
@@ -105,6 +162,7 @@ impl<'a> Parser<'a> {
             unclosed: false,
             reserved: Vec::new(),
             no_fn: false,
+            generics: HashSet::new(),
             out: Vec::new(),
         }
     }
@@ -483,7 +541,7 @@ impl<'a> Parser<'a> {
             }
         }
         let next = self.peek_n(j + 1);
-        (matches!(next, Tok::Ident(_)) || inner && matches!(next, Tok::Op(")" | ",")))
+        (matches!(next, Tok::Ident(_)) || inner && matches!(next, Tok::Op(")" | "," | "]")))
             .then_some(j + 1)
     }
 
@@ -510,6 +568,9 @@ impl<'a> Parser<'a> {
                 self.elem_end(j + 1)
             }
             Tok::Ident(m) if MODULES.contains(&m.as_str()) && self.qualified_at(k) => Some(k + 3),
+            Tok::Ident(n) if self.generics.contains(n) => {
+                Some(self.targs_end(k + 1).unwrap_or(k + 1))
+            }
             Tok::Ident(_) | Tok::Kw("void") => Some(k + 1),
             _ => None,
         }
@@ -535,6 +596,22 @@ impl<'a> Parser<'a> {
     /// `io.IoErr`: a module name, a dot and a name.
     fn qualified_at(&self, k: usize) -> bool {
         *self.peek_n(k + 1) == Tok::Op(".") && matches!(self.peek_n(k + 2), Tok::Ident(_))
+    }
+
+    /// The end of type arguments `[T, U]` starting at the `[` at `k` (R27).
+    fn targs_end(&self, k: usize) -> Option<usize> {
+        if *self.peek_n(k) != Tok::Op("[") {
+            return None;
+        }
+        let mut j = k + 1;
+        loop {
+            j = self.type_end_in(j, true)?;
+            match self.peek_n(j) {
+                Tok::Op(",") => j += 1,
+                Tok::Op("]") => return Some(j + 1),
+                _ => return None,
+            }
+        }
     }
 
     /// `T name` at the start of a statement: a declaration.
@@ -601,18 +678,19 @@ impl<'a> Parser<'a> {
         }
         // `R T.name(` is a method
         let k = self.type_len();
-        if k > 0
-            && matches!(self.peek_n(k), Tok::Ident(_))
-            && *self.peek_n(k + 1) == Tok::Op(".")
-            && self.name_at(k + 2)
-        {
-            return self.func().map(Decl::Func);
+        if k > 0 && matches!(self.peek_n(k), Tok::Ident(_)) {
+            let r = self.type_end(k).unwrap_or(k + 1);
+            if *self.peek_n(r) == Tok::Op(".") && self.name_at(r + 1) {
+                return self.func().map(Decl::Func);
+            }
         }
         if self.is_kw("test") {
             return self.test_decl().map(Decl::Test);
         }
         if self.decl_start() {
-            if matches!(self.peek_n(k + 1), Tok::Op("(" | "{")) {
+            let generic = matches!(self.peek_n(k), Tok::Ident(n) if self.generics.contains(n))
+                && *self.peek_n(k + 1) == Tok::Op("[");
+            if generic || matches!(self.peek_n(k + 1), Tok::Op("(" | "{")) {
                 return self.func().map(Decl::Func);
             }
             let v = self.var_decl(true)?;
@@ -792,6 +870,34 @@ impl<'a> Parser<'a> {
                 name.push(']');
                 self.elem_type(name, nested)
             }
+            Tok::Ident(n) if self.generics.contains(n) && *self.peek_n(1) == Tok::Op("[") => {
+                name.push_str(n);
+                self.bump();
+                let open = self.pos();
+                self.bump();
+                name.push('[');
+                let mut first = true;
+                while !self.is_op("]") && *self.peek() != Tok::Eof {
+                    if !first {
+                        name.push(',');
+                    }
+                    first = false;
+                    let mut arg = String::new();
+                    if !self.type_top(&mut arg, nested) {
+                        return false;
+                    }
+                    name.push_str(&arg);
+                    if !self.is_op(",") {
+                        break;
+                    }
+                    self.bump();
+                }
+                if !self.close(open, "]") {
+                    return false;
+                }
+                name.push(']');
+                true
+            }
             Tok::Ident(n) => {
                 name.push_str(n);
                 let qualified = MODULES.contains(&n.as_str()) && self.qualified_at(0);
@@ -849,10 +955,42 @@ impl<'a> Parser<'a> {
         self.base_type(name, nested)
     }
 
+    /// `[T, ordered U]` after the name of a function, struct or enum (R27).
+    fn tparams(&mut self) -> Vec<TParam> {
+        let mut out = Vec::new();
+        if !self.is_op("[") {
+            return out;
+        }
+        let open = self.pos();
+        self.bump();
+        while !self.is_op("]") && *self.peek() != Tok::Eof {
+            let Some((first, fpos)) = self.name() else {
+                break;
+            };
+            let (name, pos, bound) = match self.peek() {
+                Tok::Ident(_) => {
+                    let Some((n, p)) = self.name() else { break };
+                    (n, p, Some((first, fpos)))
+                }
+                _ => (first, fpos, None),
+            };
+            out.push(TParam { name, pos, bound });
+            if !self.is_op(",") {
+                break;
+            }
+            self.bump();
+        }
+        self.close(open, "]");
+        out
+    }
+
     fn func(&mut self) -> Option<Func> {
         let header = self.pos().offset;
         let mut ret = self.type_ref();
-        let recv = if *self.peek_n(1) == Tok::Op(".") {
+        let recv = if self
+            .type_end(0)
+            .is_some_and(|e| *self.peek_n(e) == Tok::Op("."))
+        {
             let t = self.type_ref();
             self.bump(); // .
             Some(t)
@@ -860,6 +998,7 @@ impl<'a> Parser<'a> {
             None
         };
         let (name, pos) = self.name()?;
+        let tparams = self.tparams();
         let mut params = Vec::new();
         let mut mut_self = None;
         if self.is_op("{") {
@@ -969,6 +1108,8 @@ impl<'a> Parser<'a> {
             mut_self,
             params,
             body,
+            tparams,
+            inst: Inst::default(),
         })
     }
 
@@ -1627,6 +1768,22 @@ impl<'a> Parser<'a> {
                     ended = closed && self.block_arg(&e, &mut args);
                     ExprKind::Call(Box::new(e), args)
                 }
+                Tok::Op("[")
+                    if matches!(&e.kind, ExprKind::Ident(n) if self.generics.contains(n))
+                        && self.targs_end(0).is_some() =>
+                {
+                    self.bump();
+                    let mut targs = Vec::new();
+                    while !self.is_op("]") {
+                        targs.push(self.type_ref());
+                        if !self.is_op(",") {
+                            break;
+                        }
+                        self.bump();
+                    }
+                    self.close(open, "]");
+                    ExprKind::TypeApp(Box::new(e), targs)
+                }
                 Tok::Op("[") => {
                     self.bump();
                     let header = std::mem::replace(&mut self.header, false);
@@ -1743,6 +1900,7 @@ impl<'a> Parser<'a> {
                 StrPart::Expr(toks) | StrPart::Fmt(toks, _) => {
                     let mut sub = Parser::new(self.src, toks, Vec::new());
                     sub.reserved = self.reserved.clone();
+                    sub.generics = self.generics.clone();
                     let e = sub.expr();
                     if *sub.peek() != Tok::Eof {
                         let p = sub.pos();
@@ -1846,6 +2004,7 @@ impl<'a> Parser<'a> {
     fn struct_decl(&mut self) -> Option<StructDecl> {
         self.bump(); // struct
         let (name, pos) = self.name()?;
+        let tparams = self.tparams();
         if !self.expect_op("{") {
             return None;
         }
@@ -1888,12 +2047,20 @@ impl<'a> Parser<'a> {
             self.skip_nl();
         }
         self.expect_op("}");
-        Some(StructDecl { name, pos, fields })
+        Some(StructDecl {
+            name,
+            pos,
+            fields,
+            tparams,
+            display: None,
+            inst: Inst::default(),
+        })
     }
 
     fn enum_decl(&mut self) -> Option<EnumDecl> {
         self.bump(); // enum
         let (name, pos) = self.name()?;
+        let tparams = self.tparams();
         if !self.expect_op("{") {
             return None;
         }
@@ -1946,6 +2113,9 @@ impl<'a> Parser<'a> {
             name,
             pos,
             variants,
+            tparams,
+            display: None,
+            inst: Inst::default(),
         })
     }
 

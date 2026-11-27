@@ -38,6 +38,11 @@ static inline void dif_eprint_buf(dif_buf *b) {
 "#;
 
 /// A literal needs no line in the failure report of `expect` (R18).
+/// A function or method of the check of generic text (R27): it has no code.
+fn hidden(f: &Func) -> bool {
+    f.name.contains('$') || f.recv.as_ref().is_some_and(|r| r.name.contains('$'))
+}
+
 fn is_literal(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::Int(_)
@@ -66,6 +71,7 @@ fn is_literal(e: &Expr) -> bool {
         | ExprKind::ListLit(_)
         | ExprKind::MapLit(_)
         | ExprKind::FuncLit(_)
+        | ExprKind::TypeApp(..)
         | ExprKind::Missing => false,
     }
 }
@@ -169,6 +175,7 @@ fn emitter<'a>(file: &str, src: &'a str, info: &'a Info) -> Emitter<'a> {
         in_test: false,
         slots: Vec::new(),
         info,
+        fn_ords: HashMap::new(),
         funcs: HashMap::new(),
         methods: HashMap::new(),
         structs: HashMap::new(),
@@ -208,6 +215,8 @@ struct Emitter<'a> {
     /// Texts of the operands of the `expect` being lowered, in source order.
     slots: Vec<String>,
     info: &'a Info,
+    /// Ordinal of each function instance (`max[int]`) among the functions, for its C name.
+    fn_ords: HashMap<&'a str, usize>,
     funcs: HashMap<&'a str, &'a Func>,
     methods: HashMap<(&'a str, &'a str), &'a Func>,
     structs: HashMap<&'a str, &'a StructDecl>,
@@ -320,6 +329,7 @@ fn sets(e: &Expr, n: &str) -> bool {
         | ExprKind::NoneVal
         | ExprKind::OkVal(None)
         | ExprKind::FuncLit(_)
+        | ExprKind::TypeApp(..)
         | ExprKind::Missing => false,
     }
 }
@@ -381,6 +391,7 @@ fn has_call(e: &Expr) -> bool {
         | ExprKind::SelfRef
         | ExprKind::NoneVal
         | ExprKind::OkVal(None)
+        | ExprKind::TypeApp(..)
         | ExprKind::Missing => false,
     }
 }
@@ -500,10 +511,33 @@ impl<'a> Emitter<'a> {
             return i.map_or(Ty::Err, |i| Ty::Map(i as u32));
         }
         let end = s
-            .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
+            .find(|c: char| !(c.is_alphanumeric() || matches!(c, '_' | '.' | '$')))
             .unwrap_or(s.len());
         let (n, rest) = s.split_at(end);
+        // a generic type: the text up to the matching `]` names the instance
+        let (n, rest) = if rest.starts_with('[') {
+            let mut depth = 0;
+            let mut close = rest.len();
+            for (i, c) in rest.char_indices() {
+                match c {
+                    '[' => depth += 1,
+                    ']' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            close = i + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let whole = &s[..n.len() + close];
+            (whole, &s[n.len() + close..])
+        } else {
+            (n, rest)
+        };
         *s = rest;
+        let n = self.info.aliases.get(n).map_or(n, |k| k.as_str());
         match n {
             "int" => Ty::Int,
             "bool" => Ty::Bool,
@@ -563,6 +597,9 @@ impl<'a> Emitter<'a> {
 
     /// The enum a name before `.` stands for: `E`, or `io.IoErr`.
     fn enum_of(&self, base: &Expr) -> Option<u32> {
+        if let Some(&eid) = self.info.enum_bases.get(&(base.pos.offset, base.end)) {
+            return Some(eid);
+        }
         let name = match &base.kind {
             ExprKind::Ident(tn) => tn.clone(),
             ExprKind::Field(m, n) => match &m.kind {
@@ -577,6 +614,16 @@ impl<'a> Emitter<'a> {
         // a variable of the same name hides the type (R4 forbids it, the checker decided)
         let is_value = self.info.exprs.contains_key(&(base.pos.offset, base.end));
         (matches!(self.info.types[i].body, TypeBody::Enum(_)) && !is_value).then_some(i as u32)
+    }
+
+    /// The enum a pattern `E.V` is over: the type of the switch, or the enum called `E`.
+    fn enum_for(&self, ty: &str, over: Ty) -> u32 {
+        match over {
+            Ty::Named(id) if crate::generics::base_of(&self.info.types[id as usize].name) == ty => {
+                id
+            }
+            _ => self.enum_named(ty).unwrap_or(0),
+        }
     }
 
     fn enum_named(&self, name: &str) -> Option<u32> {
@@ -622,6 +669,7 @@ impl<'a> Emitter<'a> {
 
     /// Line and column (in characters) of a byte offset, for the position of an abort.
     fn pos_of(&self, offset: u32) -> (usize, usize) {
+        let offset = offset % self.info.stride;
         let line = self.line_starts.partition_point(|&s| s <= offset) - 1;
         let from = self.line_starts[line] as usize;
         let col = self
@@ -633,7 +681,7 @@ impl<'a> Emitter<'a> {
 
     /// Position of the name of a method or function after `base.` (R14).
     fn name_pos(&self, base: &Expr) -> (usize, usize) {
-        let rest = &self.src[base.end as usize..];
+        let rest = &self.src[(base.end % self.info.stride) as usize..];
         let skip = rest
             .find(|c: char| !(c.is_whitespace() || c == '.'))
             .unwrap_or(0);
@@ -729,6 +777,10 @@ impl<'a> Emitter<'a> {
                         self.methods.insert((&r.name, &f.name), f);
                     }
                     None => {
+                        if f.name.contains('[') {
+                            let n = self.fn_ords.len();
+                            self.fn_ords.insert(&f.name, n);
+                        }
                         self.funcs.insert(&f.name, f);
                     }
                 },
@@ -758,6 +810,7 @@ impl<'a> Emitter<'a> {
         // prototypes, so the order of declarations does not matter
         for d in &m.decls {
             match d {
+                Decl::Func(f) if hidden(f) => {}
                 Decl::Func(f) => {
                     let _ = writeln!(c, "{};", self.header(f));
                 }
@@ -799,6 +852,7 @@ impl<'a> Emitter<'a> {
                         self.temp_decls()
                     );
                 }
+                Decl::Func(f) if hidden(f) => {}
                 Decl::Func(f) => c.push_str(&self.func(f)),
                 _ => {}
             }
@@ -901,10 +955,15 @@ impl<'a> Emitter<'a> {
         &self.info.types[id as usize].name
     }
 
-    fn cname(f: &Func) -> String {
+    /// The C name of a function or method. An instance of a generic declaration has a name that
+    /// starts with a digit after the prefix, which no name of a program does.
+    fn cname(&self, f: &Func) -> String {
         match &f.recv {
-            Some(r) => format!("dm_{}_{}", types::cid(&r.name), f.name),
-            None => format!("d_{}", f.name),
+            Some(r) => format!("dm_{}_{}", self.type_cid(&r.name), f.name),
+            None => match self.fn_ords.get(f.name.as_str()) {
+                Some(n) => format!("d_{n}f_{}", types::sanitize(&f.name)),
+                None => format!("d_{}", f.name),
+            },
         }
     }
 
@@ -940,7 +999,7 @@ impl<'a> Emitter<'a> {
         format!(
             "{} {}({params})",
             self.c_ty(self.ty_of(&f.ret)),
-            Self::cname(f)
+            self.cname(f)
         )
     }
 
@@ -1386,7 +1445,7 @@ impl<'a> Emitter<'a> {
                     binds: Some(binds),
                     ..
                 }] => {
-                    let eid = self.enum_named(ty).unwrap_or(0);
+                    let eid = self.enum_for(ty, st);
                     let k = self.variant_index(eid, name);
                     (binds.iter().enumerate())
                         .filter_map(|(j, b)| b.as_ref().map(|b| (j, b)))
@@ -1446,7 +1505,7 @@ impl<'a> Emitter<'a> {
                 _ => format!("{s} == d_{n}()"),
             },
             Pattern::Variant { ty, name, .. } => {
-                let eid = self.enum_named(ty).unwrap_or(0);
+                let eid = self.enum_for(ty, st);
                 format!("{s}.tag == {}", self.variant_index(eid, name))
             }
             Pattern::Result { kind, .. } => match *kind {
@@ -1533,6 +1592,7 @@ impl<'a> Emitter<'a> {
             | ExprKind::ListLit(_)
             | ExprKind::MapLit(_)
             | ExprKind::FuncLit(_)
+            | ExprKind::TypeApp(..)
             | ExprKind::Missing => None,
         }
     }
@@ -1599,6 +1659,7 @@ impl<'a> Emitter<'a> {
             | ExprKind::ListLit(_)
             | ExprKind::MapLit(_)
             | ExprKind::FuncLit(_)
+            | ExprKind::TypeApp(..)
             | ExprKind::Missing => unreachable!("the checker lets only places be written"),
         }
     }
@@ -1699,12 +1760,12 @@ impl<'a> Emitter<'a> {
                 let eid = self.enum_of(base).unwrap_or(0);
                 self.variant(eid, name, &[])
             }
-            ExprKind::StructLit(name, inits) => self.struct_lit(name, inits),
+            ExprKind::StructLit(_, inits) => self.struct_lit(e, inits),
             ExprKind::IfExpr(branches, last) => self.if_expr(self.ty(e), branches, last),
             ExprKind::Mut(x) => format!("(&({}))", self.lvalue(x)),
             ExprKind::Named(_, x) => self.expr(x),
             ExprKind::FuncLit(l) => self.func_lit(e, l),
-            ExprKind::Missing => "0".into(),
+            ExprKind::TypeApp(..) | ExprKind::Missing => "0".into(),
             ExprKind::ListLit(items) => self.list_lit(e, items),
             ExprKind::MapLit(entries) => self.map_lit(e, entries),
             ExprKind::Index(base, idx, bp) => self.map_get(e, base, idx, *bp),
@@ -1771,7 +1832,9 @@ impl<'a> Emitter<'a> {
             };
             return format!(
                 "{{ {text} dif_try_fail({}, {}, {}, dif_take(&b)); }}",
-                p.line, p.col, p.offset
+                p.line,
+                p.col,
+                p.offset % self.info.stride
             );
         }
         let r = self.c_ty(self.ret);
@@ -1867,7 +1930,7 @@ impl<'a> Emitter<'a> {
             "({{ dif_str xv{id}[{n}]; bool xd{id}[{n}] = {{false}}; const char *const xt{id}[{n}] = {{{list}}}; bool xk{id} = {c}; if (!xk{id}) dif_expect_fail({}, {}, {}, {text}, {}, xt{id}, xv{id}, xd{id}); for (int xi = 0; xi < {}; xi++) if (xd{id}[xi]) dif_str_dec(xv{id}[xi]); }})",
             p.line,
             p.col,
-            p.offset,
+            p.offset % self.info.stride,
             texts.len(),
             texts.len()
         )
@@ -1877,7 +1940,7 @@ impl<'a> Emitter<'a> {
     fn text_of(&self, e: &Expr) -> String {
         let s = self
             .src
-            .get(e.pos.offset as usize..e.end as usize)
+            .get((e.pos.offset % self.info.stride) as usize..(e.end % self.info.stride) as usize)
             .unwrap_or("");
         let mut out = String::new();
         let mut gap = String::new();
@@ -1996,8 +2059,12 @@ impl<'a> Emitter<'a> {
 
     /// `T{f: v, …}`: written fields left to right, then the defaults of the missing
     /// ones in declaration order (R5).
-    fn struct_lit(&mut self, name: &'a str, inits: &'a [FieldInit]) -> String {
-        let (s, mut c, end) = self.building(self.ty_named(name));
+    fn struct_lit(&mut self, e: &'a Expr, inits: &'a [FieldInit]) -> String {
+        let Ty::Named(id) = self.ty(e) else {
+            unreachable!("a struct literal has the type of its struct")
+        };
+        let name = self.tname(id);
+        let (s, mut c, end) = self.building(Ty::Named(id));
         for i in inits {
             let v = self.at(self.field_ty(name, &i.name), &i.value);
             let _ = write!(c, "{s}.f_{} = {v}; ", i.name);
@@ -2204,11 +2271,22 @@ impl<'a> Emitter<'a> {
             ExprKind::Ident(name) if name == "assert" => self.assert(e, &args[0]),
             ExprKind::Ident(name) if name == "repeat" => self.repeat(e, args),
             ExprKind::Ident(name) if name == "expect" && self.in_test => self.expect(e, &args[0]),
+            ExprKind::Ident(_) | ExprKind::TypeApp(..)
+                if self.info.callees.contains_key(&(e.pos.offset, e.end)) =>
+            {
+                let func = self.funcs[self.info.callees[&(e.pos.offset, e.end)].as_str()];
+                let items = self.args_of(func, args, None);
+                self.apply(
+                    &self.cname(func),
+                    &items,
+                    (e.pos.line as usize, e.pos.col as usize),
+                )
+            }
             ExprKind::Ident(name) if self.funcs.contains_key(name.as_str()) => {
                 let func = self.funcs[name.as_str()];
                 let items = self.args_of(func, args, None);
                 self.apply(
-                    &Self::cname(func),
+                    &self.cname(func),
                     &items,
                     (e.pos.line as usize, e.pos.col as usize),
                 )
@@ -2233,7 +2311,7 @@ impl<'a> Emitter<'a> {
         };
         let items = self.args_of(func, args, Some(recv));
         let at = self.name_pos(base);
-        self.apply(&Self::cname(func), &items, at)
+        self.apply(&self.cname(func), &items, at)
     }
 
     /// The operands of a call: `mut` parameters take the place after `mut`; a parameter the
@@ -2438,6 +2516,7 @@ impl<'a> Emitter<'a> {
             | ExprKind::ListLit(_)
             | ExprKind::MapLit(_)
             | ExprKind::FuncLit(_)
+            | ExprKind::TypeApp(..)
             | ExprKind::Missing => None,
         }
     }

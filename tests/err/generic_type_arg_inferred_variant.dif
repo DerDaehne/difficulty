@@ -1,0 +1,10 @@
+// expect: error[R27] 8:23
+enum Tree[T] {
+    Empty
+    Leaf(T value)
+}
+
+void main() {
+    Tree[int] t = Tree[int].Leaf(3)
+    print(t)
+}
