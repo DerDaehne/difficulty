@@ -892,7 +892,7 @@ impl<'a> Checker<'a> {
 
     // ---- builtin methods (§4) ----
 
-    fn method_names(bt: Ty) -> &'static [&'static str] {
+    pub(super) fn method_names(bt: Ty) -> &'static [&'static str] {
         match bt {
             Ty::Str => STR_METHODS,
             Ty::Rune => RUNE_METHODS,

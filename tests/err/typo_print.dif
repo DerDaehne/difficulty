@@ -1,0 +1,4 @@
+// expect: error[R4] 3:5
+void main() {
+    pritn("x")
+}

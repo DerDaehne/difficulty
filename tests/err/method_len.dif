@@ -1,0 +1,4 @@
+// expect: error[R4] 3:11
+void main() {
+    print(len([1, 2]))
+}

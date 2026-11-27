@@ -1,0 +1,5 @@
+// expect: error[R4] 4:11
+void main() {
+    int a = 3
+    print(min(a, 2))
+}

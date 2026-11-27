@@ -1633,6 +1633,53 @@ impl<'a> Checker<'a> {
         );
     }
 
+    /// `min(a, b)` where `min` is a method of the type of `a`: say `a.min(b)` (R4).
+    fn method_hint(&mut self, e: &'a Expr, name: &str, args: &'a [Expr]) -> bool {
+        let Some(a) = args.first() else { return false };
+        if matches!(a.kind, ExprKind::Named(..) | ExprKind::Mut(_))
+            || self.unknown.iter().any(|n| n == name)
+        {
+            return false;
+        }
+        let bt = self.rvalue(a).0;
+        let is_method = match bt {
+            Ty::Named(t) if self.types[t as usize].opaque.is_none() => {
+                self.types[t as usize].methods.contains_key(name)
+            }
+            _ => Self::method_names(bt).contains(&name),
+        };
+        if !is_method {
+            return false;
+        }
+        self.unknown.push(name.to_string());
+        let recv = self.text(a);
+        let plain = matches!(
+            a.kind,
+            ExprKind::Ident(_)
+                | ExprKind::SelfRef
+                | ExprKind::Call(..)
+                | ExprKind::Index(..)
+                | ExprKind::Field(..)
+                | ExprKind::Paren(_)
+                | ExprKind::ListLit(_)
+        );
+        let recv = if plain {
+            recv.to_string()
+        } else {
+            format!("({recv})")
+        };
+        let rest = args
+            .get(1)
+            .zip(args.last())
+            .map_or("", |(f, l)| self.span(f.pos.offset, l.end));
+        let call = format!("{recv}.{name}({rest})");
+        let d = Diag::new("R4.unknown_name", e.pos, format!("unknown name `{name}`"))
+            .hint(format!("`{name}` is a method: {call}"))
+            .fix(e.pos.offset, e.end, &call);
+        self.diags.push(d);
+        true
+    }
+
     fn lookup(&mut self, name: &str, pos: Pos) -> (Ty, Val) {
         if let Some(l) = self.local(name) {
             let (ty, val) = (l.ty, l.val);
@@ -3292,7 +3339,7 @@ impl<'a> Checker<'a> {
             if self.consts.contains_key(name) {
                 let msg = format!("`{name}` is a const, not a function");
                 self.err("R8.const_not_fn", f.pos, msg, None);
-            } else {
+            } else if !self.method_hint(e, name, args) {
                 self.unknown_name(name, f.pos);
             }
             return (Ty::Err, Val::Runtime);
@@ -4249,10 +4296,15 @@ fn breaks(b: &Block) -> bool {
 
 /// The candidate with the smallest edit distance, if it is close enough.
 fn closest<'b>(name: &str, candidates: impl Iterator<Item = &'b str>) -> Option<&'b str> {
-    let limit = (name.chars().count() / 3).max(1);
+    // short names are too ambiguous: `min` is not `main`
+    let limit = match name.chars().count() {
+        1 | 2 => 1,
+        3 => 0,
+        n => (n + 1) / 3,
+    };
     candidates
         .filter(|c| *c != name && !c.contains(['[', '$']))
-        .map(|c| (distance(name, c), c))
+        .map(|c| (distance(&name.to_lowercase(), &c.to_lowercase()), c))
         .filter(|(d, _)| *d <= limit)
         .min()
         .map(|(_, c)| c)

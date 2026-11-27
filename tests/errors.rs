@@ -707,3 +707,19 @@ fn call_of_function_parameter_is_an_effect_r13() {
     let src = "void times(int n, void() body) {\n    for int i in range(n) {\n        body()\n    }\n}\n\nint apply(int(int) f, int x) {\n    return f(x)\n}\n\nvoid main() {\n    times(2) {\n        print(1)\n    }\n    int r = apply(int(int v) { return v * 2 }, 21)\n    print(r)\n}\n";
     assert_eq!(check_source(src), vec![], "{src}");
 }
+
+#[test]
+fn method_called_as_function_gets_the_method_form() {
+    let r4 = |src: &str| (one(src).3, check_source(src)[0].fix.clone());
+    let main = |b: &str| format!("void main() {{\n    int a = 3\n    {b}\n}}\n");
+    let (hint, fix) = r4(&main("print(min(a, 2))"));
+    assert_eq!(hint, "`min` is a method: a.min(2)");
+    assert_eq!(fix.unwrap().text, "a.min(2)");
+    let (hint, fix) = r4(&main("print(len([1, 2]))"));
+    assert_eq!(hint, "`len` is a method: [1, 2].len()");
+    assert_eq!(fix.unwrap().text, "[1, 2].len()");
+    let (hint, _) = r4(&main("print(abs(a - 5))"));
+    assert_eq!(hint, "`abs` is a method: (a - 5).abs()");
+    assert_eq!(r4(&main("pritn(\"x\")")).0, "did you mean print?");
+    assert_eq!(r4(&main("min(\"a\", \"b\")")).0, "");
+}
