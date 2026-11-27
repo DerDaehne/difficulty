@@ -40,6 +40,7 @@ impl<'a> Emitter<'a> {
             Ty::Named(id) => format!("d_{}", cid(&self.info.types[id as usize].name)),
             Ty::Opt(i) => format!("dif_o{i}"),
             Ty::Res(i) => format!("dif_r{i}"),
+            Ty::Func(i) => format!("dfn_{i}"),
             Ty::Void | Ty::Err => "void".into(),
         }
     }

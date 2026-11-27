@@ -157,12 +157,16 @@ fn readme_examples() {
 
 /// Sections of the spec whose examples are checked but not built and run;
 /// a section is listed here only while its backend is missing.
-const CHECK_ONLY: &[&str] = &[];
+const CHECK_ONLY: &[&str] = &["### R26 ", "### R13, Teil 2d"];
 
 /// Sections of part 2d (function literals, block argument, list methods with a function argument):
 /// their examples need the compiler of part 2d and are skipped until it exists; the compiler
 /// change removes them here.
-const PENDING_2D: &[&str] = &["### R13, Teil 2d", "### R26 ", "### 4.7 "];
+const PENDING_2D: &[&str] = &["### 4.7 "];
+
+/// The list methods with a function argument (`filter`, `map`, `sort_by`, `any`, `all`) come with
+/// their own change; examples of part 2d that call one are skipped until then.
+const PENDING_LIST_METHODS: &[&str] = &[".filter(", ".map(", ".sort_by(", ".any(", ".all("];
 
 /// Every ```dif block of a document, by kind: valid module, snippet (inside
 /// `void main()`), `error Rn` (exactly that diagnostic), `panic "message"`.
@@ -206,6 +210,12 @@ fn doc_examples(doc: &str, tag: &str, san: bool) -> usize {
             lines[from..to].join("\n")
         });
         if PENDING_2D.iter().any(|p| section.starts_with(p)) {
+            continue;
+        }
+        if PENDING_LIST_METHODS
+            .iter()
+            .any(|m| body.iter().any(|l| l.contains(m)))
+        {
             continue;
         }
         let check_only = CHECK_ONLY.iter().any(|p| section.starts_with(p));

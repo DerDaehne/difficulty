@@ -82,6 +82,8 @@ struct Parser<'a> {
     unclosed: bool,
     /// Reserved words already reported as names; their uses are not reported again.
     reserved: Vec<&'static str>,
+    /// Reading the return type of a function literal: a `(` after it is its parameter list.
+    no_fn: bool,
     out: Vec<Diag>,
 }
 
@@ -102,6 +104,7 @@ impl<'a> Parser<'a> {
             expr_level: 0,
             unclosed: false,
             reserved: Vec::new(),
+            no_fn: false,
             out: Vec::new(),
         }
     }
@@ -696,6 +699,31 @@ impl<'a> Parser<'a> {
                 *nested = true;
             }
         }
+        if self.is_op("(") && !self.no_fn {
+            // a function type `R(T1, mut T2)` (R26); the checker allows it for parameters only
+            let open = self.pos();
+            self.bump();
+            let mut ps = Vec::new();
+            while !self.is_op(")") && *self.peek() != Tok::Eof {
+                let m = self.is_kw("mut");
+                if m {
+                    self.bump();
+                }
+                let mut t = String::new();
+                if !self.type_top(&mut t, nested) {
+                    return false;
+                }
+                ps.push(format!("{}{t}", if m { "mut " } else { "" }));
+                if !self.is_op(",") {
+                    break;
+                }
+                self.bump();
+            }
+            if !self.close(open, ")") {
+                return false;
+            }
+            name.push_str(&format!("({})", ps.join(",")));
+        }
         true
     }
 
@@ -772,7 +800,7 @@ impl<'a> Parser<'a> {
                 return false;
             }
             // only `!E` needs the parentheses; `[](?int)` is `[]?int`
-            if inner.contains('!') {
+            if inner.contains('!') || inner.contains('(') {
                 inner = format!("({inner})");
             }
             name.push_str(&inner);
@@ -1548,6 +1576,7 @@ impl<'a> Parser<'a> {
         let mut e = self.primary();
         let start = e.pos;
         loop {
+            let mut ended = false;
             let open = self.pos();
             let kind = match self.peek() {
                 Tok::Op("(") => {
@@ -1560,7 +1589,8 @@ impl<'a> Parser<'a> {
                         }
                         self.bump(); // a trailing comma is allowed
                     }
-                    self.close(open, ")");
+                    let closed = self.close(open, ")");
+                    ended = closed && self.block_arg(&e, &mut args);
                     ExprKind::Call(Box::new(e), args)
                 }
                 Tok::Op("[") => {
@@ -1594,11 +1624,24 @@ impl<'a> Parser<'a> {
                 pos: start,
                 end: self.last_end,
             };
+            if ended {
+                if self.is_op(".") || self.is_op("(") {
+                    let msg = format!(
+                        "nothing can follow a block argument, found {}",
+                        describe(self.peek())
+                    );
+                    self.err("S1", self.pos(), msg, None);
+                }
+                return e;
+            }
         }
     }
 
     fn primary(&mut self) -> Expr {
         let p = self.pos();
+        if let Some(name_only) = self.lit_ahead() {
+            return self.func_lit(name_only);
+        }
         let kind = match self.peek() {
             Tok::Int(v) => ExprKind::Int(*v),
             Tok::Float(s) => ExprKind::Float(s.clone()),
@@ -2704,5 +2747,192 @@ fn c_for_hint(inner: &[&Tok]) -> String {
         (Some(v), Some(f), Some(t)) if f == "0" => format!("for int {v} in range({t})"),
         (Some(v), Some(f), Some(t)) => format!("for int {v} in range({f}, {t})"),
         _ => "for int i in range(n)".into(),
+    }
+}
+
+/// Function literals and block arguments (R26).
+impl<'a> Parser<'a> {
+    /// A block right after the `)` of the call `callee(args)` joins the arguments; returns
+    /// whether it did. Not in a header outside parentheses: there the `{` starts the body.
+    fn block_arg(&mut self, callee: &Expr, args: &mut Vec<Expr>) -> bool {
+        if self.header || self.i == 0 {
+            return false;
+        }
+        let close = &self.t[self.i - 1];
+        let same = self.is_op("{") && self.pos().line == close.pos.line;
+        let next = *self.peek() == Tok::Nl && *self.peek_n(1) == Tok::Op("{");
+        if !same && !next {
+            return false;
+        }
+        if next {
+            let name = match &callee.kind {
+                ExprKind::Ident(n) | ExprKind::Field(_, n) => n.clone(),
+                _ => String::new(),
+            };
+            let at = Pos {
+                line: close.pos.line,
+                col: close.pos.col + 1,
+                offset: close.end,
+            };
+            let from = self.src[..close.pos.offset as usize]
+                .rfind('\n')
+                .map_or(0, |i| i + 1);
+            let hint = format!("{} {{", self.src[from..close.end as usize].trim_start());
+            let msg = format!("the block argument of `{name}` must start on the same line");
+            self.err("R3", at, msg, Some(hint));
+            self.bump();
+        }
+        let p = self.pos();
+        let body = self.block();
+        args.push(Expr {
+            kind: ExprKind::FuncLit(Box::new(FuncLit {
+                ret: TypeRef {
+                    name: "void".into(),
+                    pos: p,
+                },
+                params: Vec::new(),
+                body,
+                block: true,
+                alt: None,
+            })),
+            pos: p,
+            end: self.last_end,
+        });
+        true
+    }
+
+    /// Is a function literal written here: a type, `(`, nothing or `mut` or `T name`, the
+    /// matching `)` and a `{` on the same line? `Some(true)` for `Name() {`, which is also a
+    /// call of `Name` with a block (the checker decides by the name).
+    fn lit_ahead(&self) -> Option<bool> {
+        if self.header {
+            return None;
+        }
+        let k = match self.peek() {
+            Tok::Op("?" | "[") | Tok::Ident(_) | Tok::Kw("void") => self.type_end(0)?,
+            _ => return None,
+        };
+        if *self.peek_n(k) != Tok::Op("(") {
+            return None;
+        }
+        let empty = *self.peek_n(k + 1) == Tok::Op(")");
+        let named = |j: usize| {
+            matches!(self.peek_n(j), Tok::Ident(_))
+                && matches!(self.peek_n(j + 1), Tok::Op("," | ")"))
+        };
+        if !(empty
+            || *self.peek_n(k + 1) == Tok::Kw("mut")
+            || self.type_end(k + 1).is_some_and(named))
+        {
+            return None;
+        }
+        let (mut depth, mut j) = (0, k);
+        loop {
+            match self.peek_n(j) {
+                Tok::Op("(") => depth += 1,
+                Tok::Op(")") => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                Tok::Eof => return None,
+                _ => {}
+            }
+            j += 1;
+        }
+        if *self.peek_n(j + 1) != Tok::Op("{") || self.tok(j + 1).pos.line != self.tok(j).pos.line {
+            return None;
+        }
+        let builtin = |n: &str| {
+            matches!(
+                n,
+                "int"
+                    | "bool"
+                    | "str"
+                    | "rune"
+                    | "i8"
+                    | "i16"
+                    | "i32"
+                    | "u8"
+                    | "u16"
+                    | "u32"
+                    | "u64"
+                    | "f64"
+                    | "f32"
+            )
+        };
+        Some(k == 1 && empty && matches!(self.peek(), Tok::Ident(n) if !builtin(n)))
+    }
+
+    fn func_lit(&mut self, name_only: bool) -> Expr {
+        let p = self.pos();
+        self.no_fn = true;
+        let ret = self.type_ref();
+        self.no_fn = false;
+        let open = self.pos();
+        self.bump(); // (
+        let mut params = Vec::new();
+        while !self.is_op(")") && *self.peek() != Tok::Eof {
+            let mut_pos = self.is_kw("mut").then(|| self.pos());
+            if mut_pos.is_some() {
+                self.bump();
+            }
+            let ty = self.type_ref();
+            let Some((name, pos)) = self.name() else {
+                break;
+            };
+            params.push(Param {
+                ty,
+                name,
+                pos,
+                mut_pos,
+            });
+            if !self.is_op(",") {
+                break;
+            }
+            self.bump();
+        }
+        self.close(open, ")");
+        let bp = self.pos();
+        let body = self.block();
+        let block_end = self.last_end;
+        let alt = name_only.then(|| {
+            let blk = Expr {
+                kind: ExprKind::FuncLit(Box::new(FuncLit {
+                    ret: TypeRef {
+                        name: "void".into(),
+                        pos: bp,
+                    },
+                    params: Vec::new(),
+                    body: body.clone(),
+                    block: true,
+                    alt: None,
+                })),
+                pos: bp,
+                end: block_end,
+            };
+            let callee = Expr {
+                kind: ExprKind::Ident(ret.name.clone()),
+                pos: p,
+                end: p.offset + ret.name.len() as u32,
+            };
+            Box::new(Expr {
+                kind: ExprKind::Call(Box::new(callee), vec![blk]),
+                pos: p,
+                end: block_end,
+            })
+        });
+        Expr {
+            kind: ExprKind::FuncLit(Box::new(FuncLit {
+                ret,
+                params,
+                body,
+                block: false,
+                alt,
+            })),
+            pos: p,
+            end: block_end,
+        }
     }
 }

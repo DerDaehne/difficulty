@@ -256,8 +256,22 @@ pub enum ExprKind {
     ListLit(Vec<Expr>),
     /// `{k: v, …}`
     MapLit(Vec<(Expr, Expr)>),
+    /// A function literal or a block argument (R26).
+    FuncLit(Box<FuncLit>),
     /// Placeholder after an error that was already reported.
     Missing,
+}
+
+/// `R(T x) { … }`, or a block `{ … }` after a call (`block`: no parameters, `ret` is `void` at
+/// the brace). `alt` is the call `Name() { … }` that the same text means when `Name` is a
+/// function: the checker decides by the name (R26).
+#[derive(Debug, Clone)]
+pub struct FuncLit {
+    pub ret: TypeRef,
+    pub params: Vec<Param>,
+    pub body: Block,
+    pub block: bool,
+    pub alt: Option<Box<Expr>>,
 }
 
 #[derive(Debug, Clone)]

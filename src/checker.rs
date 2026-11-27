@@ -13,6 +13,7 @@ use crate::diag::{Diag, Pos};
 use crate::lexer::Fmt;
 use crate::live::{self, CallChanges};
 
+mod lit;
 mod p2c;
 
 /// The sized number types of part 2c (R8); `int` is `Ty::Int`.
@@ -93,6 +94,8 @@ pub enum Ty {
     Arr(u32),
     /// `map[K]V`: index of `(K, V)` in `Info::maps`.
     Map(u32),
+    /// `R(T1, mut T2)`: index in `Info::ftys`. Only the type of a parameter, a literal or a block.
+    Func(u32),
     /// Already reported; silences everything that depends on it.
     Err,
 }
@@ -199,6 +202,18 @@ pub struct Info {
     /// The program uses a form of part 2c (collections, number widths, f64, rune, std
     /// modules); the C backend rejects it until it is implemented.
     pub part2c: bool,
+    /// `Ty::Func(i)` is `ftys[i].0(ftys[i].1)`: return type, parameter types with `mut`.
+    pub ftys: Vec<(Ty, Vec<(Ty, bool)>)>,
+    /// Function literals and blocks by span: their type and the names they capture.
+    pub lits: HashMap<(u32, u32), LitInfo>,
+    /// Spans of `Name() { … }` that are a call of a function with a block, not a literal.
+    pub lit_calls: HashSet<(u32, u32)>,
+}
+
+/// A function literal (R26): its function type and the values it captures (name, type).
+pub struct LitInfo {
+    pub ty: Ty,
+    pub captures: Vec<(String, Ty)>,
 }
 
 pub fn check(file: &str, src: &str, m: &Module) -> (Vec<Diag>, Info) {
@@ -238,6 +253,9 @@ pub fn check(file: &str, src: &str, m: &Module) -> (Vec<Diag>, Info) {
         arrs: c.arrs,
         maps: c.maps,
         part2c: c.uses_2c,
+        ftys: c.ftys,
+        lits: c.lits,
+        lit_calls: c.lit_calls,
     };
     (c.diags, info)
 }
@@ -452,6 +470,28 @@ struct Checker<'a> {
     uses_2b: bool,
     /// Names of the tests seen so far, for duplicates.
     tests: Vec<(&'a str, Pos)>,
+    ftys: Vec<(Ty, Vec<(Ty, bool)>)>,
+    /// A function type is allowed where a parameter type is read.
+    fn_ok: bool,
+    /// The function literals being checked, innermost last.
+    frames: Vec<LitFrame>,
+    lits: HashMap<(u32, u32), LitInfo>,
+    lit_calls: HashSet<(u32, u32)>,
+    /// Calls (by span) that pass a literal or a function with an effect (R13).
+    call_lit: HashSet<(u32, u32)>,
+    /// Effect of the literal checked last.
+    last_lit_effect: bool,
+}
+
+/// A function literal being checked: names declared outside it are captured (R26).
+struct LitFrame {
+    ret: Ty,
+    /// `scopes.len()` before its parameters.
+    base: usize,
+    captured: Vec<(String, Ty)>,
+    declared: Vec<String>,
+    changed: Vec<String>,
+    effect: bool,
 }
 
 impl<'a> Checker<'a> {
@@ -496,6 +536,13 @@ impl<'a> Checker<'a> {
             in_test: false,
             uses_2b: false,
             tests: Vec::new(),
+            ftys: Vec::new(),
+            fn_ok: false,
+            frames: Vec::new(),
+            lits: HashMap::new(),
+            lit_calls: HashSet::new(),
+            call_lit: HashSet::new(),
+            last_lit_effect: false,
         }
     }
 
@@ -542,6 +589,14 @@ impl<'a> Checker<'a> {
             Ty::Map(i) => {
                 let (k, v) = self.maps[i as usize];
                 format!("map[{}]{}", self.tn_elem(k), self.tn_elem(v))
+            }
+            Ty::Func(i) => {
+                let (r, ps) = &self.ftys[i as usize];
+                let ps: Vec<String> = ps
+                    .iter()
+                    .map(|(t, m)| format!("{}{}", if *m { "mut " } else { "" }, self.tn(*t)))
+                    .collect();
+                format!("{}({})", self.tn(*r), ps.join(", "))
             }
             Ty::Err => "?".into(),
         }
@@ -625,6 +680,20 @@ impl<'a> Checker<'a> {
             self.lists.len() - 1
         });
         Ty::List(i as u32)
+    }
+
+    /// `r(ps)`.
+    fn func_ty(&mut self, r: Ty, ps: Vec<(Ty, bool)>) -> Ty {
+        if r == Ty::Err || ps.iter().any(|p| p.0 == Ty::Err) {
+            return Ty::Err;
+        }
+        let i = (self.ftys.iter())
+            .position(|x| x.0 == r && x.1 == ps)
+            .unwrap_or_else(|| {
+                self.ftys.push((r, ps));
+                self.ftys.len() - 1
+            });
+        Ty::Func(i as u32)
     }
 
     /// `[n]t`.
@@ -849,7 +918,7 @@ impl<'a> Checker<'a> {
             .params
             .iter()
             .map(|p| ParamInfo {
-                ty: self.ty(&p.ty, false),
+                ty: self.param_ty(&p.ty),
                 is_mut: p.mut_pos.is_some(),
                 name: &p.name,
             })
@@ -1242,6 +1311,9 @@ impl<'a> Checker<'a> {
         if self.cur.is_some() || self.in_test {
             self.fn_locals.insert(name.to_string());
         }
+        if let Some(fr) = self.frames.last_mut() {
+            fr.declared.push(name.to_string());
+        }
         if let Some(s) = self.scopes.last_mut() {
             s.push(local);
         }
@@ -1281,7 +1353,13 @@ impl<'a> Checker<'a> {
 
     fn lookup(&mut self, name: &str, pos: Pos) -> (Ty, Val) {
         if let Some(l) = self.local(name) {
-            return (l.ty, l.val);
+            let (ty, val) = (l.ty, l.val);
+            self.capture(name, ty);
+            if let Ty::Func(_) = ty {
+                self.only_called(name, pos);
+                return (Ty::Err, Val::Runtime);
+            }
+            return (ty, val);
         }
         if self.consts.contains_key(name) {
             return self.global_const(name).unwrap_or_else(|| {
@@ -1290,6 +1368,10 @@ impl<'a> Checker<'a> {
             });
         }
         if self.funcs.contains_key(name) || BUILTINS.contains(&name) {
+            if self.funcs.contains_key(name) {
+                self.only_called(name, pos);
+                return (Ty::Err, Val::Runtime);
+            }
             let msg = format!("`{name}` is a function; call it: {name}(…)");
             self.err("R8.fn_as_value", pos, msg, None);
             return (Ty::Err, Val::Runtime);
@@ -1345,6 +1427,9 @@ impl<'a> Checker<'a> {
     }
 
     fn changed(&mut self, place: &Expr) {
+        if let Some((root, false)) = self.root_of(place) {
+            self.lit_changed(&root, place.pos);
+        }
         let (Some(id), Some(slot)) = (self.cur, self.root_slot(place)) else {
             return;
         };
@@ -1438,15 +1523,16 @@ impl<'a> Checker<'a> {
                     (Some(d), Some(id)) => d[id].effect,
                     _ => self.last_effect.unwrap_or(true),
                 };
+                let effect = effect || self.lit_effect_in(e);
                 if matches!(t, Ty::Opt(_) | Ty::Res(_)) {
-                    let text = self.text(e);
+                    let text = flat(self.text(e));
                     let msg = format!("result of `{text}` is never used");
                     let hint = format!(
                         "use it with try, ?? or switch, or discard it explicitly with `_ = {text}`"
                     );
                     self.err("R13.unused_result", e.pos, msg, Some(hint));
                 } else if t != Ty::Void && t != Ty::Err && !effect {
-                    let text = self.text(e);
+                    let text = flat(self.text(e));
                     let msg = format!("result of `{text}` is never used");
                     let hint = format!("use it, or discard it explicitly with `_ = {text}`");
                     self.err("R13.unused_result", e.pos, msg, Some(hint));
@@ -1565,6 +1651,10 @@ impl<'a> Checker<'a> {
     }
 
     fn ret(&mut self, value: Option<&'a Expr>, p: Pos) {
+        if let Some(fr) = self.frames.last() {
+            let want = fr.ret;
+            return self.lit_ret(want, value, p);
+        }
         if self.in_test {
             if let Some(e) = value {
                 self.rvalue(e);
@@ -2011,7 +2101,16 @@ impl<'a> Checker<'a> {
 
     fn expr(&mut self, e: &'a Expr) -> (Ty, Val) {
         let place = std::mem::replace(&mut self.place_ty, Ty::Err);
+        if matches!(e.kind, ExprKind::Call(..)) && !self.frames.is_empty() {
+            self.last_callee = None;
+            self.last_effect = None;
+        }
         let r = self.expr_kind(e, place);
+        if matches!(e.kind, ExprKind::Call(..)) && self.call_effect(e) {
+            if let Some(fr) = self.frames.last_mut() {
+                fr.effect = true;
+            }
+        }
         self.exprs.insert((e.pos.offset, e.end), r.0);
         if self.is_2c(r.0) {
             self.uses_2c = true;
@@ -2022,6 +2121,7 @@ impl<'a> Checker<'a> {
     fn expr_kind(&mut self, e: &'a Expr, place: Ty) -> (Ty, Val) {
         match &e.kind {
             ExprKind::Missing => (Ty::Err, Val::Runtime),
+            ExprKind::FuncLit(l) => self.func_lit_value(e, l),
             ExprKind::Int(v) if self.lit_float => (Ty::FloatLit, Val::Float(*v as f64)),
             ExprKind::Int(v) => (Ty::IntLit, Val::Int(*v as i128)),
             ExprKind::Float(text) => self.float_lit(e, text),
@@ -2067,7 +2167,10 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Ident(n) => self.lookup(n, e.pos),
             ExprKind::SelfRef => match self.cur.and_then(|id| self.fns[id].recv) {
-                Some(t) => (Ty::Named(t), Val::Runtime),
+                Some(t) => {
+                    self.capture_self(Ty::Named(t));
+                    (Ty::Named(t), Val::Runtime)
+                }
                 None => {
                     self.err(
                         "R7.self_outside_method",
@@ -2634,7 +2737,10 @@ impl<'a> Checker<'a> {
                     return self.module_call(e, module, m, args);
                 }
                 if let Some(eid) = self.enum_of(base) {
-                    return self.variant(e, eid, m, Some(args));
+                    let r = self.variant(e, eid, m, Some(args));
+                    self.last_callee = None;
+                    self.last_effect = Some(false);
+                    return r;
                 }
                 self.method_call(e, base, m, args)
             }
@@ -2656,6 +2762,9 @@ impl<'a> Checker<'a> {
         place: Ty,
     ) -> (Ty, Val) {
         if let Some(l) = self.local(name) {
+            if let Ty::Func(fi) = l.ty {
+                return self.call_param(e, f, name, fi, args);
+            }
             let msg = format!("`{name}` is {}, not a function", self.tn(l.ty));
             self.err("R8.local_not_fn", f.pos, msg, None);
             return (Ty::Err, Val::Runtime);
@@ -2678,6 +2787,8 @@ impl<'a> Checker<'a> {
                     self.facts[id].prints = true;
                 }
                 self.effect_in_default(e, None);
+                self.last_callee = None;
+                self.last_effect = Some(true);
                 return (Ty::Void, Val::Runtime);
             }
             "range" => {
@@ -2722,6 +2833,8 @@ impl<'a> Checker<'a> {
                     self.facts[id].prints = true;
                 }
                 self.effect_in_default(e, None);
+                self.last_callee = None;
+                self.last_effect = Some(true);
                 return (Ty::Void, Val::Runtime);
             }
             "repeat" => {
@@ -2748,8 +2861,8 @@ impl<'a> Checker<'a> {
                 return (self.list(want.unwrap_or(et)), Val::Runtime);
             }
             "int" | "bool" | "str" | "rune" | "i8" | "i16" | "i32" | "u8" | "u16" | "u32"
-            | "u64" | "f64" => return self.convert(e, name, args),
-            n if self.type_ids.contains_key(n) => return self.convert(e, name, args),
+            | "u64" | "f64" => return self.convert_pure(e, name, args),
+            n if self.type_ids.contains_key(n) => return self.convert_pure(e, name, args),
             _ => {}
         }
         let Some(&id) = self.funcs.get(name) else {
@@ -2842,6 +2955,7 @@ impl<'a> Checker<'a> {
         if changes_self {
             match self.root_of(base) {
                 Some((root, false)) if is_place(base) => {
+                    self.lit_changed(&root, e.pos);
                     self.call_changes
                         .entry((e.pos.offset, e.end))
                         .or_default()
@@ -2892,24 +3006,39 @@ impl<'a> Checker<'a> {
         e: &'a Expr,
         id: usize,
         args: &'a [Expr],
-        mut changeable: Vec<&'a Expr>,
+        changeable: Vec<&'a Expr>,
     ) -> bool {
         let name = self.fn_name(id);
-        let n = self.fns[id].params.len();
+        let ps = self.fns[id].params.iter();
+        let ps = ps.map(|p| (p.ty, p.is_mut, p.name.to_string())).collect();
+        self.args_to(e, &name, ps, Some(id), args, changeable)
+    }
+
+    /// Arguments for parameters `(type, mut, name)`; `callee` is the function, or `None` for a
+    /// function-typed parameter, whose `mut` counts as a change (R26).
+    pub(super) fn args_to(
+        &mut self,
+        e: &'a Expr,
+        name: &str,
+        params: Vec<(Ty, bool, String)>,
+        callee: Option<usize>,
+        args: &'a [Expr],
+        mut changeable: Vec<&'a Expr>,
+    ) -> bool {
+        let n = params.len();
         if args.len() != n {
             let s = if n == 1 { "" } else { "s" };
             let msg = format!("`{name}` takes {n} argument{s}, found {}", args.len());
-            self.err("R8.arg_count", e.pos, msg, None);
+            let hint = self.header_block_hint(e, &params, args.len());
+            self.err("R8.arg_count", e.pos, msg, hint);
             return false;
         }
-        if let Some(cur) = self.cur {
+        if let (Some(cur), Some(id)) = (self.cur, callee) {
             self.facts[cur].calls.push(id);
         }
         for (j, a) in args.iter().enumerate() {
-            let (pt, pmut, pname) = {
-                let p = &self.fns[id].params[j];
-                (p.ty, p.is_mut, p.name)
-            };
+            let (pt, pmut) = (params[j].0, params[j].1);
+            let pname = params[j].2.as_str();
             match (&a.kind, pmut) {
                 (ExprKind::Mut(inner), false) => {
                     let msg = format!("`{name}` takes `{pname}` without mut");
@@ -2944,12 +3073,21 @@ impl<'a> Checker<'a> {
                         continue;
                     }
                     self.expect(pt, t, inner);
-                    if let (Some(cur), Some(slot)) = (self.cur, self.root_slot(inner)) {
-                        self.facts[cur].deps.push((id, Slot::Param(j), slot));
-                    }
-                    let changes = self.derived.as_ref().is_some_and(|d| d[id].changes[j]);
+                    let changes = match callee {
+                        Some(id) => {
+                            if let (Some(cur), Some(slot)) = (self.cur, self.root_slot(inner)) {
+                                self.facts[cur].deps.push((id, Slot::Param(j), slot));
+                            }
+                            self.derived.as_ref().is_some_and(|d| d[id].changes[j])
+                        }
+                        None => {
+                            self.changed(inner);
+                            true
+                        }
+                    };
                     if changes {
                         if let Some((root, _)) = self.root_of(inner) {
+                            self.lit_changed(&root, a.pos);
                             self.call_changes
                                 .entry((e.pos.offset, e.end))
                                 .or_default()
@@ -2986,7 +3124,7 @@ impl<'a> Checker<'a> {
                     self.at_place(pt, a, None);
                 }
                 (_, false) => {
-                    self.at_place(pt, a, None);
+                    self.arg_value(e, name, pt, a);
                 }
             }
         }
@@ -3296,10 +3434,11 @@ impl<'a> Checker<'a> {
             }
             return (Ty::Err, Val::Runtime);
         };
-        let ret = if self.in_test {
+        let ret = if self.in_test && self.frames.is_empty() {
             None
         } else {
-            match self.cur.map(|id| self.fns[id].ret) {
+            let cur = self.frames.last().map(|f| f.ret);
+            match cur.or_else(|| self.cur.map(|id| self.fns[id].ret)) {
                 Some(Ty::Err) => return (Ty::Err, Val::Runtime),
                 Some(r) => Some(r),
                 None => {
@@ -3551,4 +3690,14 @@ fn lit_only(e: &Expr) -> bool {
         ExprKind::Binary("+" | "-" | "*" | "/" | "%", l, r, _) => lit_only(l) && lit_only(r),
         _ => false,
     }
+}
+
+/// A call over several lines as one line: each line break and the indentation after it is
+/// one space (R13).
+fn flat(s: &str) -> String {
+    s.split('\n')
+        .enumerate()
+        .map(|(i, l)| if i == 0 { l } else { l.trim_start() })
+        .collect::<Vec<_>>()
+        .join(" ")
 }

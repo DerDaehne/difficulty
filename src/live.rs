@@ -300,6 +300,22 @@ impl Live<'_> {
                 }
                 live
             }
+            // what a literal reads is read at the call, where it takes its copy (R26)
+            ExprKind::FuncLit(l) => {
+                let report = std::mem::replace(&mut self.report, false);
+                let escape = std::mem::take(&mut self.escape);
+                let (exit, head) = (
+                    std::mem::take(&mut self.exit),
+                    std::mem::take(&mut self.head),
+                );
+                let mut inner = self.block(&l.body, Set::new());
+                (self.report, self.escape, self.exit, self.head) = (report, escape, exit, head);
+                for p in &l.params {
+                    kill(&mut inner, &p.name);
+                }
+                live.extend(inner);
+                live
+            }
             ExprKind::Unary(_, x)
             | ExprKind::Paren(x)
             | ExprKind::Mut(x)

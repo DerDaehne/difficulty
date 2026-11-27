@@ -59,6 +59,7 @@ fn is_literal(e: &Expr) -> bool {
         | ExprKind::Try(..)
         | ExprKind::ListLit(_)
         | ExprKind::MapLit(_)
+        | ExprKind::FuncLit(_)
         | ExprKind::Missing => false,
     }
 }
@@ -297,6 +298,7 @@ fn sets(e: &Expr, n: &str) -> bool {
         | ExprKind::SelfRef
         | ExprKind::NoneVal
         | ExprKind::OkVal(None)
+        | ExprKind::FuncLit(_)
         | ExprKind::Missing => false,
     }
 }
@@ -331,7 +333,9 @@ fn c_int(v: i64) -> String {
 /// place; `try` can leave the function, so it must happen before whatever follows it.
 fn has_call(e: &Expr) -> bool {
     match &e.kind {
-        ExprKind::Call(..) | ExprKind::IfExpr(..) | ExprKind::Try(..) => true,
+        ExprKind::Call(..) | ExprKind::IfExpr(..) | ExprKind::Try(..) | ExprKind::FuncLit(_) => {
+            true
+        }
         ExprKind::Unary(_, x)
         | ExprKind::Paren(x)
         | ExprKind::Mut(x)
@@ -1468,6 +1472,7 @@ impl<'a> Emitter<'a> {
             | ExprKind::Try(..)
             | ExprKind::ListLit(_)
             | ExprKind::MapLit(_)
+            | ExprKind::FuncLit(_)
             | ExprKind::Missing => None,
         }
     }
@@ -1532,6 +1537,7 @@ impl<'a> Emitter<'a> {
             | ExprKind::Try(..)
             | ExprKind::ListLit(_)
             | ExprKind::MapLit(_)
+            | ExprKind::FuncLit(_)
             | ExprKind::Missing => unreachable!("the checker lets only places be written"),
         }
     }
@@ -1602,7 +1608,7 @@ impl<'a> Emitter<'a> {
             ExprKind::StructLit(name, inits) => self.struct_lit(name, inits),
             ExprKind::IfExpr(branches, last) => self.if_expr(self.ty(e), branches, last),
             ExprKind::Mut(x) => format!("(&({}))", self.lvalue(x)),
-            ExprKind::Missing => "0".into(),
+            ExprKind::Missing | ExprKind::FuncLit(_) => "0".into(),
             ExprKind::ListLit(items) => self.list_lit(e, items),
             ExprKind::MapLit(entries) => self.map_lit(e, entries),
             ExprKind::Index(base, idx, bp) => self.map_get(e, base, idx, *bp),
@@ -2260,6 +2266,7 @@ impl<'a> Emitter<'a> {
             | ExprKind::Try(..)
             | ExprKind::ListLit(_)
             | ExprKind::MapLit(_)
+            | ExprKind::FuncLit(_)
             | ExprKind::Missing => None,
         }
     }
