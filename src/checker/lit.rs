@@ -126,7 +126,7 @@ impl<'a> Checker<'a> {
             .collect();
         let ok = self.args_to(e, name, params, None, args, Vec::new());
         self.last_callee = None;
-        self.last_effect = Some(false);
+        self.last_effect = Some(ret == Ty::Void); // the caller decides what it does
         if ok {
             (ret, Val::Runtime)
         } else {
@@ -192,6 +192,7 @@ impl<'a> Checker<'a> {
             ExprKind::Ident(n) if matches!(pt, Ty::Func(_)) => {
                 let ty = if let Some(t) = self.local(n).map(|l| l.ty) {
                     self.capture(n, t);
+                    effect = true; // the caller of this function decides
                     matches!(t, Ty::Func(_)).then_some(t)
                 } else if let Some(&id) = self.funcs.get(n.as_str()) {
                     effect = self.derived.as_ref().is_some_and(|d| d[id].effect);

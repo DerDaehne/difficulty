@@ -701,3 +701,9 @@ fn mutual_recursion_without_effect_reports_once_r13() {
         .collect();
     assert_eq!(got, ["10 call of `a(2)` has no effect"]);
 }
+
+#[test]
+fn call_of_function_parameter_is_an_effect_r13() {
+    let src = "void times(int n, void() body) {\n    for int i in range(n) {\n        body()\n    }\n}\n\nint apply(int(int) f, int x) {\n    return f(x)\n}\n\nvoid main() {\n    times(2) {\n        print(1)\n    }\n    int r = apply(int(int v) { return v * 2 }, 21)\n    print(r)\n}\n";
+    assert_eq!(check_source(src), vec![], "{src}");
+}
