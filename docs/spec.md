@@ -2678,7 +2678,7 @@ Teil 2d legt fest, was zu M2 gehört: Literale und Blöcke an Aufrufen, Funktion
 - **Textform** (R28): ein Literal `fn@main.dif:12:5` (Pfad wie in Meldungen, Zeile und Spalte seiner Stelle, also genau die Stelle, die auch die Gleichheit meint); eine benannte Funktion oder ein Varianten-Konstruktor ihr Name (`add`, `Shape.Box`).
 - **Keine Zyklen:** ein Literal fängt Werte ein, die beim Auswerten schon existieren, und kann sich nie selbst enthalten; ein Wert verweist nie auf einen späteren. Darum kommen Funktionswerte ohne GC aus.
 
-**Teil 3 ergänzt** (Funktionswerte speichern). Hebt die Einschränkungen von M2 auf: Funktionstypen und Literale stehen überall, wo ein Wert stehen darf; die Meldungen `R26.function_type_place` und `R26.literal_outside_call` gibt es nicht mehr, `R26.function_not_value` nur noch für Methoden (`R26.block_not_accepted` ändert sich nicht).
+**Teil 3 ergänzt** (Funktionswerte speichern). Hebt die Einschränkungen von M2 auf: Funktionstypen und Literale stehen überall, wo ein Wert stehen darf; `R26.function_not_value` gilt nur noch für Methoden (`R26.block_not_accepted` ändert sich nicht).
 
 ```ebnf
 base_type = prim_type | list_type | array_type | map_type | named_type | func_type ;   (* ergänzt R2 *)
