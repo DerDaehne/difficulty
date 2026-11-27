@@ -382,7 +382,7 @@ Output: `[1, 2, 3, 4] 1 {"to": 2, "be": 2, "or": 1} Task{title: "WRITE", tags: [
 - **Lists `[]T` and arrays `[N]T` (R5).** Values: `ys = xs` copies, a write to one never shows
   in the other (copy-on-write inside, `push` is O(1)). `xs[i]` is checked (abort, R14);
   `xs[i] = v`, `xs[i].f = v`, `normalize(mut xs[i])` write. Methods: `len is_empty push pop insert
-  remove first last contains index_of count sort reverse swap slice join`; `pop first last index_of`
+  remove first last contains index_of count sort reverse swap slice join filter map sort_by any all`; `pop first last index_of`
   give `?T`. `[]`/`{}` need a typed place. `repeat(0, n)`. Arrays have no
   `push pop insert remove`.
 - **Maps `map[K]V` (R30).** `m[k]` is `?V`, `m[k] = v` sets; `m[k] += 1` is R8, use `m.add(k, 1)`.
@@ -451,6 +451,52 @@ void main() {
 }
 ```
 
+## std v0 at a glance
+
+Built into the compiler; no import except `use std.io` / `use std.os`. `f` is a function type.
+
+- **Functions:** `print(x)`, `range(a, b)` (only in `for`), `repeat(x, n)`, `expect(c)` (tests),
+  `assert(c)`, conversions `int(x) f64(x) str(r) u8(x) rune(n) …`.
+- **`str`:** `len is_empty runes split lines trim trim_start trim_end lower upper contains starts_with
+  ends_with find replace repeat slice parse_int parse_f64`. **`rune`:** `is_digit is_letter is_space`.
+- **Numbers:** `abs min max to_u8 to_i8 … to_u64` (`?T`); `f64`: `round trunc floor ceil sqrt abs min max`.
+- **`[]T` / `[N]T`:** `len is_empty push pop insert remove first last contains index_of count sort
+  reverse swap slice join`, and with a function: `filter(bool(T)) map(R(T)) sort_by(bool(T, T))
+  any(bool(T)) all(bool(T))`. Arrays have all but `push pop insert remove`.
+- **`map[K]V`:** `m[k]` is `?V`; `len has remove add keys values`.
+- **`io`:** `lines read_line read_file write_file read_lines write_lines eprint`. **`os`:** `args env exit`.
+
+The five methods with a function take a literal, a named function or a variant constructor.
+`filter` keeps the elements for which it is `true`; `map` gives `[]R` from the return type of the
+literal (`R` is any type but `void`: `?U` and `U!E` too); `any` stops at the first `true`, `all` at
+the first `false` (`[]` gives `false` and `true`); the function runs once per element, front to
+back. `sort_by(less)` sorts the variable in place, stable: a top-down merge sort that calls
+`less(right, left)` in a fixed order, so a literal with an effect gives the same output every run.
+The result of `filter`, `map`, `any`, `all` is a value (R13: use it); `sort_by` changes `self`.
+
+```dif
+struct Person {
+    str name
+    int age
+}
+
+void main() {
+    []Person people = [Person{name: "Ada", age: 36}, Person{name: "Bo", age: 17}]
+    int limit = 18
+    []Person adults = people.filter(bool(Person p) { return p.age >= limit })
+    print(adults.map(str(Person p) { return p.name }))
+    people.sort_by(bool(Person a, Person b) { return a.age < b.age })
+    print(people.map(str(Person p) { return p.name }).join(" "))
+    print(people.any(bool(Person p) { return p.age < limit }))
+    print(people.all(bool(Person p) { return p.age >= limit }))
+}
+```
+
+Output: `["Ada"]`, `Bo Ada`, `true`, `false`
+
+Complete programs: `examples/wordcount.dif` (stdin, `map`, `sort_by`), `examples/textparser.dif`
+(`T!E`, `switch`, `sort_by`, tests).
+
 ## Habits from other languages and their fixes
 
 | written | code | write instead |
@@ -490,5 +536,5 @@ Nesting deeper than 256 levels or 1024 operators in one expression is S1: split 
 
 ## Not yet
 
-`filter`/`map`/`sort_by`/`any`/`all` on lists, storing function values, own modules, C import,
+Storing function values, own modules, C import,
 handles, sharing: later parts (PLAN.md); using them is an error that says so.
