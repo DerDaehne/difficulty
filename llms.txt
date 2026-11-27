@@ -2,8 +2,8 @@
 
 > A compiled language that writes like a more pleasant C: C-like syntax, Python-like simplicity,
 > one way to write each thing, no silent fallbacks, diagnostics that say how to fix them.
-> This file covers parts 1 (basics), 2a (values, methods), 2b (errors, tests) and 2c (numbers,
-> lists, maps, text, io). Binding: docs/spec.md; error codes are rule numbers (R1–R31) or lexical/syntax codes (L, S).
+> Covers parts 1, 2a (values, methods), 2b (errors, tests), 2c (numbers, lists, maps, text,
+> io). Binding: docs/spec.md; codes are rule numbers (R1–R31) or lexical/syntax codes (L, S).
 
 ## Tools
 
@@ -15,7 +15,7 @@ dif test [path] [filter] [--json]   # run the `test` blocks, see part 2b
 ```
 
 Exit codes: 0 ok, 1 diagnostics (or an error from `void!E main`), 2 usage error, no C compiler, a
-panic, 3 internal error (the C compiler rejects the generated C: a bug in dif).
+panic, 3 internal error (C compiler rejects the generated C: a bug in dif).
 A diagnostic: `main.dif:3:11: error[R9]: condition is int, not bool` plus `hint: …`.
 Columns count characters. One diagnostic per mistake; fix the first, rerun.
 
@@ -254,7 +254,7 @@ void main() {
 
 Output: `some(4)`, `-1`, `err(AgeErr.Negative)`, `ok 8`
 
-- **Types (R12).** `?T` is a `T` or `none`; `T!E` is a `T` or an error `E`;
+- **Types (R12).** `?T` is a `T` or `none`; `T!E` is a `T` or an error `E` (any type);
   `void!E` is nothing or an error. Success is returned plainly: `return n`; failure is
   `return none` or `return err(AgeErr.Negative)`. `none`, `err(e)` take their type from
   the place they stand in (declaration, argument, `return`, the other side of `==`); alone
@@ -264,7 +264,7 @@ Output: `some(4)`, `-1`, `err(AgeErr.Negative)`, `ok 8`
   once with the same error or `none`. `try x or e` runs `e` only on failure and turns the
   error into the function's own type: `e` is such a value, `err(E e): F.V(e)` binds the
   cause (`E` = error type of `x`), or `F.V` alone when that variant holds exactly the
-  cause (`try read() or AppErr.Io`); not for `?T`.
+  cause (`try read() or AppErr.Io`); not for `?T`. Another error type without `or` is R12.
   `try` binds like a sign: `try f(a) + try f(b)`; as a statement `try f()`.
 - **`a ?? b`**: `a` if it has a value, else `b` (evaluated only then); `a` is `?T` or `T!E`.
 - **`switch` (R10)** over `T!E`: `case ok(int n):` and `case err(E e):`; over `?T`:
@@ -442,10 +442,9 @@ void main() {
 
 ## Limits
 
-Nesting deeper than 256 levels or 1024 operators in one expression is S1. Split the code.
+Nesting deeper than 256 levels or 1024 operators in one expression is S1: split it.
 
 ## Not yet
 
-Function literals and `filter`, `map`, `sort_by`, `any`, `all` (part 2d), modules of your own, C
-import, handles and sharing. They follow in later parts (see PLAN.md); using them gives an error
-that says so.
+Function literals, `filter`/`map`/`sort_by`/`any`/`all` (part 2d), own modules, C import,
+handles, sharing: later parts (PLAN.md); using them is an error that says so.
