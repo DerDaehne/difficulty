@@ -3,7 +3,7 @@
 > A compiled language that writes like a more pleasant C: C-like syntax, Python-like simplicity,
 > one way to write each thing, no silent fallbacks, diagnostics that say how to fix them.
 > Covers parts 1, 2a (values, methods), 2b (errors, tests), 2c (numbers, lists, maps, text,
-> io). Binding: docs/spec.md; codes are rule numbers (R1–R31) or lexical/syntax codes (L, S).
+> io), 2d (function literals, blocks). Binding: docs/spec.md; codes are rule numbers (R1–R31) or lexical/syntax codes (L, S).
 
 ## Tools
 
@@ -407,6 +407,49 @@ int i = 3
 print(xs[i])
 ```
 
+## Part 2d: function literals and blocks (R26)
+
+- **Function type** `R(T1, mut T2)`: only as the type of a parameter (`void times(int n, void() body)`,
+  `int sum([]int xs, int(int) f)`); elsewhere R26. A `?` or `!E` before `(` belongs to `R`.
+  In the body such a name is only called (`f(x)`, `mut` where the type says) or passed on.
+- **Literal** `R(T x) { … }`: only as an argument of a call, else R26. Detected as an argument that
+  starts `X (`, then `)`, `mut` or `T name`, and `{` on the line of the `)`. `Name() { … }` is a literal
+  if `Name` is a type, a call with a block if it is a function.
+- **Block** `{ … }` right after `)` of a call (same line): the last argument, a literal without
+  parameters; its parameter must be `R()` (else R26). `times(3) { print("hi") }`. Nothing follows
+  the closing `}`. In a header the `{` ends the head: write `if (ready() { … }) {`, or the literal.
+- **Named function or variant constructor** as argument: `mapped(xs, triple)`, `shapes(xs, Shape.Box)`;
+  the type must match exactly (R8). Any other use of a function name is R26.
+- **Values, not places.** A literal copies each outside name it uses when its call evaluates its
+  arguments (counted, no deep copy) and never changes anything outside: a change to a captured name
+  is R6 (`return the value or use a for loop`). Handles stay the same handle. `return` and `try`
+  end only the literal; `break`/`continue` do not see an outer loop (R11).
+- **Effect (R13).** A call has an effect if its function or one of its literals does (`print`, a call
+  with effect); `any_of(xs, bool(int x) { print(x) … })` is a valid statement, a pure one is R13.
+
+```dif
+int sum_with([]int xs, int(int) f) {
+    int total = 0
+    for int x in xs {
+        total += f(x)
+    }
+    return total
+}
+
+void times(int n, void() body) {
+    for int i in range(n) {
+        body()
+    }
+}
+
+void main() {
+    int factor = 10
+    times(2) {
+        print(sum_with([1, 2], int(int x) { return x * factor }))
+    }
+}
+```
+
 ## Habits from other languages and their fixes
 
 | written | code | write instead |
@@ -446,5 +489,5 @@ Nesting deeper than 256 levels or 1024 operators in one expression is S1: split 
 
 ## Not yet
 
-Function literals, `filter`/`map`/`sort_by`/`any`/`all` (part 2d), own modules, C import,
+`filter`/`map`/`sort_by`/`any`/`all` on lists, storing function values, own modules, C import,
 handles, sharing: later parts (PLAN.md); using them is an error that says so.

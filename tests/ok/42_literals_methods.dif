@@ -1,0 +1,30 @@
+struct Acc {
+    int total
+    []int seen
+}
+
+void each([]int xs, void(int) f) {
+    for int x in xs {
+        f(x)
+    }
+}
+
+void Acc.add(Acc a, int x) {
+    self.total += x
+    each([1, 2], void(int y) { print(self.total + y + a.total) })
+    each(self.seen, void(int y) { print(self.seen.len() + y) })
+}
+
+void show(mut int n, []int xs) {
+    each(xs, void(int x) { print(n + x) })
+    n += 1
+}
+
+void main() {
+    Acc a = Acc{total: 1, seen: [7]}
+    a.add(a, 5)
+    int n = 3
+    show(mut n, [1, 2])
+    print(n)
+    print(a.total)
+}

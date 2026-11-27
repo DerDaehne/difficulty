@@ -1,0 +1,6 @@
+ok(6)
+err(ParseErr.Negative(-2))
+>-4a
+x
+x
+all

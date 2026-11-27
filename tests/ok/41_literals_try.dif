@@ -1,0 +1,64 @@
+enum ParseErr {
+    Negative(int n)
+}
+
+int!ParseErr check(int n) {
+    if n < 0 {
+        return err(ParseErr.Negative(n))
+    }
+    return n
+}
+
+int!ParseErr retry(int times, int!ParseErr() body) {
+    int!ParseErr last = body()
+    return last
+}
+
+str label(str prefix, str(int) f, int n) {
+    return "{prefix}{f(n)}"
+}
+
+void each([]int xs, void(int) f) {
+    for int x in xs {
+        f(x)
+    }
+}
+
+bool all_ok([]int xs, bool(int) f) {
+    for int x in xs {
+        if !f(x) {
+            return false
+        }
+    }
+    return true
+}
+
+int!ParseErr total([]int xs) {
+    int sum = 0
+    for int x in xs {
+        sum += try retry(2) {
+            return check(x)
+        }
+    }
+    return sum
+}
+
+void main() {
+    print(total([1, 2, 3]))
+    print(total([1, -2, 3]))
+    str sep = "-"
+    []str words = ["a", "b"]
+    print(label(">", str(int n) { return "{sep}{n}{words[0]}" }, 4))
+    each([1, 2], void(int x) { print("x") })
+    if all_ok([1, 2, 3], bool(int x) { return x < 4 && words.len() == 2 }) {
+        print("all")
+    }
+}
+
+test "literal in a test" {
+    int base = 10
+    int s = 0
+    each([1, 2, 3], void(int x) { print(x + base) })
+    expect(all_ok([1, 2], bool(int x) { return x + base > 10 }))
+    expect(s == 0)
+}

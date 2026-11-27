@@ -159,9 +159,8 @@ fn readme_examples() {
 /// a section is listed here only while its backend is missing.
 const CHECK_ONLY: &[&str] = &[];
 
-/// Sections of part 2d (function literals, block argument, list methods with a function argument):
-/// their examples need the compiler of part 2d and are skipped until it exists; the compiler
-/// change removes them here.
+/// Sections of part 2d whose examples all call the list methods with a function argument
+/// (`filter`, `map`, `sort_by`, `any`, `all`); they are skipped until those methods exist.
 const PENDING_2D: &[&str] = &["### 4.7 "];
 
 /// The list methods with a function argument (`filter`, `map`, `sort_by`, `any`, `all`) come with
