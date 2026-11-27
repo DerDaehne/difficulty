@@ -283,7 +283,9 @@ fn sets(e: &Expr, n: &str) -> bool {
             .iter()
             .any(|s| matches!(s, StrSeg::Expr(x) | StrSeg::Fmt(x, _) if sets(x, n))),
         ExprKind::IfExpr(branches, last) => {
-            let vb = |b: &ValueBlock| changes(&b.stmts, n) || sets(&b.value, n);
+            let vb = |b: &ValueBlock| {
+                changes(&b.stmts, n) || b.value.as_ref().is_some_and(|v| sets(v, n))
+            };
             branches.iter().any(|(c, b)| sets(c, n) || vb(b)) || vb(last)
         }
         // no `_` arm: a new expression kind must be classified here (it could change `n`)
@@ -1861,8 +1863,10 @@ impl<'a> Emitter<'a> {
         for s in &vb.stmts {
             self.stmt(s, 1);
         }
-        let v = self.at(t, &vb.value);
-        let _ = writeln!(self.out, "{r} = {v};");
+        if let Some(value) = &vb.value {
+            let v = self.at(t, value);
+            let _ = writeln!(self.out, "{r} = {v};");
+        }
         self.pop_scope(1, true);
         let _ = writeln!(self.out, "}}");
     }

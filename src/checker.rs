@@ -2469,15 +2469,14 @@ impl<'a> Checker<'a> {
             for s in &vb.stmts {
                 self.stmt(s);
             }
-            let (t, _) = self.rvalue(&vb.value);
+            let Some(value) = &vb.value else {
+                self.scopes.pop();
+                continue; // ends in return, break or continue: never arrives
+            };
+            let (t, _) = self.rvalue(value);
             self.scopes.pop();
             if t == Ty::Void {
-                self.err(
-                    "R15",
-                    vb.value.pos,
-                    "this branch of if gives no value",
-                    None,
-                );
+                self.err("R15", value.pos, "this branch of if gives no value", None);
                 return (Ty::Err, Val::Runtime);
             }
             match ty {
@@ -2494,6 +2493,9 @@ impl<'a> Checker<'a> {
                 }
                 _ => {}
             }
+        }
+        if ty.is_none() {
+            self.err("R15", e.pos, "no branch of this if gives a value", None);
         }
         (ty.unwrap_or(Ty::Err), Val::Runtime)
     }

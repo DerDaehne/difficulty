@@ -1866,6 +1866,12 @@ impl<'a> Parser<'a> {
         let mut stmts = Vec::new();
         let value = loop {
             if self.is_op("}") || *self.peek() == Tok::Eof {
+                if matches!(
+                    stmts.last(),
+                    Some(Stmt::Return(..) | Stmt::Break(_) | Stmt::Continue(_))
+                ) {
+                    break Some(None);
+                }
                 let msg = "this branch of if gives no value";
                 self.err("R15", pos, msg, None);
                 break None;
@@ -1873,7 +1879,7 @@ impl<'a> Parser<'a> {
             if self.last_line() && !self.statement_line() {
                 let v = self.expr();
                 self.skip_nl();
-                break Some(v);
+                break Some(Some(v));
             }
             let before = self.i;
             if let Some(s) = self.unit(|p| p.stmt()) {

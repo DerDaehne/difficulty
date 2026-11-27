@@ -1,0 +1,13 @@
+int sign(int n) {
+    if n < 0 { return -1 } else { return 1 }
+}
+
+void main() {
+    int total = 0
+    for int i in range(0, 4) { total += i }
+    int j = 0
+    while j < 3 { j += 1 }
+    if total > 5 { print("big") } else { total = 0 }
+    if total == 0 { print("zero") } else if j == 3 { print("three") } else { print("other") }
+    print("{total} {j} {sign(-4)} {sign(4)}")
+}

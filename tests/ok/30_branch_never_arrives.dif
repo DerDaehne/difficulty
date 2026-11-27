@@ -1,0 +1,40 @@
+enum E { Neg(str w) }
+
+int!E half(int n) {
+    str note = "n={n}"
+    []str held = [note, "x"]
+    int x = if n >= 0 { n / 2 } else { return err(E.Neg(note)) }
+    return x + held.len()
+}
+
+int pick(int v, bool skip) {
+    int total = 0
+    for int i in range(0, 5) {
+        str t = "{v}{i}"
+        int y = if i == 1 { t.len() } else if i == 3 { break } else if skip { continue } else { 7 }
+        total += y
+    }
+    return total
+}
+
+int skip_odd() {
+    int total = 0
+    int i = 0
+    while i < 6 {
+        i += 1
+        str t = "k{i}"
+        int y = if i % 2 == 0 { t.len() } else {
+            continue
+        }
+        total += y
+    }
+    return total
+}
+
+void main() {
+    print(half(8))
+    print(half(-1))
+    print(pick(10, true))
+    print(pick(10, false))
+    print(skip_odd())
+}

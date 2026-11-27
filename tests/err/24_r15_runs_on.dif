@@ -1,0 +1,8 @@
+// expect: error[R15] 4:33
+void main() {
+    int n = 3
+    int x = if n > 0 { n } else {
+        n = 1
+    }
+    print(x)
+}

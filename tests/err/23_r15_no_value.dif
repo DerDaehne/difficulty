@@ -1,0 +1,5 @@
+// expect: error[R15] 3:13
+void main() {
+    int x = if true { return } else { return }
+    print(x)
+}

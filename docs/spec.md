@@ -8,7 +8,7 @@ Diese Spezifikation ist nach den Regeln R1–R31 gegliedert. Ausgearbeitet sind 
 
 **Grammatik** steht in EBNF: `a b` Folge, `a | b` Auswahl, `[ a ]` optional, `{ a }` beliebig oft, `"x"` wörtlich, `NL` Zeilenende (siehe §1.3). Jede Produktion steht genau einmal; andere Abschnitte verweisen darauf.
 
-**Kanonische Form.** Wo der Compiler mehrere Schreibweisen annimmt (Feldreihenfolge im Struct-Literal, überflüssige Klammern um einen Elementtyp wie in `[](?int)`, abschließendes Komma in mehrzeiligen Listen, Trenner der `enum`-Varianten, `x` statt `some(x)` an einer `?T`-Stelle, die ein Ziel ist, R12), legt `dif fmt` die eine kanonische Form fest; der Compiler meldet dafür keinen Fehler.
+**Kanonische Form.** Wo der Compiler mehrere Schreibweisen annimmt (Feldreihenfolge im Struct-Literal, überflüssige Klammern um einen Elementtyp wie in `[](?int)`, abschließendes Komma in mehrzeiligen Listen, Trenner der `enum`-Varianten, `x` statt `some(x)` an einer `?T`-Stelle, die ein Ziel ist, R12), legt `dif fmt` die eine kanonische Form fest; der Compiler meldet dafür keinen Fehler. Ein Block aus genau einer Anweisung ohne eigenen Block (`if`, `else`, `while`, `for`, Rumpf eines Funktionsliterals oder Blocks, R26) steht einzeilig, wenn die Zeile dann höchstens 100 Zeichen lang ist (`if c { return e }`, `} else { x = 1 }`, `for int i in xs { total += i }`), sonst mehrzeilig; alles andere steht mehrzeilig. Die Fälle von `switch` sind keine Blöcke und bleiben davon unberührt. Der Compiler nimmt beide Formen an.
 
 ### 0.1 Diagnosen
 
@@ -333,6 +333,7 @@ discard     = "_" "=" expr ;
 ```
 
 - Jeder Block steht in `{ }`, auch bei einer einzigen Anweisung: `if x > 0 print(x)` ist `R3`, Hinweis `put the body in braces: if x > 0 { … }`.
+- Ein Block aus einer einzigen Anweisung darf in einer Zeile stehen, `if x < 0 { return -1 }`; `dif fmt` setzt diese Form nach der Regel in §0 (Länge höchstens 100 Zeichen). Beides wird angenommen.
 - Das `{` eines Blocks steht in derselben Zeile wie seine Kopfzeile; `}` und `else` stehen in einer Zeile (`} else {`).
 - Zwei Anweisungen in einer Zeile sind `R3`, Hinweis `put each statement on its own line`. Folgt einer Anweisung ein Token, das keine Anweisung beginnen kann (`)`, `=`), ist das `S1`.
 - Die Kopfzeile endet am ersten `{` auf Klammerebene 0. Darum ist `if hall.is_full() { … }` immer eine Bedingung mit Rumpf, nie ein Aufruf mit Block-Argument (R26). Ein Struct-Literal oder ein `if`-Ausdruck in einer Kopfzeile steht deshalb in Klammern: `if p == (Point{x: 0, y: 0}) {`. Ein Struct-Literal ohne Klammern dort ist `S1` am Typnamen, Meldung `a struct literal in a header needs parentheses`, Hinweis mit der geklammerten Kopfzeile. Ein Map-Literal (R30) steht dort ebenso in Klammern; ungeklammert ist es `S1` an seinem `{`, Meldung `a map literal in a header needs parentheses`. Ein Listen-Literal braucht keine Klammern: `for int x in [1, 2, 3] {`. Ein Funktionsliteral steht in den Klammern seines Aufrufs und beendet die Kopfzeile nicht; ein Block-Argument im Kopf braucht Klammern um den Aufruf (R26).
@@ -1636,6 +1637,7 @@ Teil 2a legt fest:
 
 - `if` als Ausdruck steht überall, wo ein Ausdruck stehen kann, außer am Anfang einer Anweisung (dort ist es die `if`-Anweisung aus R3) und ungeklammert in einer Kopfzeile (R3).
 - Jeder Zweig ist ein Block, dessen letzte Zeile ein Ausdruck ist; davor dürfen Anweisungen stehen. Der Wert des Zweigs ist dieser Ausdruck; ein `if`-Ausdruck in der letzten Zeile ist erlaubt.
+- **Zweige, die nie ankommen.** Ein Zweig darf statt mit einem Wert mit `return`, `break` oder `continue` enden; er gibt dann keinen Wert und gilt für den Typ nicht, mindestens ein Zweig muss einen Wert geben, sonst `R15` am `if`, Meldung `no branch of this if gives a value`. Beim Rücksprung wird alles Gehaltene freigegeben wie bei `try` (R12, R29); `break` und `continue` brauchen eine umgebende Schleife (R3).
 - `else` ist Pflicht: `R15` am `if`, Meldung `if as a value needs else`, Hinweis mit `else { … }`. Endet ein Zweig nicht mit einem Ausdruck mit Wert (sondern mit einer Anweisung oder einem `void`-Aufruf), ist das `R15`, Meldung `this branch of if gives no value`. Alle Zweige haben denselben Typ, sonst `R8`, Meldung `` the branches of if give int and str ``; Literale bekommen den Typ ihrer Stelle (R8).
 - Der Ausdruck endet mit dem `}` seines letzten Zweigs: `if c { 1 } else { 2 } + 3` addiert 3 zum gewählten Wert.
 - Ausgewertet wird nur der gewählte Zweig.
@@ -1653,6 +1655,52 @@ print("{sign} {abs}")
 ```
 
 Ausgabe: `negativ 3`.
+
+```dif
+enum E { Neg }
+
+int!E root(int n) {
+    int x = if n >= 0 { n } else { return err(E.Neg) }
+    return x
+}
+
+void main() {
+    for int v in [3, -1, 5] {
+        int y = if v >= 0 { v } else { continue }
+        print(y)
+    }
+    print(root(-1))
+}
+```
+
+Ausgabe: `3`, `5`, `err(E.Neg)`. Der Zweig mit return kommt nie bei `x` an und gibt vorher frei, was gehalten wird.
+
+```dif error R15
+void main() {
+    int x = if true { return } else { return }
+    print(x)
+}
+```
+
+```
+main.dif:2:13: error[R15]: no branch of this if gives a value
+```
+
+```dif error R15
+void main() {
+    int n = 3
+    int x = if n > 0 { n } else {
+        n = 1
+    }
+    print(x)
+}
+```
+
+```
+main.dif:3:33: error[R15]: this branch of if gives no value
+```
+
+int x = if n >= 0 { n } else { return err(E.Neg) }
 
 ```dif error R15
 void main() {

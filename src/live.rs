@@ -347,7 +347,10 @@ impl Live<'_> {
     }
 
     fn value_block(&mut self, vb: &ValueBlock, live: Set) -> Set {
-        let mut live = self.expr(&vb.value, live);
+        let mut live = match &vb.value {
+            Some(v) => self.expr(v, live),
+            None => live,
+        };
         for s in vb.stmts.iter().rev() {
             live = self.stmt(s, live);
         }

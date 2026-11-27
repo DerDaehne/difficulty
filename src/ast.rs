@@ -129,11 +129,12 @@ pub enum Pattern {
     },
 }
 
-/// A branch of `if` as a value: statements, then the value.
+/// A branch of `if` as a value: statements, then the value. A branch that ends in
+/// `return`, `break` or `continue` never arrives and has no value (R15).
 #[derive(Debug, Clone)]
 pub struct ValueBlock {
     pub stmts: Vec<Stmt>,
-    pub value: Expr,
+    pub value: Option<Expr>,
     pub pos: Pos,
 }
 
