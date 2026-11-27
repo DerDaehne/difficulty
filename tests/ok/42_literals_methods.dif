@@ -9,7 +9,7 @@ void each([]int xs, void(int) f) {
     }
 }
 
-void Acc.add(Acc a, int x) {
+void Acc.add(mut self, Acc a, int x) {
     self.total += x
     each([1, 2], void(int y) { print(self.total + y + a.total) })
     each(self.seen, void(int y) { print(self.seen.len() + y) })
