@@ -186,7 +186,8 @@ Output: `Point{x: 1, y: 2} Point{x: 12, y: 4} Point{x: 13, y: 4} 9 Shape.Rect(3,
   never changed, a change never read afterwards (also to a copy), one place passed
   changeable twice in a call. An argument without `mut` sees the value from before the call.
 - **Methods (R7).** `R Type.name(params)`; `self` is the place before the dot; a method that
-  changes it takes `mut self` first. `a.scale(2)` needs a variable or field then, no `mut`
+  changes it takes `mut self` first; a method that only reads has no written `self`
+  (`int Point.sum() { … }`). `a.scale(2)` needs a variable or field then, no `mut`
   at the call; others work on any expression: `fresh().total()`.
 - **`switch` (R10).** Over numbers, `rune`, `str` or `enum`; values are literals, `const`
   names or `E.V`; `case 1, 2:` lists values; bindings `case E.V(int w, _):` (`_` skips).
