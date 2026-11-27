@@ -297,6 +297,7 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `R12.try_needs_result_fn` |  | `try` needs a function that returns T!E or ?T |
 | `R12.try_operand` |  | `try` needs a result of type T!E or ?T, found … |
 | `R13.unused_result` |  | result of `…` is never used |
+| `R13.no_effect` |  | call of `…` has no effect |
 | `R14.conv_inexact` |  | … is not an exact … |
 | `R14.conv_range` |  | … does not fit in … |
 | `R14.conv_rune` |  | … is not a valid rune |
@@ -1154,6 +1155,7 @@ struct Point {
 
 void Point.move(int dx) {
     self.x += dx
+    print(dx)
 }
 
 void main() {
@@ -1925,7 +1927,8 @@ Teil 1 und Teil 2a legen fest:
 - Ein Aufruf als Anweisung, dessen Ergebnis nicht `void` ist, ist `R13`, Hinweis `use it, or discard it explicitly with _ = …` — außer die Funktion hat eine Wirkung (ab Teil 2a).
 - **Wirkung (Teil 2a).** Eine Funktion oder Methode hat eine Wirkung, wenn sie einen `mut`-Parameter oder `self` ändert, `print` aufruft oder eine Funktion mit Wirkung aufruft; der Compiler leitet das über alle Aufrufe hinweg ab (auch rekursiv). Ein Aufruf mit Wirkung darf als Anweisung stehen, auch wenn er einen Wert liefert. Ergebnisse vom Typ `T!E` und `?T` werden trotzdem immer verwendet (Teil 2b).
 - `_ = f()` verwirft ein Ergebnis bewusst.
-- Ein Aufruf einer `void`-Funktion als Anweisung ist erlaubt.
+- Ein Aufruf einer `void`-Funktion als Anweisung braucht ebenfalls eine Wirkung: sonst `R13`, Meldung `` call of `f(1)` has no effect ``, Hinweis `remove the call, or return a result and use it`, an der Stelle des Aufrufs. Das gilt auch für eine Methode ohne `mut self`, die nur ihre Kopie von `self` ändert (R7). `try f()` zählt als Verwendung des Ergebnisses, weil der Fehler weitergegeben wird.
+- Was keine Wirkung ist: ein möglicher Abbruch (`R14`, `assert` ist dagegen eine Ein-/Ausgabe wie `print`) und die bloße Berechnung. Eine Funktion, die nur sich selbst aufruft, hat keine Wirkung. Ein `test`-Block ist kein Aufruf und braucht keine Wirkung; `expect` ist im Test eine Wirkung.
 
 Teil 2b legt fest:
 
@@ -1967,6 +1970,21 @@ void main() {
 ```
 main.dif:6:5: error[R13]: result of `square(3)` is never used
   hint: use it, or discard it explicitly with `_ = square(3)`
+```
+
+```dif error R13
+void note(int n) {
+    int y = n + 1
+}
+
+void main() {
+    note(1)
+}
+```
+
+```
+main.dif:6:5: error[R13]: call of `note(1)` has no effect
+  hint: remove the call, or return a result and use it
 ```
 
 ### R13, Teil 2d — Wirkung eines Aufrufs mit Literal

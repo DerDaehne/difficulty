@@ -652,3 +652,43 @@ fn lost_changes_per_field_r6() {
         format!("{t}void!E f(mut P p) {{\n    p.x = 1\n    int a = try get()\n    p.y = a\n}}\n");
     assert_eq!(check_source(&src), vec![]);
 }
+
+#[test]
+fn void_call_without_effect_r13() {
+    let hint = "remove the call, or return a result and use it";
+    bad(
+        "void f(int n) {\n    int y = n + 1\n    print(y)\n}\nvoid g(int n) {\n    int y = n + 1\n}\nvoid main() {\n    f(1)\n    g(1)\n}\n",
+        "R13",
+        "10:5",
+        "call of `g(1)` has no effect",
+        hint,
+    );
+    // method without mut self: only its copy of self changes
+    bad(
+        "struct P {\n    int x\n}\nvoid P.touch() {\n    self.x += 1\n    int y = self.x\n}\nvoid main() {\n    P p = P{x: 1}\n    p.touch()\n    print(p)\n}\n",
+        "R13",
+        "10:5",
+        "call of `p.touch()` has no effect",
+        hint,
+    );
+    // no effect through calls, also recursion
+    let src = "void a(int n) {\n    int y = n\n}\nvoid r(int n) {\n    if n > 0 {\n        r(n - 1)\n    }\n}\nvoid main() {\n    a(1)\n    r(2)\n}\n";
+    let got: Vec<String> = check_source(src)
+        .iter()
+        .map(|d| format!("{} {}", d.pos.line, d.msg))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            "6 call of `r(n - 1)` has no effect",
+            "10 call of `a(1)` has no effect",
+            "11 call of `r(2)` has no effect"
+        ]
+    );
+}
+
+#[test]
+fn void_call_with_effect_is_fine() {
+    let src = "use std.io\nstruct P {\n    int x\n}\nvoid P.inc(mut self) {\n    self.x += 1\n}\nvoid bump(mut int n) {\n    n += 1\n}\nvoid say(int n) {\n    print(n)\n}\nvoid via(int n) {\n    say(n)\n}\nvoid fail() {\n    assert(false)\n}\nvoid main() {\n    P p = P{x: 1}\n    int n = 1\n    p.inc()\n    bump(mut n)\n    via(n)\n    []int xs = []\n    xs.push(n)\n    print(xs)\n    io.eprint(\"x\")\n    print(p)\n}\n\ntest \"t\" {\n    expect(1 == 1)\n}\n";
+    assert_eq!(check_source(src), vec![], "{src}");
+}

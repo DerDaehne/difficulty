@@ -5,6 +5,7 @@ struct Point {
 
 void Point.move(int dx) {
     self.x += dx
+    print(dx)
 }
 
 void main() {

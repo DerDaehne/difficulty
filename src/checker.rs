@@ -1514,6 +1514,7 @@ impl<'a> Checker<'a> {
             }
             Stmt::Return(value, p) => self.ret(value.as_ref(), *p),
             Stmt::Call(e) => {
+                let before = self.diags.len();
                 self.last_callee = None;
                 self.last_effect = None;
                 let (t, _) = self.expr(e);
@@ -1529,6 +1530,15 @@ impl<'a> Checker<'a> {
                         "use it with try, ?? or switch, or discard it explicitly with `_ = {text}`"
                     );
                     self.err("R13.unused_result", e.pos, msg, Some(hint));
+                } else if t == Ty::Void
+                    && !effect
+                    && self.diags.len() == before
+                    && !matches!(e.kind, ExprKind::Try(..))
+                {
+                    let text = self.text(e);
+                    let msg = format!("call of `{text}` has no effect");
+                    let hint = "remove the call, or return a result and use it".to_string();
+                    self.err("R13.no_effect", e.pos, msg, Some(hint));
                 } else if t != Ty::Void && t != Ty::Err && !effect {
                     let text = flat(self.text(e));
                     let msg = format!("result of `{text}` is never used");
@@ -2742,7 +2752,15 @@ impl<'a> Checker<'a> {
                 }
                 self.method_call(e, base, m, args)
             }
-            ExprKind::Ident(name) => self.fn_call(e, f, name, args, place),
+            ExprKind::Ident(name) => {
+                let r = self.fn_call(e, f, name, args, place);
+                if matches!(name.as_str(), "print" | "assert" | "expect") {
+                    // an effect of its own, whatever its arguments called
+                    self.last_callee = None;
+                    self.last_effect = None;
+                }
+                r
+            }
             _ => {
                 let msg = format!("`{}` cannot be called", self.text(f));
                 self.err("R8.not_callable", f.pos, msg, None);
