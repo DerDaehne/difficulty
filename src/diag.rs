@@ -8,22 +8,47 @@ pub struct Pos {
     pub offset: u32,
 }
 
+/// A mechanical repair: replace the bytes `[offset, end)` of the source with `text`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fix {
+    pub offset: u32,
+    pub end: u32,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diag {
     pub code: &'static str,
+    /// Stable kind of message, `<code>.<name>` (spec §0.3).
+    pub id: &'static str,
     pub pos: Pos,
     pub msg: String,
     pub hint: Option<String>,
+    pub fix: Option<Box<Fix>>,
 }
 
 impl Diag {
-    pub fn new(code: &'static str, pos: Pos, msg: impl Into<String>) -> Self {
+    /// `id` is `<code>.<name>`; a bare code (no name yet) is its own id, which the
+    /// id test rejects.
+    pub fn new(id: &'static str, pos: Pos, msg: impl Into<String>) -> Self {
+        let code = id.split_once('.').map_or(id, |(c, _)| c);
         Diag {
             code,
+            id,
             pos,
             msg: msg.into(),
             hint: None,
+            fix: None,
         }
+    }
+
+    pub fn fix(mut self, offset: u32, end: u32, text: impl Into<String>) -> Self {
+        self.fix = Some(Box::new(Fix {
+            offset,
+            end,
+            text: text.into(),
+        }));
+        self
     }
 
     pub fn hint(mut self, hint: impl Into<String>) -> Self {
@@ -45,8 +70,9 @@ impl Diag {
 
     pub fn json(&self, file: &str) -> String {
         let mut s = format!(
-            "{{\"v\":1,\"code\":{},\"severity\":\"error\",\"file\":{},\"line\":{},\"col\":{},\"offset\":{},\"message\":{}",
+            "{{\"v\":1,\"code\":{},\"id\":{},\"severity\":\"error\",\"file\":{},\"line\":{},\"col\":{},\"offset\":{},\"message\":{}",
             json_str(self.code),
+            json_str(self.id),
             json_str(file),
             self.pos.line,
             self.pos.col,
@@ -56,6 +82,14 @@ impl Diag {
         if let Some(h) = &self.hint {
             s.push_str(",\"hint\":");
             s.push_str(&json_str(h));
+        }
+        if let Some(f) = &self.fix {
+            s.push_str(&format!(
+                ",\"fix\":{{\"offset\":{},\"end\":{},\"text\":{}}}",
+                f.offset,
+                f.end,
+                json_str(&f.text)
+            ));
         }
         s.push('}');
         s
@@ -87,7 +121,7 @@ mod tests {
     #[test]
     fn render_and_json() {
         let d = Diag::new(
-            "R13",
+            "R13.unused_result",
             Pos {
                 line: 6,
                 col: 5,
@@ -102,7 +136,7 @@ mod tests {
         );
         assert_eq!(
             d.json("main.dif"),
-            "{\"v\":1,\"code\":\"R13\",\"severity\":\"error\",\"file\":\"main.dif\",\"line\":6,\"col\":5,\"offset\":70,\"message\":\"result of `f(3)` is never used\",\"hint\":\"use it, or discard it explicitly with `_ = f(3)`\"}"
+            "{\"v\":1,\"code\":\"R13\",\"id\":\"R13.unused_result\",\"severity\":\"error\",\"file\":\"main.dif\",\"line\":6,\"col\":5,\"offset\":70,\"message\":\"result of `f(3)` is never used\",\"hint\":\"use it, or discard it explicitly with `_ = f(3)`\"}"
         );
     }
 }

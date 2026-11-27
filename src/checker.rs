@@ -255,12 +255,17 @@ pub fn main_diag(m: &Module) -> Option<Diag> {
         offset: 0,
     };
     match main {
-        None => Some(Diag::new("R1", start, "no `main` function").hint(hint)),
-        Some(f) if f.ret.name != "void" && !f.ret.name.starts_with("void!") => {
-            Some(Diag::new("R1", f.pos, "`main` must return void or void!E").hint(hint))
-        }
+        None => Some(Diag::new("R1.no_main", start, "no `main` function").hint(hint)),
+        Some(f) if f.ret.name != "void" && !f.ret.name.starts_with("void!") => Some(
+            Diag::new(
+                "R1.main_signature",
+                f.pos,
+                "`main` must return void or void!E",
+            )
+            .hint(hint),
+        ),
         Some(f) if !f.params.is_empty() => {
-            Some(Diag::new("R1", f.pos, "`main` takes no parameters").hint(hint))
+            Some(Diag::new("R1.main_params", f.pos, "`main` takes no parameters").hint(hint))
         }
         Some(_) => None,
     }
@@ -868,7 +873,7 @@ impl<'a> Checker<'a> {
         let Some(&tid) = self.type_ids.get(recv.name.as_str()) else {
             let msg = format!("`{}` is not a struct or enum of this module", recv.name);
             let hint = "methods are declared for struct and enum types of this module".to_string();
-            self.err("R7", recv.pos, msg, Some(hint));
+            self.err("R7.method_receiver", recv.pos, msg, Some(hint));
             return false;
         };
         let t = &self.types[tid as usize];
@@ -930,7 +935,12 @@ impl<'a> Checker<'a> {
             if reaches(t, t) && !earlier {
                 let (name, pos) = (self.types[t as usize].name, self.types[t as usize].pos);
                 let hint = "a value has a fixed size; keep linked values in a list".to_string();
-                self.err("R5", pos, format!("`{name}` contains itself"), Some(hint));
+                self.err(
+                    "R5.contains_itself",
+                    pos,
+                    format!("`{name}` contains itself"),
+                    Some(hint),
+                );
             }
         }
     }
@@ -958,7 +968,7 @@ impl<'a> Checker<'a> {
     fn cycle(&mut self, name: &str, pos: Pos) {
         let msg = format!("`{name}` depends on itself");
         let hint = "give it a value without itself".to_string();
-        self.err("R4", pos, msg, Some(hint));
+        self.err("R4.depends_on_itself", pos, msg, Some(hint));
     }
 
     fn module_pos(&self, name: &str) -> Option<Pos> {
@@ -984,7 +994,7 @@ impl<'a> Checker<'a> {
         if predefined {
             let hint = "choose another name".to_string();
             self.err(
-                "R4",
+                "R4.predefined_name",
                 pos,
                 format!("`{name}` is a predefined name"),
                 Some(hint),
@@ -996,7 +1006,7 @@ impl<'a> Checker<'a> {
     fn already(&mut self, name: &str, pos: Pos, prev: Pos) {
         let msg = format!("`{name}` is already declared at {}", self.at(prev));
         let hint = "names are not redeclared inside their block; choose another name".to_string();
-        self.err("R4", pos, msg, Some(hint));
+        self.err("R4.already_declared", pos, msg, Some(hint));
     }
 
     /// A global `const`, checked on first use so the order of declarations does not
@@ -1019,7 +1029,12 @@ impl<'a> Checker<'a> {
                     self.const_too_deep = true;
                     let msg =
                         format!("`{key}` depends on more than {MAX_CONST_DEPTH} consts in a row");
-                    self.err("R4", d.pos, msg, Some("compute it in fewer steps".into()));
+                    self.err(
+                        "R4.const_chain",
+                        d.pos,
+                        msg,
+                        Some("compute it in fewer steps".into()),
+                    );
                 }
                 Some((Ty::Err, Val::Known))
             }
@@ -1038,7 +1053,7 @@ impl<'a> Checker<'a> {
                     v = Val::Known; // reported; its users need no second message
                 } else if v == Val::Runtime {
                     let msg = "a global const needs a value known at compile time";
-                    self.err("R4", d.value.pos, msg, None);
+                    self.err("R4.const_runtime", d.value.pos, msg, None);
                     v = Val::Known;
                 }
                 let v = self.mask(ty, v);
@@ -1105,7 +1120,7 @@ impl<'a> Checker<'a> {
         if !self.no_value(ret) && ret != Ty::Err && !terminates(&f.body, &self.complete) {
             let msg = format!("`{}` does not return a value on every path", f.name);
             let hint = format!("end it with return, e.g. return {}", self.zero(ret));
-            self.err("R8", f.pos, msg, Some(hint));
+            self.err("R8.missing_return", f.pos, msg, Some(hint));
         }
         if let Some(d) = &self.derived {
             let changes_self = d[id].changes_self;
@@ -1118,7 +1133,11 @@ impl<'a> Checker<'a> {
             for (k, mp) in unneeded {
                 let msg = format!("`{}` is never changed; remove mut", f.params[k].name);
                 let hint = self.signature(id, Some(k));
-                self.err("R6", mp, msg, Some(hint));
+                let mut d = Diag::new("R6.mut_unneeded", mp, msg).hint(hint);
+                if self.span(mp.offset, mp.offset + 4) == "mut " {
+                    d = d.fix(mp.offset, mp.offset + 4, "");
+                }
+                self.diags.push(d);
             }
             if let Some(mp) = f.mut_self.filter(|_| !changes_self) {
                 let hint = self.signature(id, None);
@@ -1156,7 +1175,7 @@ impl<'a> Checker<'a> {
                 Some(k) => {
                     let msg = format!("the change to `{place}` is lost: `{root}` is a copy");
                     let hint = format!("take it as mut: {}", self.signature(id, k));
-                    self.err("R6", pos, msg, Some(hint));
+                    self.err("R6.lost_copy", pos, msg, Some(hint));
                 }
                 None => {
                     let msg = format!("`{place}` is changed but never read afterwards");
@@ -1165,7 +1184,7 @@ impl<'a> Checker<'a> {
                         .get(&pos.offset)
                         .cloned()
                         .unwrap_or_else(|| "use the value, or remove the change".to_string());
-                    self.err("R6", pos, msg, Some(hint));
+                    self.err("R6.dead_change", pos, msg, Some(hint));
                 }
             }
         }
@@ -1247,7 +1266,12 @@ impl<'a> Checker<'a> {
         }
         self.unknown.push(name.to_string());
         let hint = closest(name, self.visible().into_iter()).map(|c| format!("did you mean {c}?"));
-        self.err("R4", pos, format!("unknown name `{name}`"), hint);
+        self.err(
+            "R4.unknown_name",
+            pos,
+            format!("unknown name `{name}`"),
+            hint,
+        );
     }
 
     fn lookup(&mut self, name: &str, pos: Pos) -> (Ty, Val) {
@@ -1262,17 +1286,27 @@ impl<'a> Checker<'a> {
         }
         if self.funcs.contains_key(name) || BUILTINS.contains(&name) {
             let msg = format!("`{name}` is a function; call it: {name}(…)");
-            self.err("R8", pos, msg, None);
+            self.err("R8.fn_as_value", pos, msg, None);
             return (Ty::Err, Val::Runtime);
         }
         if self.type_ids.contains_key(name) {
-            self.err("R8", pos, format!("`{name}` is a type, not a value"), None);
+            self.err(
+                "R8.type_as_value",
+                pos,
+                format!("`{name}` is a type, not a value"),
+                None,
+            );
             return (Ty::Err, Val::Runtime);
         }
         if p2c::STD_MODULES.contains(&name) {
             if self.imports.contains(&name) {
                 let msg = format!("`{name}` is a module, not a value");
-                self.err("R8", pos, msg, Some(format!("write {name}.name(…)")));
+                self.err(
+                    "R8.module_as_value",
+                    pos,
+                    msg,
+                    Some(format!("write {name}.name(…)")),
+                );
             } else {
                 self.not_imported(name, pos);
             }
@@ -1370,14 +1404,24 @@ impl<'a> Checker<'a> {
             Stmt::Break(p) => match self.ctx.last() {
                 Some(Ctx::Switch) => {
                     let hint = "leave the loop after the switch, or return".to_string();
-                    self.err("R11", *p, "`break` directly inside switch", Some(hint));
+                    self.err(
+                        "R11.break_in_switch",
+                        *p,
+                        "`break` directly inside switch",
+                        Some(hint),
+                    );
                 }
                 Some(Ctx::Loop) => {}
-                None => self.err("R11", *p, "`break` outside a loop", None),
+                None => self.err("R11.break_outside_loop", *p, "`break` outside a loop", None),
             },
             Stmt::Continue(p) => {
                 if !self.ctx.contains(&Ctx::Loop) {
-                    self.err("R11", *p, "`continue` outside a loop", None);
+                    self.err(
+                        "R11.continue_outside_loop",
+                        *p,
+                        "`continue` outside a loop",
+                        None,
+                    );
                 }
             }
             Stmt::Return(value, p) => self.ret(value.as_ref(), *p),
@@ -1395,19 +1439,24 @@ impl<'a> Checker<'a> {
                     let hint = format!(
                         "use it with try, ?? or switch, or discard it explicitly with `_ = {text}`"
                     );
-                    self.err("R13", e.pos, msg, Some(hint));
+                    self.err("R13.unused_result", e.pos, msg, Some(hint));
                 } else if t != Ty::Void && t != Ty::Err && !effect {
                     let text = self.text(e);
                     let msg = format!("result of `{text}` is never used");
                     let hint = format!("use it, or discard it explicitly with `_ = {text}`");
-                    self.err("R13", e.pos, msg, Some(hint));
+                    self.err("R13.unused_result", e.pos, msg, Some(hint));
                 }
             }
             Stmt::Discard(e, _) => {
                 let (t, _) = self.rvalue(e);
                 if t == Ty::Void {
                     let msg = format!("`{}` has no result to discard", self.text(e));
-                    self.err("R8", e.pos, msg, Some("call it without `_ =`".into()));
+                    self.err(
+                        "R8.discard_void",
+                        e.pos,
+                        msg,
+                        Some("call it without `_ =`".into()),
+                    );
                 }
             }
         }
@@ -1420,17 +1469,17 @@ impl<'a> Checker<'a> {
                     let decl = self.module_pos(name).unwrap_or(pos);
                     let msg = format!("cannot assign to const `{name}`");
                     let hint = format!("it is declared const at {}", self.at(decl));
-                    self.err("R4", place.pos, msg, Some(hint));
+                    self.err("R4.assign_const", place.pos, msg, Some(hint));
                 } else if self.funcs.contains_key(name.as_str()) {
                     let msg = format!("cannot assign to function `{name}`");
-                    self.err("R8", place.pos, msg, None);
+                    self.err("R8.assign_fn", place.pos, msg, None);
                 } else {
                     let (t, _) = self.rvalue(value);
                     let ty = if t == Ty::Err { "T".into() } else { self.tn(t) };
                     let hint =
                         format!("declare it with a type: {ty} {name} = {}", self.text(value));
                     self.err(
-                        "R2",
+                        "R2.not_declared",
                         place.pos,
                         format!("`{name}` is not declared"),
                         Some(hint),
@@ -1447,7 +1496,7 @@ impl<'a> Checker<'a> {
                 .unwrap_or(pos);
             let msg = format!("cannot assign to const `{root}`");
             let hint = format!("it is declared const at {}", self.at(decl));
-            self.err("R4", place.pos, msg, Some(hint));
+            self.err("R4.assign_const", place.pos, msg, Some(hint));
             return;
         }
         // `m[k] = v` sets an entry of a map; the entry itself is no place (R30)
@@ -1481,7 +1530,7 @@ impl<'a> Checker<'a> {
                                 p = self.text(place)
                             )
                         };
-                        self.err("R8", pos, msg, Some(hint));
+                        self.err("R8.binary_types", pos, msg, Some(hint));
                     }
                 }
                 return;
@@ -1515,7 +1564,7 @@ impl<'a> Checker<'a> {
             if let Some(e) = value {
                 self.rvalue(e);
                 let msg = "a test returns nothing; remove the value";
-                self.err("R8", e.pos, msg, None);
+                self.err("R8.test_return_value", e.pos, msg, None);
             }
             return;
         }
@@ -1525,12 +1574,12 @@ impl<'a> Checker<'a> {
             None if !self.no_value(want) && want != Ty::Err => {
                 let msg = format!("`{name}` returns {}; give `return` a value", self.tn(want));
                 let hint = format!("return {}", self.zero(want));
-                self.err("R8", p, msg, Some(hint));
+                self.err("R8.return_needs_value", p, msg, Some(hint));
             }
             Some(e) if want == Ty::Void => {
                 self.rvalue(e);
                 let msg = format!("`{name}` returns nothing; remove the value");
-                self.err("R8", e.pos, msg, None);
+                self.err("R8.return_void_value", e.pos, msg, None);
             }
             Some(e) => {
                 self.at_place(want, e, None);
@@ -1556,7 +1605,7 @@ impl<'a> Checker<'a> {
             _ => {
                 let hint = (t == Ty::Bool).then(|| "use if".to_string());
                 let msg = format!("cannot switch over {}", self.tn(t));
-                self.err("R10", subject.pos, msg, hint);
+                self.err("R10.switch_type", subject.pos, msg, hint);
                 None
             }
         };
@@ -1570,7 +1619,7 @@ impl<'a> Checker<'a> {
                         Some((_, first)) => {
                             let msg =
                                 format!("case {key} is already handled at {}", self.at(*first));
-                            self.err("R10", p, msg, None);
+                            self.err("R10.case_duplicate", p, msg, None);
                         }
                         None => seen.push((key, p)),
                     }
@@ -1608,11 +1657,16 @@ impl<'a> Checker<'a> {
                         let list: Vec<&str> = missing.iter().map(|s| s.as_str()).collect();
                         let msg = format!("switch does not handle {}", list.join(", "));
                         let hint = format!("add case {first}: …, or default:");
-                        self.err("R10", pos, msg, Some(hint));
+                        self.err("R10.switch_missing", pos, msg, Some(hint));
                     }
                     (None, Some((_, dpos))) => {
                         let msg = "default is never reached: every variant is handled";
-                        self.err("R10", *dpos, msg, Some("remove default".into()));
+                        self.err(
+                            "R10.default_unreachable",
+                            *dpos,
+                            msg,
+                            Some("remove default".into()),
+                        );
                     }
                     _ => {}
                 }
@@ -1620,7 +1674,7 @@ impl<'a> Checker<'a> {
             }
             Some(o) if (o.is_int() || matches!(o, Ty::Rune | Ty::Str)) && default.is_none() => {
                 let msg = format!("switch over {} needs default", self.tn(t));
-                self.err("R10", pos, msg, Some("default:".into()));
+                self.err("R10.default_needed", pos, msg, Some("default:".into()));
                 self.complete.insert(pos.offset);
             }
             _ => {
@@ -1638,7 +1692,7 @@ impl<'a> Checker<'a> {
                 c.tn(t),
                 c.tn(over)
             );
-            c.err("R8", p, msg, None);
+            c.err("R8.case_type", p, msg, None);
             None
         };
         match pat {
@@ -1647,7 +1701,7 @@ impl<'a> Checker<'a> {
                     let (lo, hi) = t.range().unwrap_or((0, 0));
                     if *v < lo || *v > hi {
                         let msg = format!("case {v} does not fit in {}", self.tn(t));
-                        self.err("R8", *p, msg, None);
+                        self.err("R8.case_range", *p, msg, None);
                         return None;
                     }
                     Some((v.to_string(), *p))
@@ -1677,7 +1731,7 @@ impl<'a> Checker<'a> {
                     if is_variant {
                         let hint = format!("case {}.{n}:", self.types[id as usize].name);
                         self.err(
-                            "R10",
+                            "R10.variant_qualified",
                             *p,
                             "variants are written with their type",
                             Some(hint),
@@ -1706,7 +1760,7 @@ impl<'a> Checker<'a> {
             } => {
                 let Some(eid) = self.enum_id(ty) else {
                     let msg = format!("`{ty}` is not an enum of this module");
-                    self.err("R4", *pos, msg, None);
+                    self.err("R4.not_enum", *pos, msg, None);
                     return None;
                 };
                 let vfields: Vec<(Ty, &'a str)> = match &self.types[eid as usize].kind {
@@ -1716,7 +1770,12 @@ impl<'a> Checker<'a> {
                             let names: Vec<&str> = vs.iter().map(|v| v.name).collect();
                             let hint = closest(name, names.into_iter())
                                 .map(|c| format!("did you mean {ty}.{c}?"));
-                            self.err("R4", *pos, format!("`{ty}` has no variant `{name}`"), hint);
+                            self.err(
+                                "R4.no_variant",
+                                *pos,
+                                format!("`{ty}` has no variant `{name}`"),
+                                hint,
+                            );
                             return None;
                         }
                     },
@@ -1729,12 +1788,12 @@ impl<'a> Checker<'a> {
                 if let Some(bs) = binds {
                     if values > 1 {
                         let msg = "a case with several values cannot bind values";
-                        self.err("R10", *pos, msg, None);
+                        self.err("R10.case_multi_bind", *pos, msg, None);
                         return Some((key, *pos));
                     }
                     if bs.iter().all(|b| b.is_none()) {
                         let msg = "nothing is bound";
-                        self.err("R10", *pos, msg, Some(format!("case {key}:")));
+                        self.err("R10.nothing_bound", *pos, msg, Some(format!("case {key}:")));
                         return Some((key, *pos));
                     }
                     let fits = bs.len() == vfields.len()
@@ -1751,7 +1810,7 @@ impl<'a> Checker<'a> {
                             .map(|(t, n)| format!("{} {n}", self.tn(*t)))
                             .collect();
                         let msg = format!("`{key}` has the values {}", list.join(", "));
-                        self.err("R8", *pos, msg, None);
+                        self.err("R8.variant_values", *pos, msg, None);
                         // the names still exist, so their uses add no second message
                         for p in bs.iter().flatten() {
                             self.declare(&p.name, p.pos, Ty::Err, false, Val::Runtime, None);
@@ -1806,7 +1865,7 @@ impl<'a> Checker<'a> {
                 "`{kind}` needs a switch over {form}, found {}",
                 self.tn(over)
             );
-            self.err("R8", pos, msg, None);
+            self.err("R8.switch_wrong_type", pos, msg, None);
             skip(self);
             return None;
         };
@@ -1820,18 +1879,23 @@ impl<'a> Checker<'a> {
         };
         if values > 1 {
             let msg = "a case with several values cannot bind values";
-            self.err("R10", pos, msg, None);
+            self.err("R10.case_multi_bind", pos, msg, None);
             skip(self);
             return Some(key);
         }
         match held {
             None => {
-                self.err("R10", pos, "`none` has no value", Some("case none:".into()));
+                self.err(
+                    "R10.none_no_value",
+                    pos,
+                    "`none` has no value",
+                    Some("case none:".into()),
+                );
                 skip(self);
             }
             Some(Ty::Void) => {
                 let msg = format!("`ok` has no value in {}", self.tn(over));
-                self.err("R10", pos, msg, Some("case ok:".into()));
+                self.err("R10.ok_no_value", pos, msg, Some("case ok:".into()));
                 skip(self);
             }
             Some(t) => {
@@ -1849,7 +1913,7 @@ impl<'a> Checker<'a> {
                             };
                         let hint = format!("case {kind}({tn} {}):", p.name);
                         self.err(
-                            "R8",
+                            "R8.bind_type",
                             p.ty.pos,
                             format!("`{kind}` holds {art} {tn}"),
                             Some(hint),
@@ -1869,7 +1933,7 @@ impl<'a> Checker<'a> {
         if !self.fits_place(want, got) && want != Ty::Err && got != Ty::Err {
             let msg = format!("expected {}, found {}", self.tn(want), self.tn(got));
             let hint = self.conv_hint(want, got, e);
-            self.err("R8", e.pos, msg, hint);
+            self.err("R8.type_mismatch", e.pos, msg, hint);
         }
     }
 
@@ -1889,22 +1953,37 @@ impl<'a> Checker<'a> {
         let (msg, hint) = match ctx {
             "expect" => (
                 format!("condition is {tn}, not bool"),
-                cmp.map(|c| format!("compare explicitly: expect({c})")),
+                cmp.as_ref()
+                    .map(|c| format!("compare explicitly: expect({c})")),
             ),
             "assert" => (
                 format!("condition is {tn}, not bool"),
-                cmp.map(|c| format!("compare explicitly: assert({c})")),
+                cmp.as_ref()
+                    .map(|c| format!("compare explicitly: assert({c})")),
             ),
             "if" | "else if" | "while" => (
                 format!("condition is {tn}, not bool"),
-                cmp.map(|c| format!("compare explicitly: {ctx} {c}")),
+                cmp.as_ref()
+                    .map(|c| format!("compare explicitly: {ctx} {c}")),
             ),
             op => (
                 format!("operand of `{op}` is {tn}, not bool"),
-                cmp.map(|c| format!("compare explicitly: {c}")),
+                cmp.as_ref().map(|c| format!("compare explicitly: {c}")),
             ),
         };
-        self.err("R9", e.pos, msg, hint);
+        let id = if matches!(ctx, "expect" | "assert" | "if" | "else if" | "while") {
+            "R9.condition"
+        } else {
+            "R9.operand"
+        };
+        let mut d = Diag::new(id, e.pos, msg);
+        d.hint = hint;
+        if id == "R9.condition" {
+            if let Some(c) = cmp {
+                d = d.fix(e.pos.offset, e.end, c);
+            }
+        }
+        self.diags.push(d);
         Val::Runtime
     }
 
@@ -1917,7 +1996,12 @@ impl<'a> Checker<'a> {
 
     fn out_of_range(&mut self, pos: Pos) {
         let hint = "the value does not fit in int".to_string();
-        self.err("R8", pos, "integer constant out of range", Some(hint));
+        self.err(
+            "R8.int_range",
+            pos,
+            "integer constant out of range",
+            Some(hint),
+        );
     }
 
     fn expr(&mut self, e: &'a Expr) -> (Ty, Val) {
@@ -1954,7 +2038,7 @@ impl<'a> Checker<'a> {
                             if t == Ty::Void {
                                 let msg =
                                     format!("`{}` has no value to put into text", self.text(x));
-                                self.err("R28", x.pos, msg, None);
+                                self.err("R28.no_text_value", x.pos, msg, None);
                             }
                         }
                         StrSeg::Fmt(x, f) => {
@@ -1969,7 +2053,7 @@ impl<'a> Checker<'a> {
                                 let msg =
                                     format!("the format {spec} needs f64, found {}", self.tn(t));
                                 let hint = format!("f64({})", self.text(x));
-                                self.err("R8", x.pos, msg, Some(hint));
+                                self.err("R8.format_type", x.pos, msg, Some(hint));
                             }
                         }
                     }
@@ -1980,7 +2064,12 @@ impl<'a> Checker<'a> {
             ExprKind::SelfRef => match self.cur.and_then(|id| self.fns[id].recv) {
                 Some(t) => (Ty::Named(t), Val::Runtime),
                 None => {
-                    self.err("R7", e.pos, "`self` exists only in methods", None);
+                    self.err(
+                        "R7.self_outside_method",
+                        e.pos,
+                        "`self` exists only in methods",
+                        None,
+                    );
                     (Ty::Err, Val::Runtime)
                 }
             },
@@ -1993,19 +2082,19 @@ impl<'a> Checker<'a> {
             ExprKind::IfExpr(branches, last) => self.if_expr(e, branches, last),
             ExprKind::Mut(x) => {
                 let msg = "only arguments of a call are passed with mut";
-                self.err("R6", e.pos, msg, None);
+                self.err("R6.mut_not_arg", e.pos, msg, None);
                 self.expr(x)
             }
             ExprKind::NoneVal => {
                 self.uses_2b = true;
                 let msg = "`none` needs a place of type ?T";
-                self.err("R12", e.pos, msg, None);
+                self.err("R12.none_place", e.pos, msg, None);
                 (Ty::Err, Val::Runtime)
             }
             ExprKind::ErrVal(_) => {
                 self.uses_2b = true;
                 let msg = "`err(…)` needs a place of type T!E";
-                self.err("R12", e.pos, msg, None);
+                self.err("R12.err_place", e.pos, msg, None);
                 (Ty::Err, Val::Runtime)
             }
             ExprKind::SomeVal(x) => self.some_val(e, x, None, None),
@@ -2015,7 +2104,12 @@ impl<'a> Checker<'a> {
                     Some(x) => format!("return the value directly: return {}", self.text(x)),
                     None => "end the function, or write return".to_string(),
                 };
-                self.err("R12", e.pos, "`ok` is only a pattern in switch", Some(hint));
+                self.err(
+                    "R12.ok_pattern",
+                    e.pos,
+                    "`ok` is only a pattern in switch",
+                    Some(hint),
+                );
                 (Ty::Err, Val::Runtime)
             }
             ExprKind::Try(x, or) => self.try_expr(e, x, or.as_ref()),
@@ -2049,7 +2143,7 @@ impl<'a> Checker<'a> {
                 (_, t) if t.is_float() => Some("use ints for bit operations".to_string()),
                 _ => None,
             };
-            self.err("R8", pos, msg, hint);
+            self.err("R8.unary_type", pos, msg, hint);
             return (Ty::Err, Val::Runtime);
         }
         match (op, v) {
@@ -2180,7 +2274,7 @@ impl<'a> Checker<'a> {
             } else {
                 None
             };
-            self.err("R8", opos, msg, hint);
+            self.err("R8.binary_types", opos, msg, hint);
             return (Ty::Err, Val::Runtime);
         };
         match (lv, rv) {
@@ -2251,7 +2345,7 @@ impl<'a> Checker<'a> {
             "-" => a.checked_sub(b),
             "*" => a.checked_mul(b),
             "/" | "%" if b == 0 => {
-                self.err("R14", opos, "division by zero", None);
+                self.err("R14.div_zero", opos, "division by zero", None);
                 return None;
             }
             "/" => Some(a / b),
@@ -2264,7 +2358,7 @@ impl<'a> Checker<'a> {
             "^" => Some(a ^ b),
             "<<" | ">>" if !(0..bits as i128).contains(&b) => {
                 let msg = format!("shift by {b} out of range 0..{}", bits - 1);
-                self.err("R14", opos, msg, None);
+                self.err("R14.shift_range", opos, msg, None);
                 return None;
             }
             "<<" => Some(wrap(a << b)),
@@ -2300,7 +2394,7 @@ impl<'a> Checker<'a> {
                         let hint =
                             closest(name, names.into_iter()).map(|c| format!("did you mean {c}?"));
                         self.err(
-                            "R4",
+                            "R4.no_field",
                             e.pos,
                             format!("`{tname}` has no field `{name}`"),
                             hint,
@@ -2310,13 +2404,13 @@ impl<'a> Checker<'a> {
                 },
                 Kind::Enum(_) => {
                     let msg = "the values of an enum are read with switch";
-                    self.err("R8", e.pos, msg, None);
+                    self.err("R8.enum_values_switch", e.pos, msg, None);
                     (Ty::Err, Val::Runtime)
                 }
             },
             t => {
                 let msg = format!("{} has no field `{name}`", self.tn(t));
-                self.err("R8", e.pos, msg, None);
+                self.err("R8.no_field_type", e.pos, msg, None);
                 (Ty::Err, Val::Runtime)
             }
         }
@@ -2339,7 +2433,7 @@ impl<'a> Checker<'a> {
             let hint =
                 closest(name, names.into_iter()).map(|c| format!("did you mean {tname}.{c}?"));
             self.err(
-                "R4",
+                "R4.no_variant",
                 e.pos,
                 format!("`{tname}` has no variant `{name}`"),
                 hint,
@@ -2355,13 +2449,13 @@ impl<'a> Checker<'a> {
         match args {
             None if !fields.is_empty() => {
                 let msg = format!("`{full}` needs its values: {full}({})", list.join(", "));
-                self.err("R8", e.pos, msg, None);
+                self.err("R8.variant_needs_values", e.pos, msg, None);
                 (Ty::Err, Val::Runtime)
             }
             None => (Ty::Named(eid), Val::Known),
             Some(_) if fields.is_empty() => {
                 let msg = format!("`{full}` has no values; write {full}");
-                self.err("R8", e.pos, msg, None);
+                self.err("R8.variant_no_values", e.pos, msg, None);
                 (Ty::Err, Val::Runtime)
             }
             Some(args) if args.len() != fields.len() => {
@@ -2370,7 +2464,7 @@ impl<'a> Checker<'a> {
                     fields.len(),
                     args.len()
                 );
-                self.err("R8", e.pos, msg, None);
+                self.err("R8.variant_arity", e.pos, msg, None);
                 (Ty::Err, Val::Runtime)
             }
             Some(args) => {
@@ -2391,7 +2485,12 @@ impl<'a> Checker<'a> {
         let Some(&id) = self.type_ids.get(name) else {
             let hint =
                 closest(name, self.type_ids.keys().copied()).map(|c| format!("did you mean {c}?"));
-            self.err("R4", e.pos, format!("unknown type `{name}`"), hint);
+            self.err(
+                "R4.unknown_type",
+                e.pos,
+                format!("unknown type `{name}`"),
+                hint,
+            );
             return (Ty::Err, Val::Runtime);
         };
         let fields: Vec<(&'a str, Ty, bool)> = match &self.types[id as usize].kind {
@@ -2401,7 +2500,7 @@ impl<'a> Checker<'a> {
                 .collect(),
             Kind::Enum(_) => {
                 let msg = format!("`{name}` is an enum; write {name}.Variant");
-                self.err("R8", e.pos, msg, None);
+                self.err("R8.enum_as_struct", e.pos, msg, None);
                 return (Ty::Err, Val::Runtime);
             }
         };
@@ -2414,7 +2513,7 @@ impl<'a> Checker<'a> {
                 let hint =
                     closest(&i.name, names.into_iter()).map(|c| format!("did you mean {c}?"));
                 self.err(
-                    "R4",
+                    "R4.no_field",
                     i.pos,
                     format!("`{name}` has no field `{}`", i.name),
                     hint,
@@ -2424,7 +2523,7 @@ impl<'a> Checker<'a> {
             };
             if let Some((_, p)) = given.iter().find(|(n, _)| *n == i.name) {
                 let msg = format!("`{}` is given twice, first at {}", i.name, self.at(*p));
-                self.err("R4", i.pos, msg, None);
+                self.err("R4.field_twice", i.pos, msg, None);
                 ok = false;
                 continue;
             }
@@ -2450,7 +2549,7 @@ impl<'a> Checker<'a> {
             );
             let hint = format!("{name}{{{}}}", parts.join(", "));
             let msg = format!("`{name}` needs a value for {}", list.join(", "));
-            self.err("R5", e.pos, msg, Some(hint));
+            self.err("R5.missing_fields", e.pos, msg, Some(hint));
         }
         if fields
             .iter()
@@ -2487,7 +2586,12 @@ impl<'a> Checker<'a> {
             let (t, _) = self.rvalue(value);
             self.scopes.pop();
             if t == Ty::Void {
-                self.err("R15", value.pos, "this branch of if gives no value", None);
+                self.err(
+                    "R15.branch_no_value",
+                    value.pos,
+                    "this branch of if gives no value",
+                    None,
+                );
                 return (Ty::Err, Val::Runtime);
             }
             match ty {
@@ -2499,14 +2603,19 @@ impl<'a> Checker<'a> {
                         self.tn(first),
                         self.tn(t)
                     );
-                    self.err("R8", e.pos, msg, None);
+                    self.err("R8.branch_types", e.pos, msg, None);
                     return (Ty::Err, Val::Runtime);
                 }
                 _ => {}
             }
         }
         if ty.is_none() {
-            self.err("R15", e.pos, "no branch of this if gives a value", None);
+            self.err(
+                "R15.no_branch_value",
+                e.pos,
+                "no branch of this if gives a value",
+                None,
+            );
         }
         (ty.unwrap_or(Ty::Err), Val::Runtime)
     }
@@ -2527,7 +2636,7 @@ impl<'a> Checker<'a> {
             ExprKind::Ident(name) => self.fn_call(e, f, name, args, place),
             _ => {
                 let msg = format!("`{}` cannot be called", self.text(f));
-                self.err("R8", f.pos, msg, None);
+                self.err("R8.not_callable", f.pos, msg, None);
                 (Ty::Err, Val::Runtime)
             }
         }
@@ -2543,21 +2652,21 @@ impl<'a> Checker<'a> {
     ) -> (Ty, Val) {
         if let Some(l) = self.local(name) {
             let msg = format!("`{name}` is {}, not a function", self.tn(l.ty));
-            self.err("R8", f.pos, msg, None);
+            self.err("R8.local_not_fn", f.pos, msg, None);
             return (Ty::Err, Val::Runtime);
         }
         match name {
             "print" => {
                 if args.len() != 1 {
                     let msg = format!("`print` takes 1 argument, found {}", args.len());
-                    self.err("R8", e.pos, msg, None);
+                    self.err("R8.arg_count", e.pos, msg, None);
                     return (Ty::Void, Val::Runtime);
                 }
                 for a in args {
                     let (t, _) = self.rvalue(a);
                     if t == Ty::Void {
                         let msg = format!("`{}` has no value to print", self.text(a));
-                        self.err("R28", a.pos, msg, None);
+                        self.err("R28.no_print_value", a.pos, msg, None);
                     }
                 }
                 if let Some(id) = self.cur {
@@ -2569,19 +2678,26 @@ impl<'a> Checker<'a> {
             "range" => {
                 let hint = "for int i in range(n) { … }".to_string();
                 let msg = "`range` can only be the source of a for loop";
-                self.err("R11", e.pos, msg, Some(hint));
+                self.err("R11.range_outside_for", e.pos, msg, Some(hint));
                 return (Ty::Err, Val::Runtime);
             }
             "expect" => {
                 if !self.in_test {
                     let cond = args.first().map_or("cond", |a| self.text(a));
                     let hint = format!("use assert({cond}) in functions");
-                    self.err("R18", f.pos, "`expect` is only for tests", Some(hint));
+                    let d = Diag::new(
+                        "R18.expect_outside_test",
+                        f.pos,
+                        "`expect` is only for tests",
+                    )
+                    .hint(hint)
+                    .fix(f.pos.offset, f.end, "assert");
+                    self.diags.push(d);
                     return (Ty::Err, Val::Runtime);
                 }
                 if args.len() != 1 {
                     let msg = format!("`expect` takes 1 argument, found {}", args.len());
-                    self.err("R8", e.pos, msg, None);
+                    self.err("R8.arg_count", e.pos, msg, None);
                     return (Ty::Void, Val::Runtime);
                 }
                 for a in args {
@@ -2593,7 +2709,7 @@ impl<'a> Checker<'a> {
                 self.uses_2c = true;
                 if args.len() != 1 {
                     let msg = format!("`assert` takes 1 argument, found {}", args.len());
-                    self.err("R8", e.pos, msg, None);
+                    self.err("R8.arg_count", e.pos, msg, None);
                     return (Ty::Void, Val::Runtime);
                 }
                 self.cond(&args[0], "assert");
@@ -2610,7 +2726,7 @@ impl<'a> Checker<'a> {
                         self.rvalue(a);
                     }
                     let msg = format!("`repeat` takes 2 arguments, found {}", args.len());
-                    self.err("R8", e.pos, msg, None);
+                    self.err("R8.arg_count", e.pos, msg, None);
                     return (Ty::Err, Val::Runtime);
                 }
                 let want = match self.peeled(place) {
@@ -2634,7 +2750,7 @@ impl<'a> Checker<'a> {
         let Some(&id) = self.funcs.get(name) else {
             if self.consts.contains_key(name) {
                 let msg = format!("`{name}` is a const, not a function");
-                self.err("R8", f.pos, msg, None);
+                self.err("R8.const_not_fn", f.pos, msg, None);
             } else {
                 self.unknown_name(name, f.pos);
             }
@@ -2684,12 +2800,18 @@ impl<'a> Checker<'a> {
             t if t.is_number() => return self.builtin_method(e, base, bt, m, args),
             _ => {
                 if bt != Ty::Err {
-                    let msg = if bt == Ty::Void {
-                        format!("`{m}` needs a value, but the call before it returns nothing")
+                    let (id, msg) = if bt == Ty::Void {
+                        (
+                            "R8.chain_void",
+                            format!("`{m}` needs a value, but the call before it returns nothing"),
+                        )
                     } else {
-                        format!("{} has no method `{m}`", self.tn(bt))
+                        (
+                            "R8.no_method",
+                            format!("{} has no method `{m}`", self.tn(bt)),
+                        )
                     };
-                    self.err("R8", e.pos, msg, None);
+                    self.err(id, e.pos, msg, None);
                 }
                 return (Ty::Err, Val::Runtime);
             }
@@ -2699,7 +2821,7 @@ impl<'a> Checker<'a> {
             let names: Vec<&str> = t.methods.keys().copied().collect();
             let hint = closest(m, names.into_iter()).map(|c| format!("did you mean {c}?"));
             let msg = format!("`{}` has no method `{m}`", t.name);
-            self.err("R4", e.pos, msg, hint);
+            self.err("R4.no_method", e.pos, msg, hint);
             return (Ty::Err, Val::Runtime);
         };
         let mut changeable = Vec::new();
@@ -2724,12 +2846,12 @@ impl<'a> Checker<'a> {
                 Some((root, true)) if is_place(base) => {
                     let msg = format!("cannot change const `{root}`");
                     let hint = format!("`{}` changes self", self.fn_name(id));
-                    self.err("R4", base.pos, msg, Some(hint));
+                    self.err("R4.change_const", base.pos, msg, Some(hint));
                 }
                 _ => {
                     let msg = format!("`{}` changes self and needs a variable", self.fn_name(id));
                     let hint = "store the value in a variable first".to_string();
-                    self.err("R7", e.pos, msg, Some(hint));
+                    self.err("R7.changes_self_needs_var", e.pos, msg, Some(hint));
                 }
             }
         }
@@ -2754,7 +2876,7 @@ impl<'a> Checker<'a> {
         };
         if effect {
             let msg = "a field default uses only constants and functions without effect";
-            self.err("R5", e.pos, msg, None);
+            self.err("R5.default_effect", e.pos, msg, None);
         }
     }
 
@@ -2772,7 +2894,7 @@ impl<'a> Checker<'a> {
         if args.len() != n {
             let s = if n == 1 { "" } else { "s" };
             let msg = format!("`{name}` takes {n} argument{s}, found {}", args.len());
-            self.err("R8", e.pos, msg, None);
+            self.err("R8.arg_count", e.pos, msg, None);
             return false;
         }
         if let Some(cur) = self.cur {
@@ -2792,18 +2914,23 @@ impl<'a> Checker<'a> {
                         self.text(inner),
                         self.span(a.end, e.end)
                     );
-                    self.err("R6", a.pos, msg, Some(hint));
+                    let d = Diag::new("R6.mut_extra", a.pos, msg).hint(hint).fix(
+                        a.pos.offset,
+                        inner.pos.offset,
+                        "",
+                    );
+                    self.diags.push(d);
                     self.at_place(pt, inner, None);
                 }
                 (ExprKind::Mut(inner), true) => {
                     if !is_place(inner) {
                         let msg = "only a variable, field or element can be passed as mut";
-                        self.err("R6", a.pos, msg, None);
+                        self.err("R6.mut_not_place", a.pos, msg, None);
                         continue;
                     }
                     if let Some((root, true)) = self.root_of(inner) {
                         let msg = format!("cannot pass const `{root}` as mut");
-                        self.err("R4", inner.pos, msg, None);
+                        self.err("R4.pass_const_mut", inner.pos, msg, None);
                         continue;
                     }
                     let (t, _) = self.expr(inner);
@@ -2833,7 +2960,7 @@ impl<'a> Checker<'a> {
                             }
                             _ => "pass it changeable only once".to_string(),
                         };
-                        self.err("R6", a.pos, msg, Some(hint));
+                        self.err("R6.mut_twice", a.pos, msg, Some(hint));
                     } else {
                         changeable.push(inner);
                     }
@@ -2845,7 +2972,12 @@ impl<'a> Checker<'a> {
                         self.span(e.pos.offset, a.pos.offset),
                         self.span(a.pos.offset, e.end)
                     );
-                    self.err("R6", a.pos, msg, Some(hint));
+                    let d = Diag::new("R6.mut_missing", a.pos, msg).hint(hint).fix(
+                        a.pos.offset,
+                        a.pos.offset,
+                        "mut ",
+                    );
+                    self.diags.push(d);
                     self.at_place(pt, a, None);
                 }
                 (_, false) => {
@@ -2954,7 +3086,7 @@ impl<'a> Checker<'a> {
     fn wrong_place(&mut self, want: Ty, found: &str, e: &Expr, hint: Option<String>) {
         if want != Ty::Err {
             let msg = format!("expected {}, found {found}", self.tn(want));
-            self.err("R8", e.pos, msg, hint);
+            self.err("R8.type_mismatch", e.pos, msg, hint);
         }
     }
 
@@ -2987,7 +3119,7 @@ impl<'a> Checker<'a> {
         if matches!(xt, Ty::Opt(_)) {
             let msg = format!("`some` needs a plain value, found {}", self.tn(xt));
             let hint = format!("use {} directly", self.text(x));
-            self.err("R12", e.pos, msg, Some(hint));
+            self.err("R12.some_plain", e.pos, msg, Some(hint));
             return (Ty::Err, Val::Runtime);
         }
         let known = if xv == Val::Runtime { xv } else { Val::Known };
@@ -3013,7 +3145,7 @@ impl<'a> Checker<'a> {
             _ => {
                 let msg = format!("`??` needs a ?T or T!E on the left, found {}", self.tn(lt));
                 let hint = "remove the ?? and its default".to_string();
-                self.err("R12", opos, msg, Some(hint));
+                self.err("R12.coalesce_left", opos, msg, Some(hint));
                 self.rvalue(r);
                 return (Ty::Err, Val::Runtime);
             }
@@ -3067,7 +3199,12 @@ impl<'a> Checker<'a> {
             match cause {
                 None => {
                     let msg = format!("`try` on {} has no error to bind", self.tn(xt));
-                    self.err("R12", p.ty.pos, msg, Some("remove err(…):".into()));
+                    self.err(
+                        "R12.try_no_error_bind",
+                        p.ty.pos,
+                        msg,
+                        Some("remove err(…):".into()),
+                    );
                 }
                 Some(c) if bt == c || bt == Ty::Err || c == Ty::Err => have = c,
                 Some(c) => {
@@ -3080,7 +3217,7 @@ impl<'a> Checker<'a> {
                     };
                     let hint = format!("or err({tn} {}): …", p.name);
                     let msg = format!("`err` holds {art} {tn}");
-                    self.err("R8", p.ty.pos, msg, Some(hint));
+                    self.err("R8.bind_type", p.ty.pos, msg, Some(hint));
                 }
             }
             self.scopes.push(Vec::new());
@@ -3100,20 +3237,26 @@ impl<'a> Checker<'a> {
                     .filter(|v| !v.fields.is_empty())
                 {
                     let full = format!("{}.{name}", self.types[eid as usize].name);
-                    let msg = match v.fields[..] {
+                    let (id, msg) = match v.fields[..] {
                         [(t, _)] if t == c => return,
-                        [(t, _)] => format!(
-                            "`{full}` holds {}, but the cause is {}",
-                            self.tn(t),
-                            self.tn(c)
+                        [(t, _)] => (
+                            "R8.alt_holds",
+                            format!(
+                                "`{full}` holds {}, but the cause is {}",
+                                self.tn(t),
+                                self.tn(c)
+                            ),
                         ),
-                        _ => format!(
-                            "`{full}` has {} values, but the cause is one",
-                            v.fields.len()
+                        _ => (
+                            "R8.alt_values",
+                            format!(
+                                "`{full}` has {} values, but the cause is one",
+                                v.fields.len()
+                            ),
                         ),
                     };
                     let hint = format!("write it out: or err({} e): {full}(…)", self.tn(c));
-                    self.err("R8", o.alt.pos, msg, Some(hint));
+                    self.err(id, o.alt.pos, msg, Some(hint));
                     return;
                 }
             }
@@ -3144,7 +3287,7 @@ impl<'a> Checker<'a> {
                     "`try` needs a result of type T!E or ?T, found {}",
                     self.tn(xt)
                 );
-                self.err("R12", e.pos, msg, Some("remove try".into()));
+                self.err("R12.try_operand", e.pos, msg, Some("remove try".into()));
             }
             return (Ty::Err, Val::Runtime);
         };
@@ -3156,7 +3299,7 @@ impl<'a> Checker<'a> {
                 Some(r) => Some(r),
                 None => {
                     let msg = "`try` needs a function that returns T!E or ?T";
-                    self.err("R12", e.pos, msg, None);
+                    self.err("R12.try_needs_result_fn", e.pos, msg, None);
                     return (Ty::Err, Val::Runtime);
                 }
             }
@@ -3165,7 +3308,12 @@ impl<'a> Checker<'a> {
             // in a test any failure ends the test; there is no error type to translate to
             if let Some(o) = or {
                 let msg = "`or` needs a function that returns U!F";
-                self.err("R12", o.pos, msg, Some("remove the or part".into()));
+                self.err(
+                    "R12.or_needs_result_fn",
+                    o.pos,
+                    msg,
+                    Some("remove the or part".into()),
+                );
                 return (Ty::Err, Val::Runtime);
             }
             return (value, Val::Runtime);
@@ -3196,7 +3344,7 @@ impl<'a> Checker<'a> {
                             }
                             _ => format!("translate it with try … or <a {}>", self.tn(f)),
                         };
-                        self.err("R12", e.pos, msg, Some(hint));
+                        self.err("R12.try_error_mismatch", e.pos, msg, Some(hint));
                         return (Ty::Err, Val::Runtime);
                     }
                 }
@@ -3208,7 +3356,7 @@ impl<'a> Checker<'a> {
                         "remove the or part, or return {}!F",
                         self.tn(self.opts[i as usize])
                     );
-                    self.err("R12", o.pos, msg, Some(hint));
+                    self.err("R12.or_needs_result_fn", o.pos, msg, Some(hint));
                     return (Ty::Err, Val::Runtime);
                 }
                 if matches!(xt, Ty::Res(_)) {
@@ -3217,7 +3365,7 @@ impl<'a> Checker<'a> {
                         self.tn(ret)
                     );
                     let hint = "handle the error with ?? or switch".to_string();
-                    self.err("R12", e.pos, msg, Some(hint));
+                    self.err("R12.try_error_mismatch", e.pos, msg, Some(hint));
                     return (Ty::Err, Val::Runtime);
                 }
             }
@@ -3232,7 +3380,7 @@ impl<'a> Checker<'a> {
                 } else {
                     format!("change the return type to {want}, or use ?? or switch")
                 };
-                self.err("R12", e.pos, msg, Some(hint));
+                self.err("R12.try_needs_result_fn", e.pos, msg, Some(hint));
                 return (Ty::Err, Val::Runtime);
             }
         }
@@ -3246,7 +3394,7 @@ impl<'a> Checker<'a> {
             Some(&(_, first)) => {
                 let msg = format!("test \"{}\" is declared twice", t.name);
                 let hint = format!("first declared at {}", self.at(first));
-                self.err("R18", t.name_pos, msg, Some(hint));
+                self.err("R18.test_twice", t.name_pos, msg, Some(hint));
             }
             None => self.tests.push((&t.name, t.name_pos)),
         }
@@ -3266,7 +3414,7 @@ impl<'a> Checker<'a> {
                         .get(&pos.offset)
                         .cloned()
                         .unwrap_or_else(|| "use the value, or remove the change".to_string());
-                    self.err("R6", pos, msg, Some(hint));
+                    self.err("R6.dead_change", pos, msg, Some(hint));
                 }
             }
         }

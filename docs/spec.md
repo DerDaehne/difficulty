@@ -68,6 +68,22 @@ panic: <message> (<file>:<line>:<column>)
 
 auf stderr und Exit-Code 2. Ein Fehler, der aus `void!E main()` herauskommt, endet mit Exit-Code 1 (Format in R12).
 
+
+### 0.3a Diagnosen als JSON und Meldungs-IDs
+
+`dif check --json` schreibt je Diagnose ein JSON-Objekt in einer Zeile auf stdout. Das Format ist stabil (`"v":1`); neue Felder kommen nur hinzu. Die Felder:
+
+- `"code"`: der Regelcode (`R15`, `L3`, `S1`, …), wie im Text.
+- `"id"`: die **stabile Kennung der Meldungsart**, `<Code>.<name>` mit kleinen Buchstaben, Ziffern und `_` im Namen (`R15.if_needs_else`, `R6.mut_missing`, `L3.semicolon`). Eine ID bezeichnet genau eine Meldung (der Text ohne die eingesetzten Namen und Werte); sie ändert sich nicht, auch wenn der Wortlaut sich ändert. Werkzeuge schalten nach `id`, nicht nach dem Text; die Liste aller IDs steht in §0.5.
+- `"severity"`, `"file"`, `"line"`, `"col"`, `"offset"` (Byte-Offset ab 0), `"message"` und, wo es einen gibt, `"hint"`.
+- `"fix"` (nur wenn vorhanden): `{"offset": …, "end": …, "text": …}`. Er ersetzt die Bytes `[offset, end)` des Quelltexts durch `text`. Ein `fix` gibt es nur, wenn der Hinweis ein eindeutiger, reiner Ersatz ist (ohne `…`, ohne Wahl zwischen mehreren Möglichkeiten); sonst fehlt das Feld. Mehrere `fix` einer Datei verschiebt man von hinten nach vorn an; nach dem Anwenden prüft man die Datei neu, denn zuvor verdeckte Meldungen können erscheinen.
+
+Die Textausgabe ändert sich dadurch nicht. Beispiel (`var x = 5` in Zeile 2 von `main.dif`):
+
+```
+{"v":1,"code":"R2","id":"R2.decl_needs_type","severity":"error","file":"main.dif","line":2,"col":5,"offset":18,"message":"declarations name their type","hint":"int x = 5","fix":{"offset":18,"end":26,"text":"int x = "}}
+```
+
 ### 0.4 Exit-Codes von `dif`
 
 | Code | `dif check` | `dif run`, `dif build`, `dif test` |
@@ -78,6 +94,226 @@ auf stderr und Exit-Code 2. Ein Fehler, der aus `void!E main()` herauskommt, end
 | 3 | – | **interner Fehler:** der C-Compiler lehnt das C ab, das `dif` erzeugt hat. Das ist ein Fehler von `dif`, nicht des Programms: stderr nennt die Meldung des C-Compilers, es entsteht kein Programm und kein Test läuft |
 
 `dif run` gibt den Exit-Code des Programms weiter, auch den von `os.exit(n)` (§4.6); wer den Code 3 des Compilers von einem Code 3 des Programms trennen will, nimmt `dif build` und startet das Programm selbst. Das erzeugte C braucht die Mathematikbibliothek (`round`, `floor`, `sqrt`, `fmod`); `dif` übergibt dem C-Compiler `-lm`.
+
+### 0.5 Meldungs-IDs
+
+Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit dem Meldungstext (`…` steht für eingesetzte Namen, Typen und Werte). In der Spalte „Fix“ steht „ja“, wenn `--json` für diese Meldung einen `fix` liefert. Ein Test hält die Tabelle und den Compiler in Einklang: jede ID des Compilers steht hier und umgekehrt.
+
+| ID | Fix | Meldung |
+|---|---|---|
+| `L1.invalid_utf8` |  | invalid UTF-8 in source file |
+| `L1.invisible` | ja | invisible character U+… is only allowed in strings and comments |
+| `L1.non_ascii` |  | `…` is only allowed in strings and comments |
+| `L1.unexpected_char` |  | unexpected character `…` |
+| `L2.block_comment` |  | block comments `/* … */` do not exist |
+| `L3.semicolon` | ja | `;` is not used in difficulty |
+| `L4.int_too_big` |  | integer literal is larger than 2^64 - 1 |
+| `L5.string_unclosed` |  | string is not closed on this line |
+| `L6.bad_unicode_escape` |  | invalid unicode escape |
+| `L6.brace_unclosed` |  | `{` in a string is not closed |
+| `L6.not_unicode` |  | not a Unicode character |
+| `L6.single_rbrace` | ja | single `}` in a string |
+| `L6.unknown_escape` |  | unknown escape sequence |
+| `L7.incdec` | ja | `++` / `--` does not exist |
+| `L8.bad_digit` |  | `…` is not a hex digit (binary digit) |
+| `L8.exponent_digits` |  | exponent without digits |
+| `L8.exponent_underscore` |  | `_` is not allowed in an exponent |
+| `L8.leading_zero` |  | integer literal with a leading zero |
+| `L8.method_on_literal` |  | a method on a number literal needs parentheses |
+| `L8.number_tail` |  | a number cannot be directly followed by `…` |
+| `L8.prefix_case` | ja | write the prefix as `0x`, directly followed by a digit |
+| `L8.prefix_no_digits` |  | `0x` without digits |
+| `L9.rune_empty` |  | a rune literal holds exactly one character |
+| `L9.rune_many` |  | a rune literal holds exactly one character |
+| `L9.rune_unclosed` |  | rune literal is not closed |
+| `S1.assign_in_cond` | ja | `=` assigns; compare with `==` |
+| `S1.assign_target` |  | cannot assign to `…` |
+| `S1.block_unclosed` |  | this block is never closed |
+| `S1.case_string_interp` |  | a case value is a plain string |
+| `S1.else_without_if` |  | `else` without `if` |
+| `S1.empty_interp` |  | empty interpolation `{}` |
+| `S1.empty_params` |  | an empty parameter list is written `()` |
+| `S1.expected_case` |  | expected `case` or `default`, found … |
+| `S1.expected_case_value` |  | expected a case value, found … |
+| `S1.expected_error_type` |  | expected the error type after `!`, found … |
+| `S1.expected_expr` |  | expected an expression, found … |
+| `S1.expected_in` |  | expected `in`, found … |
+| `S1.expected_name` |  | expected a name, found … |
+| `S1.expected_op` |  | expected `…`, found … |
+| `S1.expected_panic_text` |  | expected the panic text, found … |
+| `S1.expected_type` |  | expected a type, found … |
+| `S1.expected_use` |  | expected `std.name` after `use`, found … |
+| `S1.f32_unavailable` |  | `f32` is not available in v0 |
+| `S1.fn_needs_params` |  | function `…` needs a parameter list |
+| `S1.interp_extra` |  | an interpolation holds one expression; found … after it |
+| `S1.interp_forbidden` |  | `…` inside an interpolation |
+| `S1.needs_value` |  | `…` needs a value: …(x) |
+| `S1.precision` |  | precision at most 20 |
+| `S1.rbrace_missing` |  | expected `}` to close `{`, found … |
+| `S1.reserved_name` |  | `…` is a reserved word and cannot be a name |
+| `S1.stray_rbrace` |  | unexpected `}` |
+| `S1.struct_lit_header` | ja | a struct literal in a header needs parentheses |
+| `S1.struct_lit_unclosed` |  | expected `}` to close `…{`, found … |
+| `S1.too_deep` |  | nesting is deeper than … levels |
+| `S1.too_many_ops` |  | an expression has more than … operators |
+| `S1.type_nested` |  | this type is nested too far |
+| `S1.unclosed_bracket` |  | `(` (`[`) is never closed |
+| `S1.unexpected_token` |  | unexpected … |
+| `S1.unknown_format` |  | unknown format `…` |
+| `S2.chained_cmp` |  | comparisons cannot be chained |
+| `S3.mixed_and_or` |  | `&&` and `\|\|` are mixed without parentheses |
+| `S4.no_effect` |  | `…` does nothing as a statement |
+| `R1.main_params` |  | `main` takes no parameters |
+| `R1.main_signature` |  | `main` must return void or void!E |
+| `R1.no_main` |  | no `main` function |
+| `R1.stmt_outside_fn` |  | statement outside a function |
+| `R2.decl_needs_type` | ja | declarations name their type |
+| `R2.foreign_fn_keyword` |  | functions start with their return type, not `…` |
+| `R2.loop_var_type` |  | loop variables name their type |
+| `R2.needs_value` |  | `…` needs a value |
+| `R2.not_declared` |  | `…` is not declared |
+| `R2.return_first` |  | the return type comes first |
+| `R2.type_first` |  | the type comes before the name |
+| `R3.body_expected_brace` |  | expected `{` to start the body of `…`, found … |
+| `R3.body_next_line` | ja | the body of `…` must start on the same line |
+| `R3.branch_expected_brace` |  | expected `{` to start a branch, found … |
+| `R3.case_next_line` |  | the statements of a case start on the next line |
+| `R3.elif` | ja | `elif` does not exist |
+| `R3.else_next_line` | ja | `else` must be on the same line as `}` |
+| `R3.fields_one_per_line` |  | fields of a struct stand one per line |
+| `R3.switch_expected_brace` |  | expected `{` to start the body of `switch`, found … |
+| `R3.two_statements` |  | two statements on one line |
+| `R4.already_declared` |  | `…` is already declared at … |
+| `R4.assign_const` |  | cannot assign to const `…` |
+| `R4.change_const` |  | cannot change const `…` |
+| `R4.const_chain` |  | `…` depends on more than … consts in a row |
+| `R4.const_runtime` |  | a global const needs a value known at compile time |
+| `R4.depends_on_itself` |  | `…` depends on itself |
+| `R4.field_twice` |  | `…` is given twice, first at … |
+| `R4.no_field` |  | `…` has no field `…` |
+| `R4.no_function` |  | `…` has no function `…` |
+| `R4.no_method` |  | `…` has no method `…` |
+| `R4.not_enum` |  | `…` is not an enum of this module |
+| `R4.no_variant` |  | `…` has no variant `…` |
+| `R4.pass_const_mut` |  | cannot pass const `…` as mut |
+| `R4.predefined_name` |  | `…` is a predefined name |
+| `R4.unknown_name` |  | unknown name `…` |
+| `R4.unknown_type` |  | unknown type `…` |
+| `R4.var_outside_fn` |  | variable `…` outside a function |
+| `R5.array_length` |  | the length of an array is a constant of at least 1 |
+| `R5.contains_itself` |  | `…` contains itself |
+| `R5.default_effect` |  | a field default uses only constants and functions without effect |
+| `R5.missing_fields` |  | `…` needs a value for … |
+| `R6.dead_change` |  | `…` is changed but never read afterwards |
+| `R6.lost_copy` |  | the change to `…` is lost: `…` is a copy |
+| `R6.mut_extra` | ja | `…` takes `…` without mut |
+| `R6.mut_missing` | ja | `…` takes `…` as mut |
+| `R6.mut_not_arg` |  | only arguments of a call are passed with mut |
+| `R6.mut_not_place` |  | only a variable, field or element can be passed as mut |
+| `R6.mut_twice` |  | `…` goes into this call changeable twice |
+| `R6.mut_unneeded` | ja | `…` is never changed; remove mut |
+| `R7.changes_self_needs_var` |  | `…` changes self and needs a variable |
+| `R7.method_receiver` |  | `…` is not a struct or enum of this module |
+| `R7.self_outside_method` |  | `self` exists only in methods |
+| `R8.arg_count` |  | `…` takes … argument(s), found … |
+| `R8.array_length_mismatch` |  | … needs … elements, found … |
+| `R8.assign_fn` |  | cannot assign to function `…` |
+| `R8.binary_types` |  | cannot apply `…` to … and … |
+| `R8.bind_type` |  | `…` holds … … |
+| `R8.branch_types` |  | the branches of if give … and … |
+| `R8.case_range` |  | case … does not fit in … |
+| `R8.case_type` |  | case … is …, the switch is over … |
+| `R8.chain_void` |  | `…` needs a value, but the call before it returns nothing |
+| `R8.const_not_fn` |  | `…` is a const, not a function |
+| `R8.discard_void` |  | `…` has no result to discard |
+| `R8.empty_list_place` |  | `[]` needs a place of type []T |
+| `R8.empty_map_place` |  | `{}` needs a place of type map[K]V |
+| `R8.enum_as_struct` |  | `…` is an enum; write …Variant |
+| `R8.enum_values_switch` |  | the values of an enum are read with switch |
+| `R8.fn_as_value` |  | `…` is a function; call it: …(…) |
+| `R8.format_type` |  | the format … needs f64, found … |
+| `R8.index_str` |  | cannot index str |
+| `R8.index_type` |  | cannot index … |
+| `R8.int_range` |  | integer constant out of range |
+| `R8.local_not_fn` |  | `…` is …, not a function |
+| `R8.missing_return` |  | `…` does not return a value on every path |
+| `R8.module_as_value` |  | `…` is a module, not a value |
+| `R8.no_field_type` |  | … has no field `…` |
+| `R8.no_method` |  | … has no method `…` |
+| `R8.not_callable` |  | `…` cannot be called |
+| `R8.range_arity` |  | `range` takes 1 or 2 arguments, found … |
+| `R8.range_value_type` |  | the values of `range` are int, not … |
+| `R8.range_vars` |  | `range` gives one value per step; use one loop variable |
+| `R8.return_needs_value` |  | `…` returns …; give `return` a value |
+| `R8.return_void_value` |  | `…` returns nothing; remove the value |
+| `R8.switch_wrong_type` |  | `…` needs a switch over … found … |
+| `R8.test_return_value` |  | a test returns nothing; remove the value |
+| `R8.type_as_value` |  | `…` is a type, not a value |
+| `R8.type_mismatch` |  | expected …, found … |
+| `R8.unary_type` |  | cannot apply `…` to … |
+| `R8.variant_arity` |  | `…` takes … values, found … |
+| `R8.variant_needs_values` |  | `…` needs its values: …(…) |
+| `R8.variant_no_values` |  | `…` has no values; write … |
+| `R8.variant_values` |  | `…` has the values … |
+| `R8.void_not_type` |  | `void` is only a return type |
+| `R9.condition` | ja | condition is …, not bool |
+| `R9.operand` |  | operand of `…` is …, not bool |
+| `R10.case_duplicate` |  | case … is already handled at … |
+| `R10.case_multi_bind` |  | a case with several values cannot bind values |
+| `R10.default_needed` |  | switch over … needs default |
+| `R10.default_not_last` |  | default at …:… must be the last branch |
+| `R10.default_unreachable` |  | default is never reached: every variant is handled |
+| `R10.none_no_value` |  | `none` has no value |
+| `R10.nothing_bound` |  | nothing is bound |
+| `R10.ok_no_value` |  | `ok` has no value in … |
+| `R10.switch_missing` |  | switch does not handle … |
+| `R10.switch_type` |  | cannot switch over … |
+| `R10.two_defaults` |  | switch has two defaults |
+| `R10.variant_qualified` |  | variants are written with their type |
+| `R11.break_in_switch` |  | `break` directly inside switch |
+| `R11.break_outside_loop` |  | `break` outside a loop |
+| `R11.c_for` |  | C-style for loop |
+| `R11.continue_outside_loop` |  | `continue` outside a loop |
+| `R11.io_lines_outside_for` |  | `io.lines()` can only be the source of a for loop |
+| `R11.map_loop_vars` |  | a loop over a map needs key and value |
+| `R11.not_iterable` |  | cannot loop over … |
+| `R11.range_outside_for` |  | `range` can only be the source of a for loop |
+| `R12.coalesce_left` |  | `??` needs a ?T or T!E on the left, found … |
+| `R12.err_place` |  | `err(…)` needs a place of type T!E |
+| `R12.none_place` |  | `none` needs a place of type ?T |
+| `R12.ok_pattern` |  | `ok` is only a pattern in switch |
+| `R12.opt_void` |  | ?void has no value that could be missing |
+| `R12.or_needs_result_fn` |  | `or` needs a function that returns U!F |
+| `R12.some_plain` |  | `some` needs a plain value, found … |
+| `R12.try_error_mismatch` |  | `try` gives …, but the function returns … |
+| `R12.try_needs_result_fn` |  | `try` needs a function that returns T!E or ?T |
+| `R12.try_operand` |  | `try` needs a result of type T!E or ?T, found … |
+| `R13.unused_result` |  | result of `…` is never used |
+| `R14.conv_inexact` |  | … is not an exact … |
+| `R14.conv_range` |  | … does not fit in … |
+| `R14.conv_rune` |  | … is not a valid rune |
+| `R14.div_zero` |  | division by zero |
+| `R14.index_bounds` |  | index … out of bounds for length … |
+| `R14.shift_range` |  | shift by … out of range 0..… |
+| `R15.branch_no_value` |  | this branch of if gives no value |
+| `R15.if_needs_else` |  | if as a value needs else |
+| `R15.no_branch_value` |  | no branch of this if gives a value |
+| `R16.not_imported` |  | `…` is not imported |
+| `R16.unknown_module` |  | unknown standard module `…` |
+| `R16.use_order` |  | `use` comes before all other declarations |
+| `R16.use_twice` |  | `std.…` is already used |
+| `R18.expect_outside_test` | ja | `expect` is only for tests |
+| `R18.panics_needs_text` |  | panics needs a message text |
+| `R18.test_name_plain` |  | a test name is plain text |
+| `R18.test_needs_name` |  | a test needs a name |
+| `R18.test_nested` |  | tests are declared at the top level |
+| `R18.test_twice` |  | test "…" is declared twice |
+| `R28.no_print_value` |  | `…` has no value to print |
+| `R28.no_text_value` |  | `…` has no value to put into text |
+| `R28.sort_unordered` |  | `sort` needs an ordered element type, found … |
+| `R30.duplicate_key` |  | duplicate key … |
+| `R30.map_entry_change` |  | a map entry is changed by assigning it |
+| `R31.convert` |  | cannot convert … to … |
 
 ---
 

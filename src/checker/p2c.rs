@@ -81,28 +81,33 @@ impl<'a> Checker<'a> {
         let module = u.module.as_str();
         let Some(&known) = STD_MODULES.iter().find(|m| **m == module) else {
             let msg = format!("unknown standard module `{module}`");
-            self.err("R16", u.name_pos, msg, Some("available: io, os".into()));
+            self.err(
+                "R16.unknown_module",
+                u.name_pos,
+                msg,
+                Some("available: io, os".into()),
+            );
             return;
         };
         if self.imports.contains(&known) {
             if after_other {
                 let hint = "move it to the top of the file".to_string();
                 self.err(
-                    "R16",
+                    "R16.use_order",
                     u.pos,
                     "`use` comes before all other declarations",
                     Some(hint),
                 );
             } else {
                 let msg = format!("`std.{known}` is already used");
-                self.err("R16", u.pos, msg, Some("remove this line".into()));
+                self.err("R16.use_twice", u.pos, msg, Some("remove this line".into()));
             }
             return;
         }
         if after_other {
             let hint = "move it to the top of the file".to_string();
             self.err(
-                "R16",
+                "R16.use_order",
                 u.pos,
                 "`use` comes before all other declarations",
                 Some(hint),
@@ -197,7 +202,7 @@ impl<'a> Checker<'a> {
     fn opt_of(&mut self, ty: Ty, pos: Pos) -> Ty {
         if ty == Ty::Void {
             let msg = "?void has no value that could be missing";
-            self.err("R12", pos, msg, Some("use void!E".into()));
+            self.err("R12.opt_void", pos, msg, Some("use void!E".into()));
             return Ty::Err;
         }
         self.opt(ty)
@@ -255,12 +260,17 @@ impl<'a> Checker<'a> {
             "rune" => Ty::Rune,
             "void" if ret => Ty::Void,
             "void" => {
-                self.err("R8", pos, "`void` is only a return type", None);
+                self.err(
+                    "R8.void_not_type",
+                    pos,
+                    "`void` is only a return type",
+                    None,
+                );
                 Ty::Err
             }
             "f32" => {
                 self.err(
-                    "S1",
+                    "S1.f32_unavailable",
                     pos,
                     "`f32` is not available in v0",
                     Some("use f64".into()),
@@ -280,7 +290,7 @@ impl<'a> Checker<'a> {
                     let prims = ["int", "bool", "str", "rune", "f64", "u8", "i32"];
                     let names = prims.into_iter().chain(self.type_ids.keys().copied());
                     let hint = closest(n, names).map(|c| format!("did you mean {c}?"));
-                    self.err("R4", pos, format!("unknown type `{n}`"), hint);
+                    self.err("R4.unknown_type", pos, format!("unknown type `{n}`"), hint);
                     Ty::Err
                 }
             },
@@ -303,7 +313,7 @@ impl<'a> Checker<'a> {
             Some(n) => Some(n as u64),
             None => {
                 let msg = "the length of an array is a constant of at least 1";
-                self.err("R5", pos, msg, None);
+                self.err("R5.array_length", pos, msg, None);
                 None
             }
         }
@@ -348,7 +358,12 @@ impl<'a> Checker<'a> {
         }
         self.unknown.push(m.to_string());
         let hint = format!("add use std.{m} at the top of the file");
-        self.err("R16", pos, format!("`{m}` is not imported"), Some(hint));
+        self.err(
+            "R16.not_imported",
+            pos,
+            format!("`{m}` is not imported"),
+            Some(hint),
+        );
     }
 
     // ---- literals and their types (R8) ----
@@ -393,7 +408,7 @@ impl<'a> Checker<'a> {
             } else {
                 let msg = format!("expected {}, found {n}", self.tn(ty));
                 let hint = format!("the value does not fit in {}", self.tn(ty));
-                self.err("R8", e.pos, msg, Some(hint));
+                self.err("R8.type_mismatch", e.pos, msg, Some(hint));
             }
             return false;
         }
@@ -472,7 +487,7 @@ impl<'a> Checker<'a> {
         if f.is_infinite() || (f == 0.0 && nonzero) {
             let msg = format!("expected f64, found {text}");
             let hint = "the value does not fit in f64".to_string();
-            self.err("R8", e.pos, msg, Some(hint));
+            self.err("R8.type_mismatch", e.pos, msg, Some(hint));
             return (Ty::Err, Val::Runtime);
         }
         (Ty::FloatLit, Val::Float(f))
@@ -505,7 +520,7 @@ impl<'a> Checker<'a> {
                         "use []{} for a list that can have any length",
                         self.tn_elem(t)
                     );
-                    self.err("R8", e.pos, msg, Some(hint));
+                    self.err("R8.array_length_mismatch", e.pos, msg, Some(hint));
                     return (Ty::Err, Val::Runtime);
                 }
                 let vs: Vec<_> = items.iter().map(|x| self.at_place(t, x, None)).collect();
@@ -513,7 +528,7 @@ impl<'a> Checker<'a> {
             }
             _ if items.is_empty() => {
                 let msg = "`[]` needs a place of type []T";
-                self.err("R8", e.pos, msg, None);
+                self.err("R8.empty_list_place", e.pos, msg, None);
                 (Ty::Err, Val::Runtime)
             }
             _ => {
@@ -578,7 +593,7 @@ impl<'a> Checker<'a> {
             }
             _ if entries.is_empty() => {
                 let msg = "`{}` needs a place of type map[K]V";
-                self.err("R8", e.pos, msg, None);
+                self.err("R8.empty_map_place", e.pos, msg, None);
                 return (Ty::Err, Val::Runtime);
             }
             _ => (None, None, None),
@@ -591,7 +606,7 @@ impl<'a> Checker<'a> {
                 Some((_, first)) => {
                     let msg = format!("duplicate key {}", c.text(k));
                     let hint = format!("first used at {}", c.at(*first));
-                    c.err("R30", k.pos, msg, Some(hint));
+                    c.err("R30.duplicate_key", k.pos, msg, Some(hint));
                 }
                 None => seen.push((key, k.pos)),
             }
@@ -656,7 +671,7 @@ impl<'a> Checker<'a> {
                 if let (Ty::Int, Val::Int(k)) = (it, iv) {
                     if k < 0 || k >= n as i128 {
                         let msg = format!("index {k} out of bounds for length {n}");
-                        self.err("R14", bp, msg, None);
+                        self.err("R14.index_bounds", bp, msg, None);
                         return (Ty::Err, Val::Runtime);
                     }
                 }
@@ -670,13 +685,13 @@ impl<'a> Checker<'a> {
             Ty::Str => {
                 self.rvalue(idx);
                 let hint = "use s.slice(a, b) or s.runes()".to_string();
-                self.err("R8", e.pos, "cannot index str", Some(hint));
+                self.err("R8.index_str", e.pos, "cannot index str", Some(hint));
                 (Ty::Err, Val::Runtime)
             }
             t => {
                 self.rvalue(idx);
                 let msg = format!("cannot index {}", self.tn(t));
-                self.err("R8", e.pos, msg, None);
+                self.err("R8.index_type", e.pos, msg, None);
                 (Ty::Err, Val::Runtime)
             }
         }
@@ -697,7 +712,7 @@ impl<'a> Checker<'a> {
     pub(super) fn map_place_error(&mut self, place: &Expr) {
         let msg = "a map entry is changed by assigning it";
         let hint = "read it, change the copy, and store it: m[k] = v";
-        self.err("R30", place.pos, msg, Some(hint.into()));
+        self.err("R30.map_entry_change", place.pos, msg, Some(hint.into()));
     }
 
     // ---- conversions T(x) (R31) ----
@@ -717,7 +732,7 @@ impl<'a> Checker<'a> {
             for a in args {
                 self.rvalue(a);
             }
-            self.err("R8", e.pos, msg, None);
+            self.err("R8.arg_count", e.pos, msg, None);
             return (Ty::Err, Val::Runtime);
         }
         let a = &args[0];
@@ -751,20 +766,25 @@ impl<'a> Checker<'a> {
                 _ => None,
             };
             let msg = format!("cannot convert {} to {tname}", self.tn(st));
-            self.err("R31", e.pos, msg, hint);
+            self.err("R31.convert", e.pos, msg, hint);
             return (Ty::Err, Val::Runtime);
         }
         // known at compile time: the conversion is done here, a failure is R14
         let round = "round explicitly first with round(), trunc(), floor() or ceil()";
-        let abort = |c: &mut Self, msg: String, hint: Option<&str>| {
-            c.err("R14", e.pos, msg, hint.map(String::from));
+        let abort = |c: &mut Self, id: &'static str, msg: String, hint: Option<&str>| {
+            c.err(id, e.pos, msg, hint.map(String::from));
             (Ty::Err, Val::Runtime)
         };
         match (target, sv) {
             (t, Val::Int(n)) if t.is_int() => {
                 let (lo, hi) = t.range().unwrap_or((0, 0));
                 if n < lo || n > hi {
-                    return abort(self, format!("{n} does not fit in {tname}"), None);
+                    return abort(
+                        self,
+                        "R14.conv_range",
+                        format!("{n} does not fit in {tname}"),
+                        None,
+                    );
                 }
                 (t, Val::Int(n))
             }
@@ -772,22 +792,42 @@ impl<'a> Checker<'a> {
                 let (lo, hi) = t.range().unwrap_or((0, 0));
                 let x = Self::f64_text(f);
                 if !f.is_finite() || f.fract() != 0.0 {
-                    return abort(self, format!("{x} is not an exact {tname}"), Some(round));
+                    return abort(
+                        self,
+                        "R14.conv_inexact",
+                        format!("{x} is not an exact {tname}"),
+                        Some(round),
+                    );
                 }
                 if f.abs() >= 1.0e38 || (f as i128) < lo || (f as i128) > hi {
-                    return abort(self, format!("{x} does not fit in {tname}"), Some(round));
+                    return abort(
+                        self,
+                        "R14.conv_range",
+                        format!("{x} does not fit in {tname}"),
+                        Some(round),
+                    );
                 }
                 (t, Val::Int(f as i128))
             }
             (Ty::Num(Num::F64), Val::Int(n)) => {
                 if (n as f64) as i128 != n {
-                    return abort(self, format!("{n} is not an exact f64"), None);
+                    return abort(
+                        self,
+                        "R14.conv_inexact",
+                        format!("{n} is not an exact f64"),
+                        None,
+                    );
                 }
                 (target, Val::Float(n as f64))
             }
             (Ty::Rune, Val::Int(n)) => {
                 if !(0..=0x10FFFF).contains(&n) || (0xD800..=0xDFFF).contains(&n) {
-                    return abort(self, format!("{n} is not a valid rune"), None);
+                    return abort(
+                        self,
+                        "R14.conv_rune",
+                        format!("{n} is not a valid rune"),
+                        None,
+                    );
                 }
                 (target, Val::Int(n))
             }
@@ -919,7 +959,7 @@ impl<'a> Checker<'a> {
                 } else {
                     closest(m, names.iter().copied()).map(|c| format!("did you mean {c}?"))
                 };
-            self.err("R4", e.pos, msg, hint);
+            self.err("R4.no_method", e.pos, msg, hint);
             return (Ty::Err, Val::Runtime);
         };
         let mut changeable = false;
@@ -955,12 +995,12 @@ impl<'a> Checker<'a> {
                     Some((root, true)) if is_place(base) => {
                         let msg = format!("cannot change const `{root}`");
                         let hint = format!("`{tname}` changes self");
-                        self.err("R4", base.pos, msg, Some(hint));
+                        self.err("R4.change_const", base.pos, msg, Some(hint));
                     }
                     _ => {
                         let msg = format!("`{tname}` changes self and needs a variable");
                         let hint = "store the value in a variable first".to_string();
-                        self.err("R7", e.pos, msg, Some(hint));
+                        self.err("R7.changes_self_needs_var", e.pos, msg, Some(hint));
                     }
                 }
             }
@@ -972,7 +1012,7 @@ impl<'a> Checker<'a> {
             let n = s.params.len();
             let plural = if n == 1 { "" } else { "s" };
             let msg = format!("`{m}` takes {n} argument{plural}, found {}", args.len());
-            self.err("R8", e.pos, msg, None);
+            self.err("R8.arg_count", e.pos, msg, None);
             return (Ty::Err, Val::Runtime);
         }
         for (a, p) in args.iter().zip(&s.params) {
@@ -991,7 +1031,7 @@ impl<'a> Checker<'a> {
                     ),
                     _ => String::new(),
                 };
-                self.err("R8", e.pos, msg, Some(hint));
+                self.err("R8.add_needs_number", e.pos, msg, Some(hint));
             }
         }
         if m == "sort" {
@@ -1009,7 +1049,7 @@ impl<'a> Checker<'a> {
                     self.tn(el)
                 );
                 let hint = "only numbers, rune and str can be sorted".to_string();
-                self.err("R28", pos, msg, Some(hint));
+                self.err("R28.sort_unordered", pos, msg, Some(hint));
             }
         }
         self.last_callee = None;
@@ -1055,7 +1095,7 @@ impl<'a> Checker<'a> {
             ("io", "lines") => {
                 let hint = "for str line in try io.lines() { … }".to_string();
                 let msg = "`io.lines()` can only be the source of a for loop";
-                self.err("R11", e.pos, msg, Some(hint));
+                self.err("R11.io_lines_outside_for", e.pos, msg, Some(hint));
                 return (Ty::Err, Val::Runtime);
             }
             ("io", "read_line") => {
@@ -1083,7 +1123,7 @@ impl<'a> Checker<'a> {
                 let msg = format!("`{module}` has no function `{name}`");
                 let hint =
                     closest(name, funcs.iter().copied()).map(|c| format!("did you mean {c}?"));
-                self.err("R4", e.pos, msg, hint);
+                self.err("R4.no_function", e.pos, msg, hint);
                 return (Ty::Err, Val::Runtime);
             }
         };
@@ -1091,13 +1131,13 @@ impl<'a> Checker<'a> {
         if name == "eprint" {
             if args.len() != 1 {
                 let msg = format!("`{full}` takes 1 argument, found {}", args.len());
-                self.err("R8", e.pos, msg, None);
+                self.err("R8.arg_count", e.pos, msg, None);
                 return (Ty::Void, Val::Runtime);
             }
             let (t, _) = self.rvalue(&args[0]);
             if t == Ty::Void {
                 let msg = format!("`{}` has no value to print", self.text(&args[0]));
-                self.err("R28", args[0].pos, msg, None);
+                self.err("R28.no_print_value", args[0].pos, msg, None);
             }
         } else if let Some((params, ret, effect)) = spec {
             if args.len() != params.len() {
@@ -1107,7 +1147,7 @@ impl<'a> Checker<'a> {
                 let n = params.len();
                 let plural = if n == 1 { "" } else { "s" };
                 let msg = format!("`{full}` takes {n} argument{plural}, found {}", args.len());
-                self.err("R8", e.pos, msg, None);
+                self.err("R8.arg_count", e.pos, msg, None);
                 return (Ty::Err, Val::Runtime);
             }
             for (a, p) in args.iter().zip(&params) {
@@ -1153,14 +1193,14 @@ impl<'a> Checker<'a> {
             Some(args) => {
                 if args.is_empty() || args.len() > 2 {
                     let msg = format!("`range` takes 1 or 2 arguments, found {}", args.len());
-                    self.err("R8", src.pos, msg, None);
+                    self.err("R8.range_arity", src.pos, msg, None);
                 }
                 for a in args {
                     self.at_place(Ty::Int, a, None);
                 }
                 if vars.len() == 2 {
                     let msg = "`range` gives one value per step; use one loop variable";
-                    self.err("R8", vars[1].pos, msg, None);
+                    self.err("R8.range_vars", vars[1].pos, msg, None);
                 }
             }
             None if is_lines => {
@@ -1188,7 +1228,7 @@ impl<'a> Checker<'a> {
                             _ => None,
                         };
                         let msg = format!("cannot loop over {}", self.tn(t));
-                        self.err("R11", src.pos, msg, hint);
+                        self.err("R11.not_iterable", src.pos, msg, hint);
                     }
                 }
                 self.uses_2c = true;
@@ -1220,7 +1260,7 @@ impl<'a> Checker<'a> {
                     self.text(src)
                 );
                 let msg = "a loop over a map needs key and value";
-                self.err("R11", src.pos, msg, Some(hint));
+                self.err("R11.map_loop_vars", src.pos, msg, Some(hint));
             } else {
                 for (k, v) in vars.iter().enumerate() {
                     let want = if k == 0 { kt } else { vt };
@@ -1232,7 +1272,7 @@ impl<'a> Checker<'a> {
             for (v, t) in vars.iter().zip(types.iter_mut()) {
                 if *t != Ty::Int && *t != Ty::Err {
                     let msg = format!("the values of `range` are int, not {}", self.tn(*t));
-                    self.err("R8", v.ty.pos, msg, None);
+                    self.err("R8.range_value_type", v.ty.pos, msg, None);
                 }
             }
         }
@@ -1255,7 +1295,7 @@ impl<'a> Checker<'a> {
         let msg = format!("expected {}, found {}", self.tn(have), self.tn(want));
         let hint = (!tried && self.inner(want) == Some(have))
             .then(|| format!("for {} {} in try {}", self.tn(have), v.name, self.text(src)));
-        self.err("R8", v.pos, msg, hint);
+        self.err("R8.type_mismatch", v.pos, msg, hint);
     }
 }
 
