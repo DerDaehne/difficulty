@@ -678,7 +678,7 @@ Teil 2c ergänzt Elemente:
 Teil 2d ergänzt Funktionsliterale und Blöcke (R26):
 
 - **Ein Literal ändert nichts ringsum.** Es nimmt beim Auswerten eine Kopie jedes Namens der Umgebung, den es benutzt, und liest nur diese Kopien (R26). Darum ist ein Literal nie ein Weg in einen Aufruf: „Keine Aliase“ gilt unverändert und kennt keine Literale, ein Schnappschuss-Sonderfall entfällt. Ein Literal sieht immer den Wert von vor dem Aufruf: `xs.sort_by(…)` mit einem Literal, das `xs` liest, liest die Liste vor dem Sortieren.
-- **Änderung an einem eingefangenen Namen.** Weist ein Literal oder Block einem Namen der Umgebung oder einem Teil davon zu, rechnet es mit `+=` usw. oder ruft es darauf eine Methode, die `self` ändert, ist das immer `R6` an der Änderung: Meldung `` the change to `x` is lost: `x` is a copy ``, Hinweis `pass it as a parameter`. `x` ist die Wurzel (`p.x = 1` meldet `p`); gemeldet wird pro Wurzel die erste Änderung. Das gilt für jeden Namen der Umgebung: Variablen, Parameter mit und ohne `mut`, `self` und die Namen äußerer Literale. Eine `const`-Wurzel bleibt `R4`. Ein Griff (R5) ist keine Ausnahme der Regel, sondern fällt nicht darunter: seine Kopie ist derselbe Griff, und eine Methode, die hinter den Griff schreibt, ändert den Namen nicht.
+- **Änderung an einem eingefangenen Namen.** Weist ein Literal oder Block einem Namen der Umgebung oder einem Teil davon zu, rechnet es mit `+=` usw. oder ruft es darauf eine Methode, die `self` ändert, ist das immer `R6` an der Änderung: Meldung `` the change to `x` is lost: `x` is a copy ``, Hinweis `a function literal sees a copy; return the value or use a for loop`. `x` ist die Wurzel (`p.x = 1` meldet `p`); gemeldet wird pro Wurzel die erste Änderung. Das gilt für jeden Namen der Umgebung: Variablen, Parameter mit und ohne `mut`, `self` und die Namen äußerer Literale. Eine `const`-Wurzel bleibt `R4`. Ein Griff (R5) ist keine Ausnahme der Regel, sondern fällt nicht darunter: seine Kopie ist derselbe Griff, und eine Methode, die hinter den Griff schreibt, ändert den Namen nicht.
 - **Verlorene Änderung.** Was ein Literal liest, gilt am Aufruf als gelesen: eine Änderung vor dem Aufruf, die nur das Literal liest, ist nicht verloren. Parameter und Variablen des Literals selbst folgen den Regeln einer Funktion (siehe oben): die Änderung an einem Parameter ohne `mut` meldet `` the change to `p` is lost: `p` is a copy `` ohne Hinweis, weil sein Typ vom Aufruf kommt.
 
 ```dif
@@ -1827,6 +1827,8 @@ main.dif:5:6: error[R18]: test "sum" is declared twice
 
 **Regel.** `share(x)` friert einen Wert ein und liefert `shared[T]`: nur lesbar, und ohne Kopie an beliebig viele Tasks übergebbar. Ändern heißt, eine neue Version zu bauen und erneut zu teilen.
 
+*Offene Frage:* speichert ein Griff (`shared`, Kanal) Funktionswerte, die ihn selbst eingefangen haben, entsteht ein Zyklus; R26 schließt Zyklen nur für Werte aus.
+
 *Ausarbeitung nach v0.*
 
 ### R23 — `defer`
@@ -1898,7 +1900,7 @@ Teil 2d legt fest, was zu M2 gehört: Literale und Blöcke an Aufrufen, Funktion
 **Ab M3: Funktionswerte speichern.** Festgelegt, in M2 noch nicht benutzbar. Benannte Funktionen und Varianten-Konstruktoren kommen zuerst als gespeicherte Werte (Variable, Feld, Liste, `return`), Literale danach; ein Literal wird dann ein Wert aus Funktion und eingefangenen Kopien (in C ein Paar `{fn, env}`, `env` fehlt bei benannten Funktionen).
 
 - **Gleichheit** (R28): zwei Funktionswerte sind gleich, wenn sie von derselben Quelltextstelle stammen (Datei, Zeile und Spalte des Literals; bei einer benannten Funktion dieselbe Funktion) und alle eingefangenen Werte gleich sind. Ein Literal ist nie gleich einer benannten Funktion.
-- **Textform** (R28): `fn@main.dif:12` mit dem Pfad wie in Meldungen und der Zeile des Literals (bei einer benannten Funktion der Deklaration). Zwei verschiedene Literale auf einer Zeile haben dieselbe Textform.
+- **Textform** (R28): ein Literal `fn@main.dif:12:5` (Pfad wie in Meldungen, Zeile und Spalte seiner Stelle, also genau die Stelle, die auch die Gleichheit meint); eine benannte Funktion oder ein Varianten-Konstruktor ihr Name (`add`, `Shape.Box`).
 - **Keine Zyklen:** ein Literal fängt Werte ein, die beim Auswerten schon existieren, und kann sich nie selbst enthalten; ein Wert verweist nie auf einen späteren. Darum kommen Funktionswerte ohne GC aus.
 
 ```dif
@@ -2131,7 +2133,7 @@ void main() {
 
 ```
 main.dif:4:9: error[R6]: the change to `xs` is lost: `xs` is a copy
-  hint: pass it as a parameter
+  hint: a function literal sees a copy; return the value or use a for loop
 ```
 
 ```dif error R6
@@ -2149,7 +2151,7 @@ void main() {
 
 ```
 main.dif:5:9: error[R6]: the change to `last` is lost: `last` is a copy
-  hint: pass it as a parameter
+  hint: a function literal sees a copy; return the value or use a for loop
 ```
 
 ```dif error R4
@@ -2219,7 +2221,7 @@ Teil 2d ergänzt Funktionswerte (R26), ab M3, wenn sie gespeichert werden dürfe
 
 - **Fähigkeiten.** Ein Funktionswert ist `equal`, `text` und `hashable` (wenn alle eingefangenen Werte es sind), nie `ordered`.
 - **Gleichheit.** Gleiche Quelltextstelle des Literals (Datei, Zeile, Spalte; bei einer benannten Funktion dieselbe Funktion) und gleiche eingefangene Werte (nach diesem Abschnitt); ein Literal ist nie gleich einer benannten Funktion.
-- **Text.** `fn@main.dif:12`: das Wort `fn`, `@`, der Pfad so, wie ihn Meldungen nennen, `:` und die Zeile des Literals (bei einer benannten Funktion die Zeile ihrer Deklaration, bei einem Varianten-Konstruktor die der Variante). Die eingefangenen Werte erscheinen nicht.
+- **Text.** Ein Literal `fn@main.dif:12:5`: das Wort `fn`, `@`, der Pfad so, wie ihn Meldungen nennen, Zeile und Spalte des Literals. Eine benannte Funktion oder ein Varianten-Konstruktor ist sein Name (`add`, `Shape.Box`). Die eingefangenen Werte erscheinen nicht.
 
 ### R29 — Zahlen
 
