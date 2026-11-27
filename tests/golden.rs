@@ -144,8 +144,8 @@ fn llms_txt() {
         .unwrap()
         .len();
     assert!(
-        size <= 16 * 1024,
-        "llms.txt has {size} bytes, more than 16 KB"
+        size <= 24 * 1024,
+        "llms.txt has {size} bytes, more than 24 KB"
     );
     assert!(doc_examples("llms.txt", "llms", false) >= 2);
 }

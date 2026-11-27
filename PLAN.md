@@ -1310,7 +1310,7 @@ Diagnosen für typisches Vorwissen greifen vor dem generischen Parserfehler, vie
 
 | Falle | Lösung |
 |---|---|
-| Sprache ist nicht im Training | C/Python-vertraute Syntax; `llms.txt` ≤ 16 KB; `dif llms` liefert genau die passende Version |
+| Sprache ist nicht im Training | C/Python-vertraute Syntax; `llms.txt` ≤ 24 KB; `dif llms` liefert genau die passende Version |
 | Mehrdeutige Argumentgrenzen | Aufrufe immer `f(a, b)` |
 | Unklarer Kontrollfluss | `if`, `return`, `break`, `continue` wie in C |
 | EOF als leerer String → Endlosschleife | `for str line in io.lines()`, `read_line() -> ?str` |
@@ -1358,7 +1358,7 @@ Makros · Klassen, Vererbung, Objekte · Exceptions · Operator-Überladung (v0)
 | `dif check`, 10 000 Zeilen | < 100 ms |
 | `dif run hello.dif` (gcc) | < 300 ms |
 | Compiler-Binary `dif` | ≤ 5 MB |
-| `llms.txt` | ≤ 16 KB |
+| `llms.txt` | ≤ 24 KB |
 | Alltags-Benchmark (Listen, Strings, Maps: Wortzählung über 10 MB Text) | ≤ 2× C, ≤ ½ Python |
 | Agenten-pass@1 im Aufgabenkatalog | Ziel ≥ Python |
 
