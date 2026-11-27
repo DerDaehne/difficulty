@@ -19,7 +19,7 @@ Rechner: x86_64, AMD Ryzen 7 7800X3D, Linux, gcc 16.2.0, `dif` als Release-Build
 | `llms.txt` | ≤ 24 KB | 21214 B | ja |
 | Agenten-pass@1 (Abschnitt „Agenten-Messung 1“) | ≥ Python | Haiku 4/5 gegen 4/5, Sonnet 4/5 gegen 5/5 | Haiku ja, Sonnet nein |
 | 1 000 000 × `push` auf `[]int` | < 50 ms | 7,2 ms (Abschnitt „M2-Zielwerte“) | ja |
-| Alltags-Benchmark: Wortzählung über 10 MB | ≤ 2× C, ≤ ½ Python | 4,5× C, 0,45× Python (121 ms gegen 27 ms und 270 ms) | ½ Python ja, 2× C nein |
+| Alltags-Benchmark: Wortzählung über 10 MB | ≤ 2× C, ≤ ½ Python | 4,3× C, 0,43× Python (105 ms gegen 25 ms und 244 ms) | ½ Python ja, 2× C nein |
 
 Befehle:
 
@@ -251,4 +251,4 @@ erneutem Hash) und räumte den doppelten Schlüssel danach weg; jetzt liefert
 `dif_map_slot` die Wertstelle mit einem Hash und einer Suche. Der Hash über Bytes lief
 byteweise (FNV); jetzt liest er 8 Byte je Schritt (kurze Schlüssel: zwei überlappende
 Lesezugriffe). Reihenfolge der Einträge (R28) bleibt die Einfügereihenfolge. Die
-Wortzählung blieb damit (vor dem Umbau der Strings gemessen) bei rund 9× C.
+Wortzählung blieb damit (vor dem Umbau der Strings gemessen) bei rund 9× C. Mit beiden Umbauten zusammen: dif 105 ms, C 25 ms, Python 244 ms (4,3× C, 0,43× Python).
