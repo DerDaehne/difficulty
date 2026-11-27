@@ -212,7 +212,9 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `R6.mut_not_place` |  | only a variable, field or element can be passed as mut |
 | `R6.mut_twice` |  | `…` goes into this call changeable twice |
 | `R6.mut_unneeded` | ja | `…` is never changed; remove mut |
+| `R6.mut_self_unneeded` |  | `self` is never changed; remove mut |
 | `R7.changes_self_needs_var` |  | `…` changes self and needs a variable |
+| `R7.mut_self_position` |  | `mut self` is only the first parameter of a method |
 | `R7.method_receiver` |  | `…` is not a struct or enum of this module |
 | `R7.self_outside_method` |  | `self` exists only in methods |
 | `R8.add_needs_number` |  | `add` needs number values, found … |

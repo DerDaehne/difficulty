@@ -838,7 +838,7 @@ impl<'a> Parser<'a> {
                     } else {
                         let msg = "`mut self` is only the first parameter of a method";
                         let hint = "write it as `void T.name(mut self, …)`".to_string();
-                        self.err("R7", p, msg, Some(hint));
+                        self.err("R7.mut_self_position", p, msg, Some(hint));
                     }
                     self.bump();
                     self.bump();

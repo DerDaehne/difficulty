@@ -1141,7 +1141,12 @@ impl<'a> Checker<'a> {
             }
             if let Some(mp) = f.mut_self.filter(|_| !changes_self) {
                 let hint = self.signature(id, None);
-                self.err("R6", mp, "`self` is never changed; remove mut", Some(hint));
+                self.err(
+                    "R6.mut_self_unneeded",
+                    mp,
+                    "`self` is never changed; remove mut",
+                    Some(hint),
+                );
             }
             // a broken body has its own causes; lost changes there would only add noise
             if self.diags.len() == errors_before {
