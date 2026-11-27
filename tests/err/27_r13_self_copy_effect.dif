@@ -1,0 +1,14 @@
+// expect: error[R13] 13:5
+struct P {
+    int x
+}
+
+int P.peek() {
+    self.x += 1
+    return self.x
+}
+
+void main() {
+    P p = P{x: 1}
+    p.peek()
+}

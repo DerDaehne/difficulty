@@ -359,8 +359,10 @@ fn derive(fns: &[FnInfo], facts: &[Facts]) -> Vec<Derived> {
                 .iter()
                 .zip(&d[i].changes)
                 .any(|(p, c)| p.is_mut && *c);
-            let effect =
-                f.prints || d[i].changes_self || mut_change || f.calls.iter().any(|&c| d[c].effect);
+            let effect = f.prints
+                || fns[i].decl.mut_self.is_some()
+                || mut_change
+                || f.calls.iter().any(|&c| d[c].effect);
             if effect && !d[i].effect {
                 d[i].effect = true;
                 changed = true;
