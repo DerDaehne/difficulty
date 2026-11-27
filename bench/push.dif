@@ -1,0 +1,8 @@
+// 1 000 000 x push on []int.
+void main() {
+    []int xs = []
+    for int i in range(1000000) {
+        xs.push(i)
+    }
+    print(xs.len())
+}

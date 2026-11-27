@@ -382,7 +382,7 @@ Output: `[1, 2, 3, 4] 1 {"to": 2, "be": 2, "or": 1} Task{title: "WRITE", tags: [
   `str(r)`. `n.to_u8()` gives `?u8`. Nothing converts by itself, `str` and numbers never.
 - **`str` and `rune`.** `'a'` is a `rune`; no `s[i]`: `s.slice(a, b)` counts bytes, `s.runes()`,
   `len()`. Methods: `split lines trim trim_start trim_end lower upper contains starts_with
-  ends_with find replace repeat parse_int parse_f64 is_empty`; `rune`: `is_digit is_letter is_space to_digit` (`?int`, ASCII only).
+  ends_with find replace repeat parse_int parse_f64 is_empty`; `rune`: `is_digit is_letter is_space to_digit` (`?int`, only `0`–`9`).
 - **Lists `[]T` and arrays `[N]T` (R5).** Values: `ys = xs` copies, a write to one never shows
   in the other (copy-on-write inside, `push` is O(1)). `xs[i]` is checked (abort, R14);
   `xs[i] = v`, `xs[i].f = v`, `normalize(mut xs[i])` write. Methods: `len is_empty push pop insert
@@ -462,7 +462,7 @@ Built into the compiler; no import except `use std.io` / `use std.os`. `f` is a 
 - **Functions:** `print(x)`, `range(a, b)` (only in `for`), `repeat(x, n)`, `expect(c)` (tests),
   `assert(c)`, conversions `int(x) f64(x) str(r) u8(x) rune(n) …`.
 - **`str`:** `len is_empty runes split lines trim trim_start trim_end lower upper contains starts_with
-  ends_with find replace repeat slice parse_int parse_f64`. **`rune`:** `is_digit is_letter is_space to_digit` (`?int`, ASCII only).
+  ends_with find replace repeat slice parse_int parse_f64`. **`rune`:** `is_digit is_letter is_space to_digit` (`?int`, only `0`–`9`).
 - **Numbers:** `abs min max to_u8 to_i8 … to_u64` (`?T`); `f64`: `round trunc floor ceil sqrt abs min max`.
 - **`[]T` / `[N]T`:** `len is_empty push pop insert remove first last contains index_of count sort
   reverse swap slice join`, and with a function: `filter(bool(T)) map(R(T)) sort_by(bool(T, T))

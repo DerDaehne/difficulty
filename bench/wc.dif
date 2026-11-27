@@ -1,0 +1,43 @@
+// Word count benchmark: a word is a run of ASCII letters. Reads stdin.
+use std.io
+
+bool is_ascii_letter(rune r) {
+    return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+}
+
+int count_of(map[str]int counts, str word) {
+    return counts[word] ?? 0
+}
+
+void!io.IoErr main() {
+    map[str]int counts = {}
+    int total = 0
+    for str line in try io.lines() {
+        str word = ""
+        for rune r in line.runes() {
+            if is_ascii_letter(r) {
+                word += str(r)
+            } else if word != "" {
+                str w = word.lower()
+                counts.add(w, 1)
+                total += 1
+                word = ""
+            }
+        }
+        if word != "" {
+            str w = word.lower()
+            counts.add(w, 1)
+            total += 1
+        }
+    }
+    []str words = counts.keys()
+    words.sort_by(bool(str a, str b) {
+        int ca = count_of(counts, a)
+        int cb = count_of(counts, b)
+        return ca > cb || (ca == cb && a < b)
+    })
+    for str w in words.slice(0, (20).min(words.len())) {
+        print("{w} {count_of(counts, w)}")
+    }
+    print("total {total} distinct {counts.len()}")
+}

@@ -18,7 +18,8 @@ Rechner: x86_64, AMD Ryzen 7 7800X3D, Linux, gcc 16.2.0, `dif` als Release-Build
 | `kino`-Binary (`examples/kino.dif`, x86_64, dynamisch gegen libc, gestrippt) | ≤ 64 KB | 59 784 B (58,4 KB) | ja |
 | `llms.txt` | ≤ 24 KB | 21214 B | ja |
 | Agenten-pass@1 (Abschnitt „Agenten-Messung 1“) | ≥ Python | Haiku 4/5 gegen 4/5, Sonnet 4/5 gegen 5/5 | Haiku ja, Sonnet nein |
-| `push`, Alltags-Benchmark | siehe PLAN.md | noch nicht messbar | – |
+| 1 000 000 × `push` auf `[]int` | < 50 ms | 7,2 ms (Abschnitt „M2-Zielwerte“) | ja |
+| Alltags-Benchmark: Wortzählung über 10 MB | ≤ 2× C, ≤ ½ Python | 9,4× C, 0,97× Python (249 ms gegen 26 ms und 257 ms) | nein |
 
 Befehle:
 
@@ -169,3 +170,43 @@ Beobachtungen:
   Haiku schreibt in difficulty deutlich mehr Ausgabe als Sonnet.
 - Opus: nach ADR 011 erst bei stabilen Ergebnissen. Ein Lauf mit fünf Aufgaben ist das noch nicht;
   zuerst kommt ein zweiter Lauf mit Haiku und Sonnet auf dem geklärten Aufgabentext.
+
+## M2-Zielwerte: `push` und Wortzählung
+
+Rechner: x86_64, AMD Ryzen 7 7800X3D (16 Threads), Linux, gcc 16.2.0 (`-O2` für C, Backend von `dif`),
+Python 3.14.8, `dif` als Release-Build. Zeit: Wanduhr des fertigen Programms
+(`dif build`), Median aus 5 Läufen, Eingabedatei vorher gelesen (Page Cache warm).
+
+```sh
+nix develop -c nix shell nixpkgs#python3 -c bench/run.sh
+```
+
+Das Skript (`bench/`) erzeugt den Text (10 000 019 Byte, fester Seed, Zipf-artig über
+5 010 Wörter, Groß-/Kleinschreibung, Satzzeichen, einige Umlaute), baut, prüft, dass die
+drei Ausgaben byte-gleich sind, und misst. Ein Wort ist eine Folge ASCII-Buchstaben
+(so lassen sich C und Python ohne Unicode-Tabellen gleich halten; `rune.is_letter` in
+difficulty kennt Unicode); Umlaute trennen Wörter, in allen drei Programmen gleich. Es sind 1 304 206 Wörter.
+
+| Messung | Ziel | Gemessen | Erfüllt |
+|---|---|---|---|
+| 1 000 000 × `push` (`bench/push.dif`, ganzes Programm samt Start) | < 50 ms | 7,2 ms | ja |
+| Wortzählung dif | ≤ 2× C | 248,6 ms = 9,4× C | nein |
+| Wortzählung C (C11, eigene Hash-Tabelle, `-O2`) | – | 26,4 ms | – |
+| Wortzählung Python (`Counter`) | dif ≤ ½ Python | 256,5 ms; dif = 0,97× | nein |
+
+### Wortzählung: Zeitanteile (dif)
+
+Varianten des Programms, Wanduhr, ms (ungefähr, je 3 Läufe):
+
+| Stufe | Zeit |
+|---|---|
+| nur `io.lines()` und `line.len()` | 30 |
+| plus Schleife über `line.runes()` mit Vergleich | 45 |
+| plus Wort zeichenweise mit `word += str(r)` aufbauen | 125 |
+| plus `word.lower()` je Wort | 165 |
+| vollständig (Map-Zugriffe mit `counts.add(w, 1)`, Sortieren) | 249 |
+
+Die Zeit liegt vor allem im zeichenweisen Aufbau der Wörter (rund 80 ms), in den
+Allokationen von `lower()` (rund 40 ms) und in Map-Zugriffen und Sortieren (rund
+85 ms). `perf` war auf dem Rechner nicht erlaubt (`perf_event_paranoid`), die Anteile
+stammen aus den Programmvarianten. Beide Ziele sind verfehlt; Folgetickets liegen vor.
