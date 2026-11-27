@@ -273,7 +273,7 @@ fn sets(e: &Expr, n: &str) -> bool {
         | ExprKind::SomeVal(x)
         | ExprKind::ErrVal(x)
         | ExprKind::OkVal(Some(x)) => sets(x, n),
-        ExprKind::Try(x, or) => sets(x, n) || or.as_ref().is_some_and(|(_, e)| sets(e, n)),
+        ExprKind::Try(x, or) => sets(x, n) || or.as_ref().is_some_and(|o| sets(&o.alt, n)),
         ExprKind::Binary(_, l, r, _) | ExprKind::Index(l, r, _) => sets(l, n) || sets(r, n),
         ExprKind::ListLit(items) => items.iter().any(|x| sets(x, n)),
         ExprKind::MapLit(entries) => entries.iter().any(|(k, v)| sets(k, n) || sets(v, n)),
@@ -1625,7 +1625,7 @@ impl<'a> Emitter<'a> {
                 }
                 _ => unreachable!("err(e) without a result type"),
             },
-            ExprKind::Try(x, or) => self.try_expr(e, x, or.as_ref().map(|o| &*o.1)),
+            ExprKind::Try(x, or) => self.try_expr(e, x, or.as_ref()),
             // only a pattern (R12): the checker rejects it as a value
             ExprKind::OkVal(_) => "0".into(),
             ExprKind::Paren(x) => self.expr(x),
@@ -1661,7 +1661,7 @@ impl<'a> Emitter<'a> {
 
     /// The code that leaves the function when the result or optional in `y` has no value:
     /// the error (or `alt`) is returned, everything owned is released first (R12).
-    fn try_leave(&mut self, xt: Ty, y: &str, or: Option<&'a Expr>, p: Pos) -> String {
+    fn try_leave(&mut self, xt: Ty, y: &str, or: Option<&'a TryOr>, p: Pos) -> String {
         if self.in_test {
             let text = match xt {
                 Ty::Res(i) => {
@@ -1689,12 +1689,37 @@ impl<'a> Emitter<'a> {
             _ => String::new(),
         };
         match (self.ret, or) {
-            (Ty::Res(i), Some(alt)) => {
+            (Ty::Res(i), Some(o)) => {
                 let et = self.info.ress[i as usize].1;
-                let alt = self.at(et, alt);
+                let short = match (&o.bind, &o.alt.kind) {
+                    (None, ExprKind::Field(base, name)) => self
+                        .enum_of(base)
+                        .filter(|&eid| Ty::Named(eid) == et)
+                        .map(|eid| (eid, name.as_str())),
+                    _ => None,
+                };
+                let (decl, alt, spent) = match (&o.bind, short) {
+                    // `F.V`: the cause moves into the variant, nothing is left to release
+                    (None, Some((eid, name))) => {
+                        let k = self.variant_index(eid, name);
+                        (
+                            String::new(),
+                            self.variant_of(eid, k, vec![format!("{y}.e")]),
+                            String::new(),
+                        )
+                    }
+                    (Some(p), _) => {
+                        // the name borrows the cause; `spent` releases it afterwards
+                        let ct = self.ty_of(&p.ty);
+                        let decl =
+                            format!("{} d_{n} = {y}.e; (void)d_{n}; ", self.c_ty(ct), n = p.name);
+                        (decl, self.at(et, &o.alt), spent)
+                    }
+                    _ => (String::new(), self.at(et, &o.alt), spent),
+                };
                 let rel = self.release_from(0, true, None);
                 format!(
-                    "{{ {} a_ = {alt}; {spent}{rel}return (({r}){{.e = a_}}); }}",
+                    "{{ {decl}{} a_ = {alt}; {spent}{rel}return (({r}){{.e = a_}}); }}",
                     self.c_ty(et)
                 )
             }
@@ -1705,7 +1730,7 @@ impl<'a> Emitter<'a> {
 
     /// `try x [or alt]`: the value, or an early return of the failure (R12). In a
     /// test a failure ends the test (R18).
-    fn try_expr(&mut self, e: &'a Expr, x: &'a Expr, or: Option<&'a Expr>) -> String {
+    fn try_expr(&mut self, e: &'a Expr, x: &'a Expr, or: Option<&'a TryOr>) -> String {
         let xt = self.ty(x);
         let y = format!("y{}", self.uid);
         self.uid += 1;
@@ -1908,6 +1933,17 @@ impl<'a> Emitter<'a> {
             let start = format!("({{ {} {s} = {{0}}; ", self.c_ty(t));
             (s.clone(), start, format!("{s}; }})"))
         }
+    }
+
+    /// `E.V` of variant `k` with the field values already written in C.
+    fn variant_of(&mut self, eid: u32, k: usize, vals: Vec<String>) -> String {
+        let (s, mut c, end) = self.building(Ty::Named(eid));
+        let _ = write!(c, "{s}.tag = {k}; ");
+        for (j, v) in vals.iter().enumerate() {
+            let _ = write!(c, "{s}.u.v{k}.f{j} = {v}; ");
+        }
+        c.push_str(&end);
+        c
     }
 
     /// `E.V` or `E.V(a, b)`.

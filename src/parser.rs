@@ -2211,7 +2211,12 @@ impl<'a> Parser<'a> {
         if self.is_kw("or") {
             let at = self.pos();
             self.bump();
-            or = Some((at, Box::new(self.postfix())));
+            let bind = self.or_bind();
+            or = Some(TryOr {
+                pos: at,
+                bind,
+                alt: Box::new(self.postfix()),
+            });
         }
         self.leave();
         Expr {
@@ -2219,6 +2224,45 @@ impl<'a> Parser<'a> {
             pos: p,
             end: self.last_end,
         }
+    }
+
+    /// `err(E e):` after `or`: told from the value `err(x)` by the `:` after `)`.
+    fn or_bind(&mut self) -> Option<Param> {
+        if !self.is_kw("err") || *self.peek_n(1) != Tok::Op("(") {
+            return None;
+        }
+        let mut depth = 0;
+        let mut n = 1;
+        loop {
+            match self.peek_n(n) {
+                Tok::Op("(") => depth += 1,
+                Tok::Op(")") => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                Tok::Nl | Tok::Eof => return None,
+                _ => {}
+            }
+            n += 1;
+        }
+        if *self.peek_n(n + 1) != Tok::Op(":") {
+            return None;
+        }
+        self.bump();
+        let open = self.pos();
+        self.bump();
+        let ty = self.type_ref();
+        let (name, pos) = self.name()?;
+        self.close(open, ")");
+        self.bump(); // :
+        Some(Param {
+            ty,
+            name,
+            pos,
+            mut_pos: None,
+        })
     }
 
     /// `some(x)`, `err(e)`, `ok(x)` and a bare `ok`.

@@ -105,6 +105,15 @@ pub struct Case {
     pub pos: Pos,
 }
 
+/// The `or` part of `try`: the position of `or`, the cause binding `err(E e):` if
+/// written, and the value (R12).
+#[derive(Debug, Clone)]
+pub struct TryOr {
+    pub pos: Pos,
+    pub bind: Option<Param>,
+    pub alt: Box<Expr>,
+}
+
 #[derive(Debug, Clone)]
 pub enum Pattern {
     /// An integer literal, already negated for `-5`.
@@ -239,8 +248,8 @@ pub enum ExprKind {
     ErrVal(Box<Expr>),
     /// `ok(x)` or `ok`: only a pattern (R12), kept so the checker can report it.
     OkVal(Option<Box<Expr>>),
-    /// `try x`, or `try x or e` with the position of `or`.
-    Try(Box<Expr>, Option<(Pos, Box<Expr>)>),
+    /// `try x`, or `try x or e` / `try x or err(E e): e2`.
+    Try(Box<Expr>, Option<TryOr>),
     /// `[a, b]`
     ListLit(Vec<Expr>),
     /// `{k: v, …}`

@@ -566,7 +566,7 @@ impl<'a> Emitter<'a> {
         d: usize,
     ) {
         let (src, tried) = match &iter.kind {
-            ExprKind::Try(x, or) => (&**x, Some(or.as_ref().map(|o| &*o.1))),
+            ExprKind::Try(x, or) => (&**x, Some(or.as_ref())),
             _ => (iter, None),
         };
         if let ExprKind::Call(f, args) = &src.kind {
@@ -739,7 +739,7 @@ impl<'a> Emitter<'a> {
     fn for_lines(
         &mut self,
         vars: &'a [Param],
-        tried: Option<Option<&'a Expr>>,
+        tried: Option<Option<&'a TryOr>>,
         iter: &'a Expr,
         body: &'a Block,
         d: usize,

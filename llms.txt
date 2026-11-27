@@ -3,7 +3,7 @@
 > A compiled language that writes like a more pleasant C: C-like syntax, Python-like simplicity,
 > one way to write each thing, no silent fallbacks, diagnostics that say how to fix them.
 > This file covers parts 1 (basics), 2a (values, methods), 2b (errors, tests) and 2c (numbers,
-> lists, maps, text, io). The binding description is docs/spec.md; error codes are rule numbers (R1–R31) or lexical/syntax codes (L, S).
+> lists, maps, text, io). Binding: docs/spec.md; error codes are rule numbers (R1–R31) or lexical/syntax codes (L, S).
 
 ## Tools
 
@@ -14,10 +14,10 @@ dif build main.dif -o prog     # native program (needs cc, gcc or clang; or set 
 dif test [path] [filter] [--json]   # run the `test` blocks, see part 2b
 ```
 
-Exit codes: 0 ok, 1 diagnostics (or an error from `void!E main`), 2 usage error, no C compiler or a
-panic of the program, 3 internal error (the C compiler rejects the generated C: a bug in dif).
+Exit codes: 0 ok, 1 diagnostics (or an error from `void!E main`), 2 usage error, no C compiler, a
+panic, 3 internal error (the C compiler rejects the generated C: a bug in dif).
 A diagnostic: `main.dif:3:11: error[R9]: condition is int, not bool` plus `hint: …`.
-Columns count characters. Each mistake gives exactly one diagnostic; fix the first, rerun.
+Columns count characters. One diagnostic per mistake; fix the first, rerun.
 
 ## A program
 
@@ -254,25 +254,27 @@ void main() {
 
 Output: `some(4)`, `-1`, `err(AgeErr.Negative)`, `ok 8`
 
-- **Types (R12).** `?T` is a `T` or `none`; `T!E` is a `T` or an error `E` (any type);
+- **Types (R12).** `?T` is a `T` or `none`; `T!E` is a `T` or an error `E`;
   `void!E` is nothing or an error. Success is returned plainly: `return n`; failure is
-  `return none` or `return err(AgeErr.Negative)`. `none` and `err(e)` take their type from
+  `return none` or `return err(AgeErr.Negative)`. `none`, `err(e)` take their type from
   the place they stand in (declaration, argument, `return`, the other side of `==`); alone
-  it is R12. `some(x)` builds a `?T` for comparing: `x == some(3)`; `x == 3` is R8. `ok(x)`
+  it is R12. `some(x)` is for comparing: `x == some(3)`; `x == 3` is R8. `ok(x)`
   exists only as a pattern.
 - **`try x`** (functions and tests only): the value of `x`, or the function returns at
-  once with the same error or `none`. `try x or E.V(…)` turns the error into the
-  function's own error type (`or` runs only on failure); a different error type without
-  `or` is R12. `try` binds like a sign: `try f(a) + try f(b)`; as a statement `try f()`.
+  once with the same error or `none`. `try x or e` runs `e` only on failure and turns the
+  error into the function's own type: `e` is such a value, `err(E e): F.V(e)` binds the
+  cause (`E` = error type of `x`), or `F.V` alone when that variant holds exactly the
+  cause (`try read() or AppErr.Io`); not for `?T`.
+  `try` binds like a sign: `try f(a) + try f(b)`; as a statement `try f()`.
 - **`a ?? b`**: `a` if it has a value, else `b` (evaluated only then); `a` is `?T` or `T!E`.
 - **`switch` (R10)** over `T!E`: `case ok(int n):` and `case err(E e):`; over `?T`:
   `case some(int n):` and `case none:`; `ok` without parentheses for `void!E`; `_` skips the
   value; both forms or a `default` are needed.
-- **Use (R13).** A `T!E` or `?T` result is always used: `try`, `??`, `switch`, argument,
+- **Use (R13).** A `T!E` or `?T` is always used: `try`, `??`, `switch`, argument,
   `return`, or discarded with `_ = f()`; a bare `f()` statement is R13.
 - **Equality and text (R28).** `==` compares `?T` with `?T` and `T!E` with `T!E`;
   text is `some(4)`, `none`, `ok(30)`, `err(AgeErr.Negative)`, `ok` for `void!E`.
-- **`void!E main()`** is allowed. An error ends the program with `error: <text>` on stderr
+- **`void!E main()`**: an error ends the program with `error: <text>` on stderr
   (a `str` unchanged) and exit code 1; a panic is still exit code 2.
 
 ```dif fails "HallErr.NoSeat(7)"

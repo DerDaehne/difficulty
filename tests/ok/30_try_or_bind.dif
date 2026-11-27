@@ -1,0 +1,60 @@
+enum ParseErr {
+    Empty
+    Bad(str text)
+}
+
+enum OrderErr {
+    BadAmount(ParseErr cause)
+    Wrapped(ParseErr cause)
+    Pair(ParseErr cause, int n)
+    Text(str msg)
+}
+
+int!ParseErr parse(str raw) {
+    if raw == "" {
+        return err(ParseErr.Empty)
+    }
+    if raw == "x" {
+        return err(ParseErr.Bad("x{raw}"))
+    }
+    return raw.len()
+}
+
+str!str shout(str s) {
+    if s == "" {
+        return err("empty text")
+    }
+    return s
+}
+
+int!OrderErr amount(str raw) {
+    int n = try parse(raw) or err(ParseErr e): OrderErr.BadAmount(e)
+    return n * 10
+}
+
+int!OrderErr short(str raw) {
+    int n = try parse(raw) or OrderErr.Wrapped
+    return n * 10
+}
+
+str!OrderErr loud(str s) {
+    str t = try shout(s) or err(str m): OrderErr.Text("loud: {m}")
+    return "{t}!"
+}
+
+int!OrderErr maybe(?int o) {
+    int n = try o or OrderErr.Text("none")
+    return n
+}
+
+void main() {
+    print(amount("abc"))
+    print(amount(""))
+    print(amount("x"))
+    print(short("abc"))
+    print(short("x"))
+    print(loud("hi"))
+    print(loud(""))
+    print(maybe(some(4)))
+    print(maybe(none))
+}

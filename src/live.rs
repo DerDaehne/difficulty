@@ -311,9 +311,9 @@ impl Live<'_> {
             ExprKind::Try(x, or) => {
                 let mut after = live;
                 after.extend(self.escape.iter().cloned());
-                if let Some((_, alt)) = or {
+                if let Some(o) = or {
                     let end = self.escape.clone();
-                    after.extend(self.expr(alt, end));
+                    after.extend(self.expr(&o.alt, end));
                 }
                 self.expr(x, after)
             }

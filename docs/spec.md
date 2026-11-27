@@ -8,7 +8,7 @@ Diese Spezifikation ist nach den Regeln R1–R31 gegliedert. Ausgearbeitet sind 
 
 **Grammatik** steht in EBNF: `a b` Folge, `a | b` Auswahl, `[ a ]` optional, `{ a }` beliebig oft, `"x"` wörtlich, `NL` Zeilenende (siehe §1.3). Jede Produktion steht genau einmal; andere Abschnitte verweisen darauf.
 
-**Kanonische Form.** Wo der Compiler mehrere Schreibweisen annimmt (Feldreihenfolge im Struct-Literal, überflüssige Klammern um einen Elementtyp wie in `[](?int)`, abschließendes Komma in mehrzeiligen Listen, Trenner der `enum`-Varianten, `x` statt `some(x)` an einer `?T`-Stelle, die ein Ziel ist, R12), legt `dif fmt` die eine kanonische Form fest; der Compiler meldet dafür keinen Fehler. Ein Block aus genau einer Anweisung ohne eigenen Block (`if`, `else`, `while`, `for`, Rumpf eines Funktionsliterals oder Blocks, R26) steht einzeilig, wenn die Zeile dann höchstens 100 Zeichen lang ist (`if c { return e }`, `} else { x = 1 }`, `for int i in xs { total += i }`), sonst mehrzeilig; alles andere steht mehrzeilig. Die Fälle von `switch` sind keine Blöcke und bleiben davon unberührt. Der Compiler nimmt beide Formen an.
+**Kanonische Form.** Wo der Compiler mehrere Schreibweisen annimmt (Feldreihenfolge im Struct-Literal, überflüssige Klammern um einen Elementtyp wie in `[](?int)`, abschließendes Komma in mehrzeiligen Listen, Trenner der `enum`-Varianten, `x` statt `some(x)` an einer `?T`-Stelle, die ein Ziel ist, R12; `or F.V` statt `or err(E e): F.V(e)` hinter `try`, R12), legt `dif fmt` die eine kanonische Form fest; der Compiler meldet dafür keinen Fehler. Ein Block aus genau einer Anweisung ohne eigenen Block (`if`, `else`, `while`, `for`, Rumpf eines Funktionsliterals oder Blocks, R26) steht einzeilig, wenn die Zeile dann höchstens 100 Zeichen lang ist (`if c { return e }`, `} else { x = 1 }`, `for int i in xs { total += i }`), sonst mehrzeilig; alles andere steht mehrzeilig. Die Fälle von `switch` sind keine Blöcke und bleiben davon unberührt. Der Compiler nimmt beide Formen an.
 
 ### 0.1 Diagnosen
 
@@ -221,7 +221,7 @@ Drei Korrekturen gegenüber C, jeweils ein Fehler mit Hinweis statt stiller Bede
 expr     = binary ;
 binary   = unary { binop unary } ;          (* geordnet nach der Tabelle *)
 unary    = { "-" | "!" | "~" } ( try_expr | postfix ) ;
-try_expr = "try" postfix [ "or" postfix ] ;          (* R12 *)
+try_expr = "try" postfix [ try_or ] ;          (* R12 *)
 suffix   = "(" [ args ] ")" | "[" expr "]" | "." IDENT ;
 postfix  = primary { suffix } | primary { suffix } "(" [ args ] ")" block ;   (* zweite Form: Block-Argument, R26 *)
 args     = arg { "," arg } [ "," ] ;
@@ -1209,14 +1209,15 @@ main.dif:5:13: error[R8]: expected int, found int!ParseErr
 
 ### R12 — Scheitern steht im Typ
 
-**Regel.** Kann eine Funktion scheitern, steht es im Rückgabetyp: `T!E` heißt Wert oder `err(e)`, `?T` heißt Wert oder `none`. Erfolg gibt man einfach zurück. `try x` reicht einen Fehler gleichen Typs weiter; `try x or E.V(…)` übersetzt ihn vorher in einen eigenen.
+**Regel.** Kann eine Funktion scheitern, steht es im Rückgabetyp: `T!E` heißt Wert oder `err(e)`, `?T` heißt Wert oder `none`. Erfolg gibt man einfach zurück. `try x` reicht einen Fehler gleichen Typs weiter; `try x or E.V(…)` übersetzt ihn vorher in einen eigenen, `try x or err(C c): E.V(c)` bindet dabei die Ursache, `try x or E.V` ist die Kurzform dafür.
 
 ```ebnf
 err_val  = "err" "(" expr ")" ;
 some_val = "some" "(" expr ")" ;
+try_or   = "or" ( "err" "(" type IDENT ")" ":" postfix | postfix ) ;   (* Bindung der Ursache | Wert oder F.V *)
 ```
 
-**Grammatik:** `type` (R2), `try_expr`, `none` und `??` (§2), `err_val` und `some_val` hier, die Muster `ok`, `err`, `some`, `none` in R10.
+**Grammatik:** `type` (R2), `try_expr`, `none` und `??` (§2), `err_val`, `some_val` und `try_or` hier, die Muster `ok`, `err`, `some`, `none` in R10.
 
 Teil 2b legt fest:
 
@@ -1244,6 +1245,9 @@ Teil 2b legt fest:
   - `or` in einer Funktion, die kein `U!F` liefert: `` `or` needs a function that returns U!F ``, Hinweis `remove the or part, or return int!F`.
   - `or` ohne `try` ist `S1`, Meldung `` unexpected `or` ``, Hinweis `or belongs to try: try f() or E.V(…)`.
 - **`try x or e`:** `e` wird nur ausgewertet, wenn `x` scheitert; es ersetzt den ursprünglichen Fehler (er ist danach nicht mehr erreichbar). Für `?T` ersetzt es `none`. Hat `e` nicht den Fehlertyp der Funktion, ist es `R8`. `or` gehört zum unmittelbar davorstehenden `try` und umfasst genau einen `postfix`-Ausdruck: `try f() or E.V(1) + 2` ist `(try f() or E.V(1)) + 2`.
+- **`try x or err(E e): w`** bindet den Fehler von `x`. `E` ist der Fehlertyp von `x`, ausgeschrieben (R2); ein anderer Typ ist `R8` am Typ, Meldung `` `err` holds a ParseErr `` (mit dem richtigen Typ), Hinweis `or err(ParseErr s): …` (mit dem Namen aus dem Quelltext). `e` ist nur in `w` sichtbar (R4) und ein gewöhnlicher Name, der dort nicht schon vergeben sein darf. `w` hat den Fehlertyp der Funktion (sonst `R8` wie bei `or e`) und wird nur im Fehlerfall ausgewertet; was `w` aus `e` braucht, wird kopiert, `e` selbst wird danach wie der ursprüngliche Fehler freigegeben. Bei einem `?T` gibt es keinen Fehlerwert: `err(…):` ist dort `R12` am Typ, Meldung `` `try` on ?int has no error to bind ``, Hinweis `remove err(…):`; ohne Bindung gilt dort die Tabelle. Ob hinter `or` die Bindung oder ein Wert `err(x)` steht, entscheidet das `:` hinter der schließenden Klammer.
+- **Kurzform `or F.V`.** Der Ausdruck hinter `or` hat eine von zwei Formen, nach seinem Typ: ein Wert vom Fehlertyp `F` der Funktion (wie bisher), oder ein Varianten-Konstruktor `F.V` ohne Klammern (R26), dessen **genau eine** Nutzlast den Fehlertyp von `x` hat: `try io.read_file(path) or AppErr.Io` ist `try io.read_file(path) or err(io.IoErr e): AppErr.Io(e)`, die Ursache wandert unverändert in die Variante. Hat `V` eine andere Nutzlast, ist es `R8` am Konstruktor, Meldung `` `AppErr.Msg` holds str, but the cause is ParseErr ``; hat `V` mehrere, `` `AppErr.Two` has 2 values, but the cause is one ``; Hinweis jeweils `write it out: or err(ParseErr e): AppErr.Msg(…)`. Eine Variante ohne Nutzlast ist ein gewöhnlicher Wert. Für `?T` gibt es die Kurzform nicht (`F.V` mit Nutzlast ist dort `R8`, Meldung `` `F.V` needs its values: F.V(…) ``).
+- **Kanonische Form (§0).** `dif fmt` schreibt `or err(E e): F.V(e)` (genau diese Form: `e` als einziges Argument) als `or F.V`; der Compiler nimmt beide an und meldet für keine einen Fehler. Alles, was mehr tut (ein anderes Argument, ein Ausdruck um `e`, mehrere Nutzlasten), bleibt die Langform.
 - **`a ?? b`** ist `a`, wenn `a` einen Wert hat, sonst `b`; `a` ist ein `?T` oder `T!E`, `b` und das Ergebnis sind `T`. `b` wird nur ausgewertet, wenn es gebraucht wird. `??` bindet am schwächsten und ist rechtsassoziativ: `a ?? b ?? c` ist `a ?? (b ?? c)`. Ist `a` weder `?T` noch `T!E`, ist es `R12` am `??`, Meldung `` `??` needs a ?T or T!E on the left, found int ``, Hinweis `remove the ?? and its default`. Ein `b` anderen Typs ist `R8`.
 - **`try` an einer Schleife.** `for T x in try xs` (R11) wendet `try` auf jedes Element einer Folge von Ergebnissen an (Liste oder Array `[](T!E)` oder `[](?T)`, `io.lines()`): `x` hat den Typ `T`, ein Element, das ein Fehler oder `none` ist, beendet die Schleife und kehrt aus der Funktion zurück, genau wie `try` an einem Einzelwert. Für Fehlertyp der Funktion, `or` und die Tabelle oben gilt jeweils das Element als `x`; alle Meldungen von `try` stehen unverändert an dem `try` vor der Quelle. Eine Quelle, die keine Folge von `T!E` oder `?T` ist, ist `R12`, Meldung `` `try` needs a list of T!E or ?T, found []int ``, Hinweis `remove try`. Eine Schleife mit `try` darf nur in einer Funktion oder einem `test`-Block stehen (wie `try`).
 - **`void!E main()`** ist neben `void main()` erlaubt; `E` ist jeder Typ; jede andere Form von `main` ist `R1`, Meldung `` `main` must return void or void!E ``. Kommt ein Fehler aus `main` heraus, schreibt das Programm eine Zeile `error: ` und die Textform des Fehlers (R28; ein `str` unverändert, wie bei `print`) auf stderr und endet mit Exit-Code 1; was vorher auf stdout stand, bleibt erhalten. Einen Fehler gibt `main` an die Umgebung, ein Panic (R14) endet mit Exit-Code 2.
@@ -1309,6 +1313,52 @@ void main() {
 
 Ausgabe: `30`, `0`, `4`, `some(4)`, `none`, `err(AgeErr.Negative)`, `error AgeErr.TooOld(200)`, `form error FormErr.BadAge(200)`.
 
+Die Ursache binden und die Kurzform (`or err(E e): F.V(e)` und `or F.V` sind dasselbe, `dif fmt` schreibt die Kurzform):
+
+```dif
+use std.io
+
+enum ParseErr {
+    Empty
+    NotANumber(str text)
+}
+
+enum AppErr {
+    BadAmount(ParseErr cause)
+    Io(io.IoErr cause)
+}
+
+int!ParseErr parse_amount(str raw) {
+    if raw.is_empty() {
+        return err(ParseErr.Empty)
+    }
+    int n = raw.parse_int() ?? -1
+    if n < 0 {
+        return err(ParseErr.NotANumber(raw))
+    }
+    return n
+}
+
+int!AppErr order(str raw) {
+    int n = try parse_amount(raw) or err(ParseErr e): AppErr.BadAmount(e)
+    return n * 10
+}
+
+str!AppErr load(str path) {
+    str text = try io.read_file(path) or AppErr.Io
+    return text
+}
+
+void main() {
+    print(order("12"))
+    print(order(""))
+    print(order("abc"))
+    print(load("no/such/file.txt"))
+}
+```
+
+Ausgabe: `ok(120)`, `err(AppErr.BadAmount(ParseErr.Empty))`, `err(AppErr.BadAmount(ParseErr.NotANumber("abc")))`, `err(AppErr.Io(IoErr.NotFound("no/such/file.txt")))`.
+
 Ein Fehler aus `main`:
 
 ```dif fails "HallErr.NoSeat(7)"
@@ -1366,6 +1416,72 @@ int!FormErr form(int n) {
 main.dif:9:12: error[R12]: `try` gives AgeErr, but the function returns int!FormErr
   hint: translate it with try … or FormErr.V(…)
 ```
+
+```dif error R8
+enum AppErr {
+    Msg(str text)
+}
+
+enum ParseErr {
+    Empty
+}
+
+int!ParseErr parse(str raw) {
+    return 1
+}
+
+int!AppErr order(str raw) {
+    return try parse(raw) or AppErr.Msg
+}
+```
+
+```
+main.dif:14:30: error[R8]: `AppErr.Msg` holds str, but the cause is ParseErr
+  hint: write it out: or err(ParseErr e): AppErr.Msg(…)
+```
+
+```dif error R8
+enum AppErr {
+    Msg(str text)
+}
+
+enum ParseErr {
+    Empty
+}
+
+int!ParseErr parse(str raw) {
+    return 1
+}
+
+int!AppErr order(str raw) {
+    return try parse(raw) or err(str s): AppErr.Msg(s)
+}
+```
+
+```
+main.dif:14:34: error[R8]: `err` holds a ParseErr
+  hint: or err(ParseErr s): …
+```
+
+```dif error R12
+enum AppErr {
+    Msg(str text)
+}
+
+?int find(str raw) {
+    return none
+}
+
+int!AppErr order(str raw) {
+    return try find(raw) or err(str s): AppErr.Msg(s)
+}
+```
+
+```
+main.dif:10:33: error[R12]: `try` on ?int has no error to bind
+  hint: remove err(…):
+```
+
 
 ```dif error R12
 void main() {

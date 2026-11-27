@@ -3030,16 +3030,87 @@ impl<'a> Checker<'a> {
     }
 
     /// `try x` and `try x or e` (R12, R18).
-    fn try_expr(
-        &mut self,
-        e: &'a Expr,
-        x: &'a Expr,
-        or: Option<&'a (Pos, Box<Expr>)>,
-    ) -> (Ty, Val) {
+    fn try_expr(&mut self, e: &'a Expr, x: &'a Expr, or: Option<&'a TryOr>) -> (Ty, Val) {
         self.uses_2b = true;
         let (xt, _) = self.rvalue(x);
         let callee = self.last_callee;
         self.try_with(e, xt, callee, or)
+    }
+
+    /// The `or` part of `try x or …` for a function whose error type is `f` (R12): a
+    /// value of type `f`, `err(E e): value` binding the cause `e` of a `T!E`, or the
+    /// short form `F.V` of a variant that holds exactly the cause.
+    fn try_or(&mut self, o: &'a TryOr, xt: Ty, f: Ty) {
+        let cause = match xt {
+            Ty::Res(i) => Some(self.ress[i as usize].1),
+            _ => None,
+        };
+        if let Some(p) = &o.bind {
+            let bt = self.ty(&p.ty, false);
+            let mut have = Ty::Err;
+            match cause {
+                None => {
+                    let msg = format!("`try` on {} has no error to bind", self.tn(xt));
+                    self.err("R12", p.ty.pos, msg, Some("remove err(…):".into()));
+                }
+                Some(c) if bt == c || bt == Ty::Err || c == Ty::Err => have = c,
+                Some(c) => {
+                    let tn = self.tn(c);
+                    let art = if tn.starts_with(['a', 'e', 'i', 'o', 'u', 'A', 'E', 'I', 'O', 'U'])
+                    {
+                        "an"
+                    } else {
+                        "a"
+                    };
+                    let hint = format!("or err({tn} {}): …", p.name);
+                    let msg = format!("`err` holds {art} {tn}");
+                    self.err("R8", p.ty.pos, msg, Some(hint));
+                }
+            }
+            self.scopes.push(Vec::new());
+            self.declare(&p.name, p.pos, have, false, Val::Runtime, None);
+            self.at_place(f, &o.alt, None);
+            self.scopes.pop();
+            return;
+        }
+        if let (Some(c), Some((eid, name))) = (cause, self.short_variant(&o.alt)) {
+            if Ty::Named(eid) == f {
+                let Kind::Enum(vs) = &self.types[eid as usize].kind else {
+                    return;
+                };
+                if let Some(v) = vs
+                    .iter()
+                    .find(|v| v.name == name)
+                    .filter(|v| !v.fields.is_empty())
+                {
+                    let full = format!("{}.{name}", self.types[eid as usize].name);
+                    let msg = match v.fields[..] {
+                        [(t, _)] if t == c => return,
+                        [(t, _)] => format!(
+                            "`{full}` holds {}, but the cause is {}",
+                            self.tn(t),
+                            self.tn(c)
+                        ),
+                        _ => format!(
+                            "`{full}` has {} values, but the cause is one",
+                            v.fields.len()
+                        ),
+                    };
+                    let hint = format!("write it out: or err({} e): {full}(…)", self.tn(c));
+                    self.err("R8", o.alt.pos, msg, Some(hint));
+                    return;
+                }
+            }
+        }
+        self.at_place(f, &o.alt, None);
+    }
+
+    /// `E.V` written without parentheses: the enum and the variant name.
+    fn short_variant(&self, alt: &'a Expr) -> Option<(u32, &'a str)> {
+        match &alt.kind {
+            ExprKind::Field(base, name) => Some((self.enum_of(base)?, name.as_str())),
+            _ => None,
+        }
     }
 
     /// The rules of `try` for a value of type `xt`: the expression `try x`, or the
@@ -3049,7 +3120,7 @@ impl<'a> Checker<'a> {
         e: &'a Expr,
         xt: Ty,
         callee: Option<usize>,
-        or: Option<&'a (Pos, Box<Expr>)>,
+        or: Option<&'a TryOr>,
     ) -> (Ty, Val) {
         let Some(value) = self.inner(xt) else {
             if xt != Ty::Err {
@@ -3076,9 +3147,9 @@ impl<'a> Checker<'a> {
         };
         let Some(ret) = ret else {
             // in a test any failure ends the test; there is no error type to translate to
-            if let Some((opos, _)) = or {
+            if let Some(o) = or {
                 let msg = "`or` needs a function that returns U!F";
-                self.err("R12", *opos, msg, Some("remove the or part".into()));
+                self.err("R12", o.pos, msg, Some("remove the or part".into()));
                 return (Ty::Err, Val::Runtime);
             }
             return (value, Val::Runtime);
@@ -3091,8 +3162,8 @@ impl<'a> Checker<'a> {
             Ty::Res(i) => {
                 let f = self.ress[i as usize].1;
                 match or {
-                    Some((_, alt)) => {
-                        self.at_place(f, alt, None);
+                    Some(o) => {
+                        self.try_or(o, xt, f);
                         self.last_callee = callee;
                     }
                     None if matches!(xt, Ty::Res(j) if self.ress[j as usize].1 == f) => {}
@@ -3115,13 +3186,13 @@ impl<'a> Checker<'a> {
                 }
             }
             Ty::Opt(i) => {
-                if let Some((opos, _)) = or {
+                if let Some(o) = or {
                     let msg = "`or` needs a function that returns U!F";
                     let hint = format!(
                         "remove the or part, or return {}!F",
                         self.tn(self.opts[i as usize])
                     );
-                    self.err("R12", *opos, msg, Some(hint));
+                    self.err("R12", o.pos, msg, Some(hint));
                     return (Ty::Err, Val::Runtime);
                 }
                 if matches!(xt, Ty::Res(_)) {

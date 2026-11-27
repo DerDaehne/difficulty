@@ -281,6 +281,43 @@ fn try_r12() {
         "expected F, found E",
         "",
     );
+    // R12 `or err(E e): …` and the short form `or F.V`
+    let g = "enum G {\n    Wrap(E e)\n    Pair(E e, int n)\n    Text(str s)\n}\n";
+    bad(
+        &format!("{PRE}{g}int!G f() {{\n    return try get() or err(F x): G.Wrap(E.Bad)\n}}\n"),
+        "R8",
+        "18:29",
+        "`err` holds an E",
+        "or err(E x): …",
+    );
+    bad(
+        &format!("{PRE}{g}int!G f() {{\n    return try opt() or err(E x): G.Wrap(x)\n}}\n"),
+        "R12",
+        "18:29",
+        "`try` on ?int has no error to bind",
+        "remove err(…):",
+    );
+    bad(
+        &format!("{PRE}{g}int!G f() {{\n    return try get() or G.Text\n}}\n"),
+        "R8",
+        "18:25",
+        "`G.Text` holds str, but the cause is E",
+        "write it out: or err(E e): G.Text(…)",
+    );
+    bad(
+        &format!("{PRE}{g}int!G f() {{\n    return try get() or G.Pair\n}}\n"),
+        "R8",
+        "18:25",
+        "`G.Pair` has 2 values, but the cause is one",
+        "write it out: or err(E e): G.Pair(…)",
+    );
+    bad(
+        &format!("{PRE}{g}int!G f() {{\n    int n = try get() or err(E x): G.Wrap(x)\n    return n + x\n}}\n"),
+        "R4",
+        "19:16",
+        "unknown name `x`",
+        "did you mean f?",
+    );
     bad(
         "void main() {\n    int x = 1 or 2\n}\n",
         "S1",
