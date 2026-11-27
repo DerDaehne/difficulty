@@ -2,12 +2,18 @@ use std.io
 
 enum CalcErr {
     Syntax(int col)
+    DivByZero
+}
+
+enum Expr {
+    Num(int value)
+    Neg(Expr operand)
+    Op(rune op, Expr left, Expr right)
 }
 
 struct Parser {
     []rune chars
     int pos = 0
-    bool zero = false  // a division by zero happened; reported only if the syntax is fine
 }
 
 // The next character after spaces, '\0' at the end of the line.
@@ -21,34 +27,34 @@ rune Parser.peek(mut self) {
     return self.chars[self.pos]
 }
 
-int!CalcErr Parser.fail(mut self) {
+Expr!CalcErr Parser.fail(mut self) {
     _ = self.peek()
     return err(CalcErr.Syntax(self.pos + 1))
 }
 
-int!CalcErr Parser.number(mut self) {
+Expr!CalcErr Parser.number(mut self) {
     int value = 0
     while self.pos < self.chars.len() && self.chars[self.pos].is_digit() {
         value = value * 10 + (int(self.chars[self.pos]) - int('0'))
         self.pos += 1
     }
-    return value
+    return Expr.Num(value)
 }
 
-int!CalcErr Parser.unary(mut self) {
+Expr!CalcErr Parser.unary(mut self) {
     rune c = self.peek()
     if c == '-' {
         self.pos += 1
-        return -(try self.unary())
+        return Expr.Neg(try self.unary())
     }
     if c == '(' {
         self.pos += 1
-        int value = try self.expr()
+        Expr inner = try self.expr()
         if self.peek() != ')' {
             return self.fail()
         }
         self.pos += 1
-        return value
+        return inner
     }
     if c.is_digit() {
         return self.number()
@@ -56,69 +62,87 @@ int!CalcErr Parser.unary(mut self) {
     return self.fail()
 }
 
-int!CalcErr Parser.term(mut self) {
-    int value = try self.unary()
+Expr!CalcErr Parser.term(mut self) {
+    Expr left = try self.unary()
     while true {
         rune op = self.peek()
         if op != '*' && op != '/' && op != '%' {
-            return value
+            return left
         }
         self.pos += 1
-        int right = try self.unary()
-        if op == '*' {
-            value *= right
-        } else if right == 0 {
-            self.zero = true
-        } else if op == '/' {
-            value /= right
-        } else {
-            value %= right
-        }
+        left = Expr.Op(op, left, try self.unary())
     }
 }
 
-int!CalcErr Parser.expr(mut self) {
-    int value = try self.term()
+Expr!CalcErr Parser.expr(mut self) {
+    Expr left = try self.term()
     while true {
         rune op = self.peek()
         if op != '+' && op != '-' {
-            return value
+            return left
         }
         self.pos += 1
-        int right = try self.term()
-        if op == '+' {
-            value += right
-        } else {
-            value -= right
-        }
+        left = Expr.Op(op, left, try self.term())
     }
 }
 
-int!CalcErr Parser.parse(mut self) {
-    int value = try self.expr()
-    if self.peek() != '\0' {
-        return self.fail()
-    }
-    return value
-}
-
-str calc(str line) {
+Expr!CalcErr parse(str line) {
     Parser p = Parser{chars: line.runes()}
-    switch p.parse() {
-    case ok(int value):
-        return if p.zero { "error: division by zero" } else { "{value}" }
-    case err(CalcErr e):
-        switch e {
-        case CalcErr.Syntax(int col):
-            return "error: syntax at {col}"
+    Expr e = try p.expr()
+    if p.peek() != '\0' {
+        return err(CalcErr.Syntax(p.pos + 1))
+    }
+    return e
+}
+
+int!CalcErr eval(Expr e) {
+    switch e {
+    case Expr.Num(int value):
+        return value
+    case Expr.Neg(Expr operand):
+        return -(try eval(operand))
+    case Expr.Op(rune op, Expr left, Expr right):
+        int a = try eval(left)
+        int b = try eval(right)
+        switch op {
+        case '+':
+            return a + b
+        case '-':
+            return a - b
+        case '*':
+            return a * b
+        default:
+            if b == 0 {
+                return err(CalcErr.DivByZero)
+            }
+            return if op == '/' { a / b } else { a % b }
         }
+    }
+}
+
+int!CalcErr calc(str line) {
+    return eval(try parse(line))
+}
+
+str message(CalcErr e) {
+    switch e {
+    case CalcErr.Syntax(int col):
+        return "error: syntax at {col}"
+    case CalcErr.DivByZero:
+        return "error: division by zero"
     }
 }
 
 void!io.IoErr main() {
     for str line in try io.lines() {
-        if !line.trim().is_empty() {
-            print(calc(line))
+        if line.trim().is_empty() {
+            continue
+        }
+        switch calc(line) {
+        case ok(int value):
+            print(value)
+        case err(CalcErr e):
+            print(message(e))
         }
     }
 }

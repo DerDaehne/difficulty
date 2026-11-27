@@ -32,6 +32,18 @@ bool all_digits(str s) {
     return if negative { -cents } else { cents }
 }
 
+// The id, none unless 1 to 9 digits and at least 1.
+?int id_of(str s) {
+    if !all_digits(s) || s.len() > 9 {
+        return none
+    }
+    int id = try s.parse_int()
+    if id < 1 {
+        return none
+    }
+    return id
+}
+
 // The record in a line, or the first reason why it is broken.
 Record!str parse_record(str line) {
     []str f = line.split(",").map(str(str x) { return x.trim() })
@@ -39,10 +51,10 @@ Record!str parse_record(str line) {
         return err("expected 3 fields")
     }
     int id = 0
-    if all_digits(f[0]) && f[0].len() <= 9 {
-        id = f[0].parse_int() ?? 0
-    }
-    if id < 1 {
+    switch id_of(f[0]) {
+    case some(int v):
+        id = v
+    case none:
         return err("bad id")
     }
     if f[1].is_empty() {

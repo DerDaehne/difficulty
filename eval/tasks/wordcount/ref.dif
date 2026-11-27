@@ -1,7 +1,5 @@
 // Word count: reads stdin, prints the 10 most frequent words and a summary line.
 // A word is a run of ASCII letters; everything else separates words.
-//   dif run examples/wordcount.dif < text.txt
-// `dif test examples/wordcount.dif` runs the tests.
 use std.io
 
 bool is_ascii_letter(rune r) {
@@ -50,7 +48,7 @@ void!io.IoErr main() {
     int total = 0
     for str line in try io.lines() {
         for str w in words_of(line) {
-            counts[w] = count_of(counts, w) + 1
+            counts.add(w, 1)
             total += 1
         }
     }
