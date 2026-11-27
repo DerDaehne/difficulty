@@ -54,15 +54,23 @@ const F64_METHODS: &[&str] = &[
 ];
 const LIST_METHODS: &[&str] = &[
     "len", "is_empty", "push", "pop", "insert", "remove", "first", "last", "contains", "index_of",
-    "count", "sort", "reverse", "slice", "join",
+    "count", "sort", "reverse", "swap", "slice", "join",
 ];
 const ARRAY_METHODS: &[&str] = &[
-    "len", "is_empty", "first", "last", "contains", "index_of", "count", "sort", "reverse",
+    "len", "is_empty", "first", "last", "contains", "index_of", "count", "sort", "reverse", "swap",
     "slice", "join",
 ];
-const MAP_METHODS: &[&str] = &["len", "has", "remove", "keys", "values"];
+const MAP_METHODS: &[&str] = &["len", "has", "remove", "add", "keys", "values"];
 /// Functions of `io` and `os`.
-const IO_FUNCS: &[&str] = &["lines", "read_line", "read_file", "write_file", "eprint"];
+const IO_FUNCS: &[&str] = &[
+    "lines",
+    "read_line",
+    "read_file",
+    "write_file",
+    "read_lines",
+    "write_lines",
+    "eprint",
+];
 const OS_FUNCS: &[&str] = &["args", "exit", "env"];
 
 impl<'a> Checker<'a> {
@@ -863,6 +871,7 @@ impl<'a> Checker<'a> {
                     "index_of" => sig(&[el], self.opt(int), false),
                     "count" => sig(&[el], int, false),
                     "sort" | "reverse" => sig(&[], Ty::Void, true),
+                    "swap" => sig(&[int, int], Ty::Void, true),
                     "slice" => sig(&[int, int], self.list(el), false),
                     "join" if el == st => sig(&[st], st, false),
                     _ => return None,
@@ -874,6 +883,7 @@ impl<'a> Checker<'a> {
                     "len" => sig(&[], int, false),
                     "has" => sig(&[k], boolean, false),
                     "remove" => sig(&[k], boolean, true),
+                    "add" => sig(&[k, v], Ty::Void, true),
                     "keys" => sig(&[], self.list(k), false),
                     "values" => sig(&[], self.list(v), false),
                     _ => return None,
@@ -968,6 +978,14 @@ impl<'a> Checker<'a> {
         for (a, p) in args.iter().zip(&s.params) {
             self.at_place(*p, a, None);
         }
+        if let (Ty::Map(i), "add") = (bt, m) {
+            let v = self.maps[i as usize].1;
+            if !v.is_number() && v != Ty::Err {
+                let msg = format!("`add` needs number values, found {}", self.tn(v));
+                let hint = format!("use {}[k] = x", self.text(base));
+                self.err("R8", e.pos, msg, Some(hint));
+            }
+        }
         if m == "sort" {
             let el = match bt {
                 Ty::List(i) => self.lists[i as usize],
@@ -1038,6 +1056,14 @@ impl<'a> Checker<'a> {
             }
             ("io", "read_file") => Some((vec![st], self.res(st, io_err), false)),
             ("io", "write_file") => Some((vec![st, st], self.res(Ty::Void, io_err), true)),
+            ("io", "read_lines") => {
+                let l = self.list(st);
+                Some((vec![st], self.res(l, io_err), false))
+            }
+            ("io", "write_lines") => {
+                let l = self.list(st);
+                Some((vec![st, l], self.res(Ty::Void, io_err), true))
+            }
             ("io", "eprint") => None,
             ("os", "args") => Some((vec![], self.list(st), false)),
             ("os", "exit") => Some((vec![int], Ty::Void, true)),

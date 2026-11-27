@@ -282,7 +282,7 @@ fn index_and_places() {
     // the element of a map is no place
     bad(
         "map[str]int m = {}\nm[\"a\"] += 1",
-        "3:12 R8 cannot apply `+=` to ?int and int | m[\"a\"] = (m[\"a\"] ?? 0) + 1",
+        "3:12 R8 cannot apply `+=` to ?int and int | m.add(\"a\", 1)",
     );
     let s = "struct P {\n    int x\n}\n\nvoid main() {\n    map[str]P m = {\"a\": P{x: 1}}\n    m[\"a\"].x = 2\n    print(m)\n}\n";
     assert_eq!(diags(s), ["7:5 R30 a map entry is changed by assigning it | read it, change the copy, and store it: m[k] = v"]);
@@ -298,7 +298,7 @@ fn element_places_and_overlap() {
     ok(&format!("{swap}void main() {{\n    []int xs = [1, 2]\n    int i = 0\n    swap(mut xs[0], mut xs[1])\n    swap(mut xs[i], mut xs[1])\n    print(xs)\n}}\n"));
     assert_eq!(
         diags(&format!("{swap}void main() {{\n    []int xs = [1, 2]\n    swap(mut xs[0], mut xs[0])\n    print(xs)\n}}\n")),
-        ["9:21 R6 `xs` goes into this call changeable twice | pass it changeable only once"]
+        ["9:21 R6 `xs` goes into this call changeable twice | to swap two elements use xs.swap(i, j)"]
     );
     assert_eq!(
         diags(&format!("{swap}void main() {{\n    [][]int xs = [[1], [2]]\n    swap(mut xs[0][0], mut xs[0][0])\n    print(xs)\n}}\n")).len(),
@@ -640,4 +640,35 @@ fn nested_optional_in_parens_is_s1() {
     assert_eq!(diags(&in_main("[]?(?int) c = []")), want("2:5"));
     assert_eq!(diags("void f(?(?int) a) {\n}\n"), want("1:8"));
     assert_eq!(diags("struct S {\n    ?(?int) a\n}\n"), want("2:5"));
+}
+
+#[test]
+fn small_std_extensions_check() {
+    ok(&in_main("[]int xs = [1, 2]\nxs.swap(0, 1)\n[2]str a = [\"a\", \"b\"]\na.swap(0, 1)\nmap[str]f64 m = {}\nm.add(\"k\", 1.5)\nprint(\"{xs}{a}{m}\")"));
+    ok("use std.io\n\nvoid!io.IoErr main() {\n    try io.write_lines(\"f\", [\"a\"])\n    []str ls = try io.read_lines(\"f\")\n    print(ls)\n}\n");
+    bad(
+        "[]int xs = [1, 2]\nxs.swap(0)\nprint(xs)",
+        "3:5 R8 `swap` takes 2 arguments, found 1",
+    );
+    bad(
+        "[]str xs = [\"a\"]\nxs.swap(\"a\", 0)\nprint(xs)",
+        "3:13 R8 expected int, found str",
+    );
+    bad(
+        "map[str]str m = {}\nm.add(\"a\", \"b\")\nprint(m)",
+        "3:5 R8 `add` needs number values, found str | use m[k] = x",
+    );
+    bad(
+        "map[str]int m = {}\nm[\"a\"] -= 1",
+        "3:12 R8 cannot apply `-=` to ?int and int | m[\"a\"] = (m[\"a\"] ?? 0) - 1",
+    );
+    bad(
+        "[]int xs = [1, 2]\nxs[0] = 3\nxs.swap(0, 1)",
+        "4:5 R6 `xs` is changed but never read afterwards | use the value, or remove the change",
+    );
+    let s = "void sw(mut int a, mut int b) {\n    int t = a\n    a = b\n    b = t\n}\n\nvoid main() {\n    []int xs = [1, 2]\n    sw(mut xs[0], mut xs[0])\n    print(xs)\n}\n";
+    assert_eq!(
+        diags(s),
+        ["9:19 R6 `xs` goes into this call changeable twice | to swap two elements use xs.swap(i, j)"]
+    );
 }

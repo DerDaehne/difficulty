@@ -6,6 +6,7 @@ use std::fmt::Write;
 use super::{Arg, Emitter};
 use crate::ast::*;
 use crate::checker::{Num, Ty};
+use crate::diag::Pos;
 
 /// An integer type: `(bits, signed)`.
 fn int_kind(t: Ty) -> Option<(u32, bool)> {
@@ -364,7 +365,10 @@ impl<'a> Emitter<'a> {
             _ => None,
         };
         let (l, c) = at;
-        let changes = matches!(m, "push" | "pop" | "insert" | "remove" | "sort" | "reverse");
+        let changes = matches!(
+            m,
+            "push" | "pop" | "insert" | "remove" | "sort" | "reverse" | "swap"
+        );
         let mut items = vec![if changes {
             Arg::Addr(base)
         } else {
@@ -454,6 +458,10 @@ impl<'a> Emitter<'a> {
                 v[1],
                 data(&v[0])
             ),
+            "swap" => match arr_n {
+                Some(n) => format!("dif_arr_swap(&{d}, ({})->a, {n}, {}, {}, {l}, {c})", v[0], v[1], v[2]),
+                None => format!("dif_list_swap(&{d}, {}, {}, {}, {l}, {c})", v[0], v[1], v[2]),
+            },
             "sort" | "reverse" => match arr_n {
                 Some(n) => format!("dif_arr_{m}(&{d}, ({})->a, {n})", v[0]),
                 None => format!("dif_list_{m}(&{d}, {})", v[0]),
@@ -486,12 +494,17 @@ impl<'a> Emitter<'a> {
         let (kt, vt) = self.info.maps[i as usize];
         let (kd, vd) = (self.dty(kt), self.dty(vt));
         let (l, c) = at;
-        let mut items = vec![if m == "remove" {
+        let mut items = vec![if matches!(m, "remove" | "add") {
             Arg::Addr(base)
         } else {
             Arg::Ref(base)
         }];
-        items.extend(args.iter().map(Arg::Ref));
+        if m == "add" {
+            items.push(Arg::Val(&args[0], kt));
+            items.push(Arg::Val(&args[1], vt));
+        } else {
+            items.extend(args.iter().map(Arg::Ref));
+        }
         let (pre, v) = self.ordered(&items);
         let kc = self.c_ty(kt);
         let body = match m {
@@ -504,6 +517,24 @@ impl<'a> Emitter<'a> {
                 "({{ {kc} k_ = {}; dif_map_remove(&{kd}, &{vd}, {}, &k_, {l}, {c}); }})",
                 v[1], v[0]
             ),
+            "add" => {
+                let vc = self.c_ty(vt);
+                let sum = self.op(
+                    "+",
+                    vt,
+                    "(p_ ? *p_ : 0)".into(),
+                    "x_".into(),
+                    Pos {
+                        line: l as u32,
+                        col: c as u32,
+                        offset: 0,
+                    },
+                );
+                format!(
+                    "({{ {kc} k_ = {}; {vc} x_ = {}; const {vc} *p_ = (const {vc} *)dif_map_get(&{kd}, &{vd}, *{}, &k_, {l}, {c}); {vc} s_ = {sum}; dif_map_set(&{kd}, &{vd}, {}, &k_, &s_, {l}, {c}); }})",
+                    v[1], v[2], v[0], v[0]
+                )
+            }
             "keys" => format!("dif_map_keys(&{kd}, &{vd}, {})", v[0]),
             _ => format!("dif_map_values(&{kd}, &{vd}, {})", v[0]),
         };
@@ -540,6 +571,14 @@ impl<'a> Emitter<'a> {
             ),
             ("io", "write_file") => format!(
                 "({{ dif_ioerr x_; {r} r_ = {{0}}; if (dif_io_write_file({}, {}, &x_)) {{ r_.ok = true; }} else {{ r_.e = dif_ioerr_val(x_); }} r_; }})",
+                v[0], v[1]
+            ),
+            ("io", "read_lines") => format!(
+                "({{ dif_list *o_; dif_ioerr x_; {r} r_ = {{0}}; if (dif_io_read_lines({}, &o_, &x_)) {{ r_.ok = true; r_.v = o_; }} else {{ r_.e = dif_ioerr_val(x_); }} r_; }})",
+                v[0]
+            ),
+            ("io", "write_lines") => format!(
+                "({{ dif_ioerr x_; {r} r_ = {{0}}; if (dif_io_write_lines({}, {}, &x_)) {{ r_.ok = true; }} else {{ r_.e = dif_ioerr_val(x_); }} r_; }})",
                 v[0], v[1]
             ),
             ("io", "read_line") => format!(

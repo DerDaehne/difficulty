@@ -674,7 +674,7 @@ Teil 2a legt fest:
 Teil 2c ergänzt Elemente:
 
 - Ein Ort ist auch ein Element einer Liste oder eines Arrays, `xs[i]`, `grid[1][0]`, `scene.items[i].pos`; seine Wurzel ist die Variable am Anfang. `m[k]` einer Map ist kein Ort (R30). Wer `xs[i]` ändert, ändert `xs`. `normalize(mut tasks[i])` und `tasks[i].done = true` sind gültig. Der Index wird vor dem Aufruf ausgewertet und geprüft (R14).
-- **Überlappung.** `xs` und `xs[i]` überlappen immer, `xs[0]` und `xs[0]` ebenso, `xs[0]` und `xs[1]` nie; `R6` wie oben (`` `xs[0]` goes into this call changeable twice ``). Zwei Elemente derselben Wurzel, von denen ein Index erst zur Laufzeit feststeht (`swap(mut xs[i], mut xs[j])`), prüft das Programm beim Aufruf; gleiche Indizes brechen mit `overlapping mut arguments: index <n>` ab (R14), `<n>` ist der gemeinsame Index.
+- **Überlappung.** `xs` und `xs[i]` überlappen immer, `xs[0]` und `xs[0]` ebenso, `xs[0]` und `xs[1]` nie; `R6` wie oben (`` `xs[0]` goes into this call changeable twice ``); sind beide Orte Elemente derselben Liste, lautet der Hinweis `to swap two elements use xs.swap(i, j)` (mit dem Namen des Orts statt `xs`). Zwei Elemente derselben Wurzel, von denen ein Index erst zur Laufzeit feststeht (`swap(mut xs[i], mut xs[j])`), prüft das Programm beim Aufruf; gleiche Indizes brechen mit `overlapping mut arguments: index <n>` ab (R14), `<n>` ist der gemeinsame Index. Wer zwei Elemente vertauschen will, nimmt `xs.swap(i, j)` (§4.4); Abbrüche tragen keinen Hinweis.
 
 Teil 2d ergänzt Funktionsliterale und Blöcke (R26):
 
@@ -2485,7 +2485,7 @@ Teil 2c legt fest:
 
 - **Typ und Literal.** `map[K]V` verbindet Schlüssel `K` mit Werten `V`; `K` ist `hashable` (R28), `V` ein beliebiger Typ. `{"a": 1, "b": 2}` hat die Typen der Stelle (R8); ohne Stelle die des ersten Eintrags, bei Schlüsseln und Werten je für sich nach der Regel der Liste (R5, Teil 2c: erstes Element, das kein Literal ist); ein späterer Schlüssel oder Wert anderen Typs ist `R8`, Meldung `` expected str, found int `` am Ausdruck. Das leere `{}` braucht eine Stelle (`map[str]int m = {}`), sonst `R8`, Meldung `` `{}` needs a place of type map[K]V ``, ohne Hinweis. Steht ein Schlüssel zweimal im Literal, ist das `R30` am zweiten, wenn beide Literale oder `const` sind (Meldung `` duplicate key "a" ``, Hinweis `first used at main.dif:2:22`); sonst setzt der spätere Eintrag den Wert des früheren, wie `m[k] = v`. Mehrzeilig und mit abschließendem Komma wie `struct_lit` (R5, kanonisch §0).
 - **Lesen.** `m[k]` hat den Typ `?V`: `some(v)`, wenn `k` vorkommt, sonst `none`; nie ein Abbruch. `k` hat den Typ `K` (R8). Man benutzt es mit `??`, `switch` oder `try` (R12): `counts[w] ?? 0`.
-- **Schreiben.** `m[k] = v` ersetzt den Wert von `k` oder fügt den Eintrag hinten an. Für R6 gilt `m[k] = v` als Änderung von `m`, auch wenn `m[k]` kein Ort ist. Ersetzen ändert die Stelle des Eintrags nicht; wer `k` mit `remove` entfernt und wieder setzt, steht hinten. `m[k] += 1` und die anderen Zuweisungsoperatoren sind `R8` am Operator, Meldung `` cannot apply `+=` to ?int and int ``, Hinweis `counts["a"] = (counts["a"] ?? 0) + 1` (mit `m[k]` aus dem Quelltext).
+- **Schreiben.** `m[k] = v` ersetzt den Wert von `k` oder fügt den Eintrag hinten an. Für R6 gilt `m[k] = v` als Änderung von `m`, auch wenn `m[k]` kein Ort ist. Ersetzen ändert die Stelle des Eintrags nicht; wer `k` mit `remove` entfernt und wieder setzt, steht hinten. `m[k] += 1` und die anderen Zuweisungsoperatoren sind `R8` am Operator, Meldung `` cannot apply `+=` to ?int and int ``, Hinweis bei `+=` mit Zahlenwerten `counts.add("a", 1)` (§4.5), bei den anderen Operatoren `counts["a"] = (counts["a"] ?? 0) - 1` (mit `m[k]` aus dem Quelltext).
 - **Kein Ort.** Ein Eintrag wird nur durch `m[k] = v` ersetzt. `m[k].f = v`, `m[k].push(x)` (eine Methode, die `self` ändert) und `mut m[k]` sind `R30` am Anfang des Orts, Meldung `` a map entry is changed by assigning it ``, Hinweis `read it, change the copy, and store it: m[k] = v`.
 - **Reihenfolge.** Einträge liegen in der Reihenfolge der Einfügung; `for K k, V v in m`, `m.keys()`, `m.values()` und die Textform halten sie ein. Die Ausgabe eines Programms ist darum bei gleicher Eingabe immer gleich.
 - **Schlüssel.** `K` ist jeder Typ, der `equal` ist; zwei Schlüssel sind dieselben, wenn `==` sie gleich nennt (`0.0` und `-0.0` sind derselbe Schlüssel). Ein Schlüssel, der irgendwo ein `NaN` enthält (`f64`, Liste, Struct), bricht ab (R14, `NaN cannot be a map key`), und zwar bei jeder Operation, die einen Schlüssel nimmt: `m[k] = v`, `m[k]`, `m.has(k)` und `m.remove(k)`; die Position ist die des `[` bzw. des Methodennamens. Es gibt nur diese eine Regel, auch wenn die Map leer ist. Gleichheit, Textform: R28; Methoden: §4.5; Kopie und Schnappschuss: R5, Teil 2c.
@@ -2521,7 +2521,7 @@ void main() {
 
 ```
 main.dif:3:17: error[R8]: cannot apply `+=` to ?int and int
-  hint: counts["a"] = (counts["a"] ?? 0) + 1
+  hint: counts.add("a", 1)
 ```
 
 ```dif error R30
@@ -2775,7 +2775,7 @@ Die Ergebnisse sind wieder `f64`; wer eine Ganzzahl will, schreibt `int(x.round(
 
 ### 4.4 Listen und Arrays
 
-Für eine Liste `[]T`, in der `T` den Elementtyp meint. Ein Array `[N]T` hat alle Methoden, die die Länge nicht ändern (also `len`, `is_empty`, `first`, `last`, `contains`, `index_of`, `count`, `sort`, `reverse`, `slice`, `join`, `filter`, `map`, `sort_by`, `any`, `all`); `push`, `pop`, `insert` und `remove` an einem Array sind `R4`, Meldung `` `[3]int` has no method `push` ``, Hinweis `use a list: []int`. `filter`, `map`, `sort_by`, `any` und `all` stehen mit den Funktionsliteralen in §4.7.
+Für eine Liste `[]T`, in der `T` den Elementtyp meint. Ein Array `[N]T` hat alle Methoden, die die Länge nicht ändern (also `len`, `is_empty`, `first`, `last`, `contains`, `index_of`, `count`, `sort`, `reverse`, `swap`, `slice`, `join`, `filter`, `map`, `sort_by`, `any`, `all`); `push`, `pop`, `insert` und `remove` an einem Array sind `R4`, Meldung `` `[3]int` has no method `push` ``, Hinweis `use a list: []int`. `filter`, `map`, `sort_by`, `any` und `all` stehen mit den Funktionsliteralen in §4.7.
 
 | Signatur | Verhalten | Wirkung |
 |---|---|---|
@@ -2791,10 +2791,11 @@ Für eine Liste `[]T`, in der `T` den Elementtyp meint. Ein Array `[N]T` hat all
 | `int [].count(T x)` | Anzahl der Elemente, die `x` gleichen | |
 | `void [].sort()` | sortiert aufsteigend; stabil; `T` ist `ordered` (R28); `NaN` steht hinter allen Zahlen | ändert |
 | `void [].reverse()` | kehrt die Reihenfolge um | ändert |
+| `void [].swap(int i, int j)` | vertauscht die Elemente an `i` und `j`; beide Indizes werden geprüft, einer außerhalb `0 … len()-1` bricht ab (R14, Meldung `index <i> out of bounds for length <n>`, Position am Namen `swap`; ist `i` falsch, nennt sie `i`); bei `i == j` bleibt die Liste unverändert | ändert |
 | `[]T [].slice(int a, int b)` | eine neue Liste aus den Elementen `a … b-1`; `0 ≤ a ≤ b ≤ len()` | |
 | `str []str.join(str sep)` | die Elemente mit `sep` dazwischen; nur für `[]str` | |
 
-`repeat(x, n)` (§4.1) baut Listen. `==` vergleicht Länge und Elemente (R28). Die leere Liste hat kein erstes Element: `pop`, `first` und `last` geben `none`. Ein `slice` ist eine Kopie, keine Sicht (R5). `pop` und `remove` ändern die Liste wie jede andere Methode (R6): wird die Liste danach nie gelesen, ist das eine verlorene Änderung mit dem Hinweis `use xs.last() if the list is not needed afterwards` bzw. `use xs[i] if the list is not needed afterwards`.
+`repeat(x, n)` (§4.1) baut Listen. `==` vergleicht Länge und Elemente (R28). Die leere Liste hat kein erstes Element: `pop`, `first` und `last` geben `none`. Ein `slice` ist eine Kopie, keine Sicht (R5). `swap` ändert die Liste wie jede andere ändernde Methode (R6, R7), auch bei `i == j`; sie ersetzt `swap(mut xs[i], mut xs[j])` (R6). `pop` und `remove` ändern die Liste wie jede andere Methode (R6): wird die Liste danach nie gelesen, ist das eine verlorene Änderung mit dem Hinweis `use xs.last() if the list is not needed afterwards` bzw. `use xs[i] if the list is not needed afterwards`.
 
 ```dif snippet
 []int xs = [5, 3, 8]
@@ -2818,9 +2819,23 @@ print(empty.pop())
 print(empty)
 print(["b", "a"].join("-"))
 print(repeat(0, 3))
+[]str names = ["a", "b", "c"]
+names.swap(0, 2)
+names.swap(1, 1)
+print(names)
 ```
 
-Ausgabe: `[9, 5, 3, 8, 1]`, `[1, 3, 5, 8, 9]`, `some(9)`, `some(1)`, `some(3)`, `false`, `[3, 5]`, `[8, 5, 3, 1]`, `8 3`, `1`, `none`, `[]`, `b-a`, `[0, 0, 0]`.
+Ausgabe: `[9, 5, 3, 8, 1]`, `[1, 3, 5, 8, 9]`, `some(9)`, `some(1)`, `some(3)`, `false`, `[3, 5]`, `[8, 5, 3, 1]`, `8 3`, `1`, `none`, `[]`, `b-a`, `[0, 0, 0]`, `["c", "b", "a"]`.
+
+```dif panic "index 3 out of bounds for length 3"
+[]int xs = [1, 2, 3]
+xs.swap(0, 3)
+print(xs)
+```
+
+```
+panic: index 3 out of bounds for length 3 (main.dif:3:8)
+```
 
 ```dif error R28
 struct P {
@@ -2863,10 +2878,49 @@ Für `map[K]V`; Literal, `m[k]` und `m[k] = v` stehen in R30.
 | `int map.len()` | Anzahl der Einträge | |
 | `bool map.has(K k)` | `k` kommt vor | |
 | `bool map[K]V.remove(K k)` | entfernt den Eintrag; `true`, wenn er da war | ändert |
+| `void map[K]V.add(K k, V x)` | nur für Zahlen-`V` (alle Ganzzahlbreiten und `f64`): addiert `x` zum Wert von `k`; fehlt `k`, beginnt die Summe bei 0 und der Eintrag wird hinten angefügt; ein Überlauf bricht ab wie `+` (R29, `integer overflow in +`, Position am Namen `add`); ein anderes `V` ist `R8` | ändert |
 | `[]K map.keys()` | die Schlüssel in Einfügereihenfolge | |
 | `[]V map.values()` | die Werte in derselben Reihenfolge | |
 
-`keys` und `values` sind Kopien (R5). Eine leere Map hat Länge 0 und Textform `{}`.
+`keys` und `values` sind Kopien (R5). Eine leere Map hat Länge 0 und Textform `{}`. `add` ersetzt `m[k] += x`, das `R8` bleibt (R30): Hinweis `m.add(k, x)`. Bei einem `V`, das keine Zahl ist, ist `add` `R8` am Namen, Meldung `` `add` needs number values, found str ``, Hinweis `use m[k] = x`.
+
+```dif snippet
+map[str]int counts = {}
+counts.add("a", 2)
+counts.add("b", -1)
+counts.add("a", 3)
+print(counts)
+map[str]f64 total = {}
+total.add("x", 0.5)
+total.add("x", 0.25)
+print(total)
+```
+
+Ausgabe: `{"a": 5, "b": -1}`, `{"x": 0.75}`.
+
+```dif panic "integer overflow in +"
+map[str]u8 m = {}
+m.add("a", 200)
+m.add("a", 100)
+print(m)
+```
+
+```
+panic: integer overflow in + (main.dif:4:7)
+```
+
+```dif error R8
+void main() {
+    map[str]str m = {}
+    m.add("a", "b")
+    print(m)
+}
+```
+
+```
+main.dif:3:5: error[R8]: `add` needs number values, found str
+  hint: use m[k] = x
+```
 
 ### 4.6 `io` und `os`
 
@@ -2891,6 +2945,8 @@ enum IoErr {
 | `?str!io.IoErr io.read_line()` | die nächste Zeile von stdin wie bei `lines()`; `ok(none)` am Ende der Eingabe, `err(IoErr.InvalidUtf8("<stdin>"))` bei ungültigem UTF-8 | ändert die Eingabe |
 | `str!io.IoErr io.read_file(str path)` | der ganze Inhalt der Datei | |
 | `void!io.IoErr io.write_file(str path, str text)` | legt die Datei an oder überschreibt sie mit den Bytes von `text` | ändert die Datei |
+| `[]str!io.IoErr io.read_lines(str path)` | die Zeilen der Datei nach der Regel von `lines()`: ohne `\n`, ein `\r` direkt vor dem Zeilenende entfällt (auch in der letzten Zeile), eine letzte Zeile ohne `\n` zählt, eine leere Datei gibt `[]`; Fehler wie `read_file` (ungültiges UTF-8 ist `IoErr.InvalidUtf8(path)`) | |
+| `void!io.IoErr io.write_lines(str path, []str lines)` | schreibt jede Zeile gefolgt von `\n` (auch die letzte; eine leere Liste gibt eine leere Datei); sonst wie `write_file`; ein `\n` im Text einer Zeile bleibt, die Datei hat dann mehr Zeilen | ändert die Datei |
 | `void io.eprint(text T x)` | schreibt `"{x}"` und einen Zeilenumbruch auf stderr | ändert stderr |
 | `[]str os.args()` | die Argumente des Programms ohne den Programmnamen | |
 | `void os.exit(int code)` | schreibt stdout und stderr, beendet das Programm mit Exit-Code `code` (0 … 255, sonst Abbruch); `defer` läuft nicht (R23) | beendet |
@@ -2900,7 +2956,7 @@ enum IoErr {
 
 **Argumente und Umgebung.** Ein Argument oder ein Wert von `os.env`, der kein gültiges UTF-8 ist, bricht ab: `invalid UTF-8 in argument <i>` (Index ab 0 in `os.args()`) bzw. `invalid UTF-8 in environment variable <name>`. Der Abbruch geschieht im Aufruf von `os.args()` bzw. `os.env(name)` (Position und Meldung in der Tabelle von R14), nicht erst beim Benutzen des Wertes.
 
-`io.read_line`, `io.write_file`, `io.eprint` und `os.exit` haben eine Wirkung (R13); `io.read_file` und `os.args` nicht: ihr Ergebnis wird verwendet. Der Fehler `io.IoErr.NotFound(path)` entsteht, wenn die Datei fehlt, `NoPermission(path)`, wenn das Betriebssystem den Zugriff verweigert, `InvalidUtf8(path)`, wenn der Inhalt kein gültiges UTF-8 ist, sonst `Other(path, reason)`.
+`io.read_line`, `io.write_file`, `io.write_lines`, `io.eprint` und `os.exit` haben eine Wirkung (R13); `io.read_file`, `io.read_lines` und `os.args` nicht: ihr Ergebnis wird verwendet. Der Fehler `io.IoErr.NotFound(path)` entsteht, wenn die Datei fehlt, `NoPermission(path)`, wenn das Betriebssystem den Zugriff verweigert, `InvalidUtf8(path)`, wenn der Inhalt kein gültiges UTF-8 ist, sonst `Other(path, reason)`.
 
 ```dif
 use std.io
@@ -2936,6 +2992,24 @@ void main() {
 ```
 
 Ausgabe: `missing: does-not-exist.txt`, `0`, `unset`, `done`.
+
+`write_lines` und `read_lines` sind das Paar zu `lines()`. Das Beispiel schreibt auf `/dev/stdout` (nur Linux und macOS) statt in eine Datei, damit es nichts hinterlässt, und liest eine fehlende Datei:
+
+```dif
+use std.io
+
+void!io.IoErr main() {
+    try io.write_lines("/dev/stdout", ["one", "", "three"])
+    switch io.read_lines("no-such-dir/lines.txt") {
+    case ok([]str ls):
+        print(ls.len())
+    case err(io.IoErr e):
+        print(e)
+    }
+}
+```
+
+Ausgabe: `one`, ``, `three`, `IoErr.NotFound("no-such-dir/lines.txt")`.
 
 Eine Zeile mit `read_line` lesen (ohne Eingabe ist das Ergebnis `ok(none)` und `try` gibt `none`, `??` setzt den Vorgabewert ein):
 

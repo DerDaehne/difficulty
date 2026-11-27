@@ -1464,12 +1464,17 @@ impl<'a> Checker<'a> {
                         let binop = &op[..op.len() - 1];
                         let msg =
                             format!("cannot apply `{op}` to {} and {}", self.tn(ot), self.tn(rt));
-                        let hint = format!(
-                            "{p} = ({p} ?? {}) {binop} {}",
-                            self.zero(vt),
-                            self.text(value),
-                            p = self.text(place)
-                        );
+                        let hint = if op == "+=" && vt.is_number() {
+                            let (m, k, x) = (self.text(b), self.text(idx), self.text(value));
+                            format!("{m}.add({k}, {x})")
+                        } else {
+                            format!(
+                                "{p} = ({p} ?? {}) {binop} {}",
+                                self.zero(vt),
+                                self.text(value),
+                                p = self.text(place)
+                            )
+                        };
                         self.err("R8", pos, msg, Some(hint));
                     }
                 }
@@ -2816,7 +2821,12 @@ impl<'a> Checker<'a> {
                     if let Some(other) = changeable.iter().find(|o| overlap(o, inner)) {
                         let root = self.root_of(other).map(|r| r.0).unwrap_or_default();
                         let msg = format!("`{root}` goes into this call changeable twice");
-                        let hint = "pass it changeable only once".to_string();
+                        let hint = match (&other.kind, &inner.kind) {
+                            (ExprKind::Index(b, ..), ExprKind::Index(..)) => {
+                                format!("to swap two elements use {}.swap(i, j)", self.text(b))
+                            }
+                            _ => "pass it changeable only once".to_string(),
+                        };
                         self.err("R6", a.pos, msg, Some(hint));
                     } else {
                         changeable.push(inner);

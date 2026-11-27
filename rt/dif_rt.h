@@ -553,6 +553,18 @@ DIF_FN void dif_arr_reverse(const dif_ty *et, void *d, int64_t n) {
     }
     if (t != tmp) free(t);
 }
+// swap(i, j): both indices are checked (R14), i == j changes nothing
+DIF_FN void dif_arr_swap(const dif_ty *et, void *d, int64_t n, int64_t i, int64_t j, int l, int c) {
+    dif_idx(i, n, l, c);
+    dif_idx(j, n, l, c);
+    if (i == j) return;
+    char tmp[256];
+    char *t = et->size <= sizeof tmp ? tmp : dif_alloc(et->size);
+    memcpy(t, DIF_AT(et, d, i), et->size);
+    memcpy(DIF_AT(et, d, i), DIF_AT(et, d, j), et->size);
+    memcpy(DIF_AT(et, d, j), t, et->size);
+    if (t != tmp) free(t);
+}
 // stable merge sort; `et->cmp` must exist (R28)
 DIF_FN void dif_arr_sort(const dif_ty *et, void *d, int64_t n) {
     if (n < 2) return;
@@ -696,6 +708,13 @@ DIF_FN void dif_list_sort(const dif_ty *et, dif_list **lp) {
     if (dif_list_len(*lp) < 2) return;
     dif_list_own(et, lp, 0);
     dif_arr_sort(et, DIF_LDATA(*lp), (*lp)->len);
+}
+DIF_FN void dif_list_swap(const dif_ty *et, dif_list **lp, int64_t i, int64_t j, int l, int c) {
+    dif_idx(i, dif_list_len(*lp), l, c);
+    dif_idx(j, dif_list_len(*lp), l, c);
+    if (i == j) return;
+    dif_list_own(et, lp, 0);
+    dif_arr_swap(et, DIF_LDATA(*lp), (*lp)->len, i, j, l, c);
 }
 DIF_FN void dif_list_reverse(const dif_ty *et, dif_list **lp) {
     if (dif_list_len(*lp) < 2) return;
@@ -1428,6 +1447,27 @@ DIF_FN bool dif_io_write_file(dif_str path, dif_str text, dif_ioerr *e) {
     err = errno;
     ok = fclose(f) == 0 && ok;
     return ok || (dif_ioerr_errno(e, path, err), false);
+}
+// read_lines(path): the lines of the file as str.lines() splits them; *out is owned
+DIF_FN bool dif_io_read_lines(dif_str path, dif_list **out, dif_ioerr *e) {
+    dif_str text;
+    if (!dif_io_read_file(path, &text, e)) return false;
+    *out = dif_str_lines(text);
+    dif_str_dec(text);
+    return true;
+}
+// write_lines(path, lines): every line followed by \n, written like write_file
+DIF_FN bool dif_io_write_lines(dif_str path, const dif_list *lines, dif_ioerr *e) {
+    dif_buf b = dif_buf_new();
+    const dif_str *s = (const dif_str *)dif_list_data(lines);
+    for (int64_t i = 0; i < dif_list_len(lines); i++) {
+        dif_put(&b, s[i].p, s[i].n);
+        dif_put(&b, "\n", 1);
+    }
+    dif_str text = dif_take(&b);
+    bool ok = dif_io_write_file(path, text, e);
+    dif_str_dec(text);
+    return ok;
 }
 // One shared stream: lines() and read_line() both call this. A line ends at \n (a \r before
 // it is dropped); a last line without \n counts. Returns 1 (*out is the line, owned), 0 at

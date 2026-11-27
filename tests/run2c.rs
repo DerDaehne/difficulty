@@ -562,3 +562,100 @@ void main() {
         ("f 0\ng\n[10]\n", "", 0)
     );
 }
+
+#[test]
+fn swap_and_map_add() {
+    let r = run(
+        "swapadd",
+        &in_main("[]int xs = [1, 2, 3]\nxs.swap(0, 2)\nxs.swap(1, 1)\nprint(xs)\n[]int ys = xs\nys.swap(0, 1)\nprint(\"{xs} {ys}\")\n[2]str a = [\"a\", \"b\"]\na.swap(1, 0)\nprint(a)\nmap[str]int m = {}\nm.add(\"a\", 2)\nm.add(\"b\", -1)\nm.add(\"a\", 3)\nprint(m)\nmap[int]f64 f = {}\nf.add(1, 1.5)\nf.add(1, 1.5)\nprint(f)"),
+    );
+    assert_eq!(r.err, "");
+    assert_eq!(
+        r.out,
+        "[3, 2, 1]\n[3, 2, 1] [2, 3, 1]\n[\"b\", \"a\"]\n{\"a\": 5, \"b\": -1}\n{1: 3}\n"
+    );
+    for (body, msg) in [
+        (
+            "[]int xs = [1, 2]\nxs.swap(0, 2)\nprint(xs)",
+            "index 2 out of bounds for length 2 (main.dif:3:8)",
+        ),
+        (
+            "[]int xs = []\nxs.swap(0, 0)\nprint(xs)",
+            "index 0 out of bounds for length 0 (main.dif:3:8)",
+        ),
+        (
+            "[2]int xs = [1, 2]\nint i = -1\nxs.swap(i, 1)\nprint(xs)",
+            "index -1 out of bounds for length 2 (main.dif:4:8)",
+        ),
+        (
+            "map[str]u8 m = {}\nm.add(\"a\", 200)\nm.add(\"a\", 100)\nprint(m)",
+            "integer overflow in + (main.dif:4:7)",
+        ),
+        (
+            "map[str]int m = {\"a\": 9223372036854775807}\nm.add(\"a\", 1)\nprint(m)",
+            "integer overflow in + (main.dif:3:7)",
+        ),
+    ] {
+        let r = run("swapabort", &in_main(body));
+        assert_eq!(r.err, format!("panic: {msg}\n"), "{body}");
+        assert_eq!(r.code, 2);
+    }
+}
+
+#[test]
+fn read_lines_and_write_lines() {
+    let dir = work("linesdata");
+    let path = dir.join("l.txt");
+    let (path, bad) = (path.to_str().unwrap(), dir.join("bad.txt"));
+    std::fs::write(&bad, b"a\xffb\n").unwrap();
+    let crlf = dir.join("crlf.txt");
+    std::fs::write(&crlf, b"x\r\n\r\ny\nz\r").unwrap();
+    let src = r#"use std.io
+use std.os
+
+void!io.IoErr main() {
+    []str a = os.args()
+    try io.write_lines(a[0], ["one", "", "three"])
+    print(try io.read_lines(a[0]))
+    str raw = try io.read_file(a[0])
+    print(raw.len())
+    try io.write_lines(a[0], [])
+    print(try io.read_lines(a[0]))
+    print(try io.read_lines(a[2]))
+    switch io.read_lines(a[1]) {
+    case ok([]str ls):
+        print(ls)
+    case err(io.IoErr e):
+        print(e)
+    }
+    switch io.read_lines("{a[0]}.missing") {
+    case ok([]str ls):
+        print(ls)
+    case err(io.IoErr e):
+        print(e)
+    }
+    switch io.write_lines("/nonexistent-dir/x", ["a"]) {
+    case ok:
+        print("written")
+    case err(io.IoErr e):
+        print(e)
+    }
+}
+"#;
+    let r = run_with(
+        "lines",
+        src,
+        b"",
+        &[path, bad.to_str().unwrap(), crlf.to_str().unwrap()],
+        &[],
+    );
+    assert_eq!(r.err, "");
+    assert_eq!(
+        r.out,
+        format!(
+            "[\"one\", \"\", \"three\"]\n11\n[]\n[\"x\", \"\", \"y\", \"z\"]\nIoErr.InvalidUtf8(\"{}\")\nIoErr.NotFound(\"{path}.missing\")\nIoErr.NotFound(\"/nonexistent-dir/x\")\n",
+            bad.display()
+        )
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
