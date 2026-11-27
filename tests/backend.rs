@@ -5,7 +5,10 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn work(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("dif-test-{}-{name}", std::process::id()));
+    // a counter in the name: two builds never share a directory, whatever names tests pass
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let k = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("dif-test-{}-{k}-{name}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
