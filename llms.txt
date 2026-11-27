@@ -497,20 +497,58 @@ void main() {
 }
 ```
 
+## Generics (R27)
+
+Type parameters stand in brackets after the name; a method takes those of its type through its
+receiver (`A Pair[A, B].left()`) and has none of its own. The only constraint is `ordered` (`<`,
+`sort`); `==`, text, `contains` and map keys work on every type. A body is checked once as
+written; every instance is its own type and code (`Pair[int, str]`).
+
+- **Inference** comes from the arguments only. A type argument they tell must not be written
+  (`max[int](3, 5)` is R27, fix `max(3, 5)`); the ones only the return type mentions are
+  written, in declaration order: `empty[int]()`. As a value all are written: `max[int]`.
+- **Struct literal:** the type stands on the left: `Pair[int, str] p = Pair{first: 1, second: "a"}`.
+- **`enum`:** `Tree.Leaf(3)` infers `T`; a variant without `T` in its values writes the type:
+  `Tree[int].Empty`.
+
+```dif
+T max[ordered T](T a, T b) {
+    return if a < b { b } else { a }
+}
+
+struct Pair[A, B] {
+    A first
+    B second
+}
+
+A Pair[A, B].left() {
+    return self.first
+}
+
+enum Tree[T] {
+    Empty
+    Leaf(T value)
+}
+
+void main() {
+    Pair[int, str] p = Pair{first: max(3, 5), second: "a"}
+    Tree[int] t = Tree.Leaf(p.left())
+    print(p)
+    print(t)
+}
+```
+
+Output: `Pair{first: 5, second: "a"}`, `Tree.Leaf(5)`
+
 ## std v0 at a glance
 
 Built into the compiler; no import except `use std.io` / `use std.os`. `f` is a function type.
 
 - **Functions:** `print(x)`, `range(a, b)` (only in `for`), `repeat(x, n)`, `expect(c)` (tests),
   `assert(c)`, conversions `int(x) f64(x) str(r) u8(x) rune(n) …`.
-- **`str`:** `len is_empty runes split lines trim trim_start trim_end lower upper contains starts_with
-  ends_with find replace repeat slice parse_int parse_f64`. **`rune`:** `is_digit is_letter is_space to_digit` (`?int`, only `0`–`9`).
 - **Numbers:** `abs min max to_u8 to_i8 … to_u64` (`?T`); `f64`: `round trunc floor ceil sqrt abs min max`.
-- **`[]T` / `[N]T`:** `len is_empty push pop insert remove first last contains index_of count sort
-  reverse swap slice join`, and with a function: `filter(bool(T)) map(R(T)) sort_by(bool(T, T))
-  any(bool(T)) all(bool(T))`. Arrays have all but `push pop insert remove`.
-- **`map[K]V`:** `m[k]` is `?V`; `len has remove add keys values`.
-- **`io`:** `lines read_line read_file write_file read_lines write_lines eprint`. **`os`:** `args env exit`.
+- **Methods of `str`, `rune`, lists, arrays, maps, `io`, `os`:** listed in part 2c. With a function: `filter(bool(T))
+  map(R(T)) sort_by(bool(T, T)) any(bool(T)) all(bool(T))`.
 
 The five methods with a function take a literal, a named function or a variant constructor.
 `filter` keeps the elements for which it is `true`; `map` gives `[]R` from the return type of the
@@ -582,5 +620,5 @@ Nesting deeper than 256 levels or 1024 operators in one expression is S1: split 
 
 ## Not yet
 
-Storing function values, own modules, C import,
+Own modules, C import,
 handles, sharing: later parts (PLAN.md); using them is an error that says so.

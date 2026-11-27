@@ -1466,10 +1466,20 @@ impl<'a> Checker<'a> {
             };
             first.get_or_insert(&p.name);
             let ty = self.fns[id].params[k].ty;
+            let tparam = if self.is_hidden(ty, 0) {
+                generics::idents(&p.ty.name)
+                    .into_iter()
+                    .find(|n| n.starts_with('$'))
+                    .map(|n| n.rsplit('$').next().unwrap_or("").to_string())
+            } else {
+                None
+            };
             let why = if p.mut_pos.is_some() {
-                "a `mut` parameter has no default"
+                "a `mut` parameter has no default".to_string()
             } else if matches!(ty, Ty::Func(_)) {
-                "a function parameter has no default"
+                "a function parameter has no default".to_string()
+            } else if let Some(t) = tparam {
+                format!("the type of `{}` contains `{t}`: it has no default", p.name)
             } else {
                 let (t, v) = self.at_place(ty, d, None);
                 if t != Ty::Err && v == Val::Runtime {
@@ -1634,6 +1644,9 @@ impl<'a> Checker<'a> {
         }
         if let Some(t) = self.named_fn_value(name) {
             return (t, Val::Runtime);
+        }
+        if let Some(r) = self.generic_name_value(name, pos) {
+            return r;
         }
         if BUILTINS.contains(&name) {
             let msg = format!("`{name}` is a function; call it: {name}(…)");
@@ -2417,7 +2430,7 @@ impl<'a> Checker<'a> {
     fn expr_kind(&mut self, e: &'a Expr, place: Ty) -> (Ty, Val) {
         match &e.kind {
             ExprKind::Missing => (Ty::Err, Val::Runtime),
-            ExprKind::TypeApp(..) => (Ty::Err, Val::Runtime),
+            ExprKind::TypeApp(b, targs) => self.type_app_value(e, b, targs),
             ExprKind::FuncLit(l) => self.func_lit_value(e, l),
             ExprKind::Int(v) if self.lit_float => (Ty::FloatLit, Val::Float(*v as f64)),
             ExprKind::Int(v) => (Ty::IntLit, Val::Int(*v as i128)),

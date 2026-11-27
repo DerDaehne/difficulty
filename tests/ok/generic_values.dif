@@ -1,0 +1,54 @@
+T max[ordered T](T a, T b) {
+    return if a < b { b } else { a }
+}
+
+int apply(int(int, int) f, int a, int b) {
+    return f(a, b)
+}
+
+void main() {
+    int(int, int) f = max[int]
+    print(f(3, 9))
+    print(apply(max[int], 7, 2))
+    str(str, str) g = max[str]
+    print(g("a", "b"))
+    print(f)
+    more()
+}
+
+str label[T](T x, str prefix = "v") {
+    return "{prefix}={x}"
+}
+
+struct Sorted[ordered T] {
+    []T items = []
+}
+
+void Sorted[T].add(mut self, T x) {
+    self.items.push(x)
+    self.items.sort()
+}
+
+T Sorted[T].biggest() {
+    T best = self.items[0]
+    for T x in self.items {
+        if x > best {
+            best = x
+        }
+    }
+    return best
+}
+
+void more() {
+    print(label(3))
+    print(label("x", prefix: "s"))
+    Sorted[int] s = Sorted{}
+    s.add(3)
+    s.add(1)
+    print(s.items)
+    print(s.biggest())
+    Sorted[str] t = Sorted{}
+    t.add("b")
+    t.add("a")
+    print(t.items)
+}

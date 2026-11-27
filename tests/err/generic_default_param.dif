@@ -1,0 +1,8 @@
+// expect: error[R25] 2:29
+T orElse[T](?T x, T other = 3) {
+    return x ?? other
+}
+
+void main() {
+    print(orElse(some(1)))
+}

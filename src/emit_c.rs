@@ -1687,6 +1687,10 @@ impl<'a> Emitter<'a> {
                 ExprKind::Ident(n) if self.funcs.contains_key(n.as_str()) => {
                     return self.fn_value(self.funcs[n.as_str()], self.ty(e));
                 }
+                ExprKind::TypeApp(..) if self.info.callees.contains_key(&(e.pos.offset, e.end)) => {
+                    let f = self.funcs[self.info.callees[&(e.pos.offset, e.end)].as_str()];
+                    return self.fn_value(f, self.ty(e));
+                }
                 ExprKind::Field(base, v) if self.enum_of(base).is_some() => {
                     let eid = self.enum_of(base).unwrap_or(0);
                     return self.ctor_value(eid, v, self.ty(e));

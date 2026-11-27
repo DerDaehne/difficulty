@@ -392,7 +392,7 @@ impl<'a> Checker<'a> {
         out
     }
 
-    fn is_hidden(&self, t: Ty, depth: u32) -> bool {
+    pub(super) fn is_hidden(&self, t: Ty, depth: u32) -> bool {
         if depth > 64 {
             return false;
         }
@@ -1149,5 +1149,75 @@ impl<'a> Checker<'a> {
             let hint = "write a function with the type parameter instead".to_string();
             self.err("R27.method_type_params", p.pos, msg, Some(hint));
         }
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// `max[int]` without a call: a function value; every type argument is written (R27).
+    pub(super) fn type_app_value(
+        &mut self,
+        e: &'a Expr,
+        base: &'a Expr,
+        targs: &'a [TypeRef],
+    ) -> (Ty, Val) {
+        let ExprKind::Ident(name) = &base.kind else {
+            return (Ty::Err, Val::Runtime);
+        };
+        let Some(&g) = self.gen_funcs.get(name.as_str()) else {
+            let msg = format!("`{}` is a type, not a value", self.text(e));
+            self.err("R8.type_as_value", e.pos, msg, None);
+            return (Ty::Err, Val::Runtime);
+        };
+        let tys: Vec<Ty> = targs.iter().map(|t| self.ty(t, false)).collect();
+        if tys.len() != g.tparams.len() {
+            let msg = format!(
+                "`{name}` takes {}, found {}",
+                plural(g.tparams.len()),
+                tys.len()
+            );
+            self.err("R27.type_arg_count", base.pos, msg, None);
+            return (Ty::Err, Val::Runtime);
+        }
+        if tys.contains(&Ty::Err) {
+            return (Ty::Err, Val::Runtime);
+        }
+        for (p, t) in g.tparams.iter().zip(&tys) {
+            let ordered = matches!(&p.bound, Some((b, _)) if b == "ordered");
+            if ordered && !self.is_ordered(*t) {
+                self.ordered_missing(name, &p.name, *t, base.pos);
+                return (Ty::Err, Val::Runtime);
+            }
+        }
+        let keys: Vec<String> = tys.iter().map(|t| self.tk(*t)).collect();
+        let key = format!("{name}[{}]", keys.join(","));
+        if !self.funcs.contains_key(key.as_str()) {
+            let shown: Vec<String> = tys.iter().map(|t| self.tn(*t)).collect();
+            let display = format!("{name}[{}]", shown.join(", "));
+            self.want(false, name, key, display, keys, base.pos);
+            return (Ty::Err, Val::Runtime);
+        }
+        match self.named_fn_value(&key) {
+            Some(t) => {
+                self.callees.insert((e.pos.offset, e.end), key);
+                (t, Val::Runtime)
+            }
+            None => (Ty::Err, Val::Runtime),
+        }
+    }
+
+    /// The name of a generic function or type where a value stands.
+    pub(super) fn generic_name_value(&mut self, name: &str, pos: Pos) -> Option<(Ty, Val)> {
+        if let Some(g) = self.gen_funcs.get(name) {
+            let msg = format!("`{name}` takes {}, found 0", plural(g.tparams.len()));
+            let hint = format!("write the types: {name}[…]");
+            self.err("R27.type_arg_count", pos, msg, Some(hint));
+            return Some((Ty::Err, Val::Runtime));
+        }
+        if self.gen_types.contains_key(name) {
+            let msg = format!("`{name}` is a type, not a value");
+            self.err("R8.type_as_value", pos, msg, None);
+            return Some((Ty::Err, Val::Runtime));
+        }
+        None
     }
 }
