@@ -29,7 +29,14 @@ fn well_formed(id: &str) -> bool {
 /// Every string literal in the compiler sources that is shaped like an id.
 fn ids_in_sources() -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
-    for f in ["lexer", "parser", "checker", "checker/p2c", "diag"] {
+    for f in [
+        "lexer",
+        "parser",
+        "checker",
+        "checker/p2c",
+        "checker/lit",
+        "diag",
+    ] {
         let text = read(&format!("src/{f}.rs"));
         // a quoted word right after a quote: robust against escaped quotes elsewhere
         for (i, _) in text.match_indices('"') {

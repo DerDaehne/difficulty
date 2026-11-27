@@ -226,13 +226,18 @@ impl<'a> Checker<'a> {
             *s = s.strip_prefix(')').unwrap_or(s);
             if !allowed {
                 let msg = "a function type is only allowed for a parameter";
-                self.err("R26", pos, msg, None);
+                self.err("R26.function_type_place", pos, msg, None);
                 return Ty::Err;
             }
             return self.func_ty(ty, ps);
         }
         if ty == Ty::Void && !ret0 {
-            self.err("R8", pos, "`void` is only a return type", None);
+            self.err(
+                "R8.void_not_type",
+                pos,
+                "`void` is only a return type",
+                None,
+            );
             return Ty::Err;
         }
         ty

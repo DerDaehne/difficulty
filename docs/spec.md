@@ -128,6 +128,7 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `L9.rune_unclosed` |  | rune literal is not closed |
 | `S1.assign_in_cond` | ja | `=` assigns; compare with `==` |
 | `S1.assign_target` |  | cannot assign to `…` |
+| `S1.after_block` |  | nothing can follow a block argument, found … |
 | `S1.block_unclosed` |  | this block is never closed |
 | `S1.case_string_interp` |  | a case value is a plain string |
 | `S1.else_without_if` |  | `else` without `if` |
@@ -176,6 +177,7 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `R2.type_first` |  | the type comes before the name |
 | `R3.body_expected_brace` |  | expected `{` to start the body of `…`, found … |
 | `R3.body_next_line` | ja | the body of `…` must start on the same line |
+| `R3.block_next_line` |  | the block argument of `…` must start on the same line |
 | `R3.branch_expected_brace` |  | expected `{` to start a branch, found … |
 | `R3.case_next_line` |  | the statements of a case start on the next line |
 | `R3.elif` | ja | `elif` does not exist |
@@ -316,6 +318,10 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `R18.test_twice` |  | test "…" is declared twice |
 | `R28.no_print_value` |  | `…` has no value to print |
 | `R28.no_text_value` |  | `…` has no value to put into text |
+| `R26.block_not_accepted` |  | `…` cannot take a block: its last parameter has type … |
+| `R26.function_not_value` |  | `…` is a function and can only be called or passed as an argument |
+| `R26.function_type_place` |  | a function type is only allowed for a parameter |
+| `R26.literal_outside_call` |  | a function literal can only be an argument of a call |
 | `R28.sort_unordered` |  | `sort` needs an ordered element type, found … |
 | `R30.duplicate_key` |  | duplicate key … |
 | `R30.map_entry_change` |  | a map entry is changed by assigning it |

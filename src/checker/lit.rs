@@ -34,7 +34,7 @@ impl<'a> Checker<'a> {
     /// A function name used in another way than a call or an argument (R26).
     pub(super) fn only_called(&mut self, name: &str, pos: Pos) {
         let msg = format!("`{name}` is a function and can only be called or passed as an argument");
-        self.err("R26", pos, msg, None);
+        self.err("R26.function_not_value", pos, msg, None);
     }
 
     /// A change to `root` inside a literal: lost if `root` comes from outside it (R6).
@@ -51,7 +51,7 @@ impl<'a> Checker<'a> {
         }
         let msg = format!("the change to `{root}` is lost: `{root}` is a copy");
         let hint = "a function literal sees a copy; return the value or use a for loop";
-        self.err("R6", pos, msg, Some(hint.to_string()));
+        self.err("R6.lost_copy", pos, msg, Some(hint.to_string()));
     }
 
     /// `return` inside a literal: the value is the literal's, not the function's.
@@ -63,12 +63,12 @@ impl<'a> Checker<'a> {
                     self.tn(want)
                 );
                 let hint = format!("return {}", self.zero(want));
-                self.err("R8", p, msg, Some(hint));
+                self.err("R8.return_needs_value", p, msg, Some(hint));
             }
             Some(e) if want == Ty::Void => {
                 self.rvalue(e);
                 self.err(
-                    "R8",
+                    "R8.return_void_value",
                     e.pos,
                     "the literal returns nothing; remove the value",
                     None,
@@ -150,7 +150,7 @@ impl<'a> Checker<'a> {
         }
         let msg = "a function literal can only be an argument of a call";
         let hint = "pass it directly as an argument of a call".to_string();
-        self.err("R26", e.pos, msg, Some(hint));
+        self.err("R26.literal_outside_call", e.pos, msg, Some(hint));
         (Ty::Err, Val::Runtime)
     }
 
@@ -182,7 +182,7 @@ impl<'a> Checker<'a> {
                     );
                     let hint = matches!(pt, Ty::Func(_))
                         .then(|| "a block has no parameters; pass a literal instead".to_string());
-                    self.err("R26", a.pos, msg, hint);
+                    self.err("R26.block_not_accepted", a.pos, msg, hint);
                     return;
                 }
                 let t = self.lit_body(a, l, want_ret);
@@ -278,7 +278,7 @@ impl<'a> Checker<'a> {
         if !self.no_value(ret) && ret != Ty::Err && !terminates(&l.body, &self.complete) {
             let msg = "the literal does not return a value on every path";
             let hint = format!("end it with return, e.g. return {}", self.zero(ret));
-            self.err("R8", e.pos, msg, Some(hint));
+            self.err("R8.missing_return", e.pos, msg, Some(hint));
         }
         let Some(fr) = self.frames.pop() else {
             return fty;
@@ -295,12 +295,12 @@ impl<'a> Checker<'a> {
                 }
                 if l.params.iter().any(|p| p.name == root) {
                     let msg = format!("the change to `{place}` is lost: `{root}` is a copy");
-                    self.err("R6", pos, msg, None);
+                    self.err("R6.lost_copy", pos, msg, None);
                 } else {
                     let msg = format!("`{place}` is changed but never read afterwards");
                     let hint = (self.lost_hints.get(&pos.offset).cloned())
                         .unwrap_or_else(|| "use the value, or remove the change".to_string());
-                    self.err("R6", pos, msg, Some(hint));
+                    self.err("R6.dead_change", pos, msg, Some(hint));
                 }
             }
         }

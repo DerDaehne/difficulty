@@ -1652,7 +1652,7 @@ impl<'a> Parser<'a> {
                         "nothing can follow a block argument, found {}",
                         describe(self.peek())
                     );
-                    self.err("S1", self.pos(), msg, None);
+                    self.err("S1.after_block", self.pos(), msg, None);
                 }
                 return e;
             }
@@ -2801,7 +2801,7 @@ impl<'a> Parser<'a> {
                 .map_or(0, |i| i + 1);
             let hint = format!("{} {{", self.src[from..close.end as usize].trim_start());
             let msg = format!("the block argument of `{name}` must start on the same line");
-            self.err("R3", at, msg, Some(hint));
+            self.err("R3.block_next_line", at, msg, Some(hint));
             self.bump();
         }
         let p = self.pos();
