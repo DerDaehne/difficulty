@@ -911,15 +911,18 @@ impl<'a> Parser<'a> {
                         name: n,
                         pos: p,
                         mut_pos,
+                        default: None,
                     });
                 } else {
                     let ty = self.type_ref();
                     let (n, p) = self.name()?;
+                    let default = self.param_default();
                     params.push(Param {
                         ty,
                         name: n,
                         pos: p,
                         mut_pos,
+                        default,
                     });
                 }
                 if !self.is_op(",") {
@@ -1296,6 +1299,7 @@ impl<'a> Parser<'a> {
                 name,
                 pos: p,
                 mut_pos: None,
+                default: None,
             });
             if vars.len() == 2 || !self.is_op(",") {
                 break;
@@ -1764,10 +1768,34 @@ impl<'a> Parser<'a> {
         e
     }
 
-    /// An argument: `mut place` or an expression; never inside a header.
+    /// `= value` after a parameter name (R25).
+    fn param_default(&mut self) -> Option<Box<Expr>> {
+        if !self.is_op("=") {
+            return None;
+        }
+        self.bump();
+        let saved = std::mem::replace(&mut self.header, false);
+        let e = self.expr();
+        self.header = saved;
+        Some(Box::new(e))
+    }
+
+    /// An argument: `mut place`, `name: value` or an expression; never inside a header.
     fn arg(&mut self) -> Expr {
         let saved = std::mem::replace(&mut self.header, false);
-        let e = if self.is_kw("mut") {
+        let e = if let (Tok::Ident(n), Tok::Op(":")) = (self.peek().clone(), self.peek_n(1).clone())
+        {
+            let p = self.pos();
+            self.bump();
+            self.bump();
+            let inner = self.arg();
+            let end = inner.end;
+            Expr {
+                kind: ExprKind::Named(n.to_string(), Box::new(inner)),
+                pos: p,
+                end,
+            }
+        } else if self.is_kw("mut") {
             let p = self.pos();
             self.bump();
             let inner = self.expr();
@@ -1881,6 +1909,7 @@ impl<'a> Parser<'a> {
                         name: n,
                         pos: p,
                         mut_pos: None,
+                        default: None,
                     });
                     if !self.is_op(",") {
                         break;
@@ -2363,6 +2392,7 @@ impl<'a> Parser<'a> {
                                 name: n,
                                 pos: np,
                                 mut_pos: None,
+                                default: None,
                             }));
                         }
                         if !self.is_op(",") {
@@ -2463,6 +2493,7 @@ impl<'a> Parser<'a> {
             name,
             pos,
             mut_pos: None,
+            default: None,
         })
     }
 
@@ -2597,6 +2628,7 @@ impl<'a> Parser<'a> {
                     name,
                     pos: np,
                     mut_pos: None,
+                    default: None,
                 }));
             }
             if !self.close(open, ")") {
@@ -2909,6 +2941,7 @@ impl<'a> Parser<'a> {
                 name,
                 pos,
                 mut_pos,
+                default: None,
             });
             if !self.is_op(",") {
                 break;

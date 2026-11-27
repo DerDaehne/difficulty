@@ -1271,6 +1271,7 @@ impl<'a> Checker<'a> {
         for (k, (t, name, pos)) in params.into_iter().enumerate() {
             self.declare(name, pos, t, false, Val::Runtime, Some(Slot::Param(k)));
         }
+        self.param_defaults(id, f);
         self.block(&f.body);
         self.scopes.pop();
         if !self.no_value(ret) && ret != Ty::Err && !terminates(&f.body, &self.complete) {
@@ -1331,6 +1332,46 @@ impl<'a> Checker<'a> {
             }
         }
         self.cur = None;
+    }
+
+    /// Defaults stand behind all parameters without one and are constants (R25).
+    fn param_defaults(&mut self, id: usize, f: &'a Func) {
+        let mut first: Option<&str> = None;
+        let mut reported = false;
+        for (k, p) in f.params.iter().enumerate() {
+            let Some(d) = &p.default else {
+                if let (Some(n), false) = (first, reported) {
+                    let msg = format!(
+                        "`{}` has no default but follows `{n}`, which has one",
+                        p.name
+                    );
+                    let hint = "put parameters with a default last".to_string();
+                    self.err("R25.default_last", p.pos, msg, Some(hint));
+                    reported = true;
+                }
+                continue;
+            };
+            first.get_or_insert(&p.name);
+            let ty = self.fns[id].params[k].ty;
+            let why = if p.mut_pos.is_some() {
+                "a `mut` parameter has no default"
+            } else if matches!(ty, Ty::Func(_)) {
+                "a function parameter has no default"
+            } else {
+                let (t, v) = self.at_place(ty, d, None);
+                if t != Ty::Err && v == Val::Runtime {
+                    let hint = "pass it at the call, or use a constant: const int SIZE = 4";
+                    self.err(
+                        "R25.default_constant",
+                        d.pos,
+                        "default must be a constant",
+                        Some(hint.into()),
+                    );
+                }
+                continue;
+            };
+            self.err("R25.default_not_allowed", d.pos, why, None);
+        }
     }
 
     fn lost_changes(&mut self, id: usize, f: &'a Func) {
@@ -2335,6 +2376,11 @@ impl<'a> Checker<'a> {
             ExprKind::Field(base, name) => self.field(e, base, name),
             ExprKind::StructLit(name, inits) => self.struct_lit(e, name, inits),
             ExprKind::IfExpr(branches, last) => self.if_expr(e, branches, last),
+            ExprKind::Named(n, x) => {
+                let msg = format!("this call has no parameter `{n}`");
+                self.err("R25.name_unknown", e.pos, msg, None);
+                self.expr(x)
+            }
             ExprKind::Mut(x) => {
                 let msg = "only arguments of a call are passed with mut";
                 self.err("R6.mut_not_arg", e.pos, msg, None);
@@ -3168,8 +3214,125 @@ impl<'a> Checker<'a> {
     ) -> bool {
         let name = self.fn_name(id);
         let ps = self.fns[id].params.iter();
-        let ps = ps.map(|p| (p.ty, p.is_mut, p.name.to_string())).collect();
-        self.args_to(e, &name, ps, Some(id), args, changeable)
+        let ps: Vec<_> = ps.map(|p| (p.ty, p.is_mut, p.name.to_string())).collect();
+        let decl = self.fns[id].decl;
+        let Some(map) = self.named_args(e, &name, decl, args, &ps) else {
+            return false;
+        };
+        self.args_map(e, &name, ps, Some(id), map, changeable)
+    }
+
+    /// Matches the arguments of a call to `f` to its parameters (R25): positional ones first,
+    /// then `name: value` in declaration order. Returns `(parameter index, argument)`; `None`
+    /// after an error.
+    fn named_args(
+        &mut self,
+        e: &'a Expr,
+        name: &str,
+        f: &'a Func,
+        args: &'a [Expr],
+        params: &[(Ty, bool, String)],
+    ) -> Option<Vec<(usize, &'a Expr)>> {
+        let ps = &f.params;
+        let req = ps.iter().filter(|p| p.default.is_none()).count();
+        let named = |a: &Expr| matches!(a.kind, ExprKind::Named(..));
+        let npos = args.iter().take_while(|a| !named(a)).count();
+        let mut out: Vec<(usize, &'a Expr)> = args[..npos].iter().enumerate().collect();
+        let mut bad = false;
+        let mut seen: Vec<(usize, Pos)> = Vec::new();
+        let mut order: Option<(Pos, String, String)> = None;
+        for a in &args[npos..] {
+            let ExprKind::Named(n, v) = &a.kind else {
+                let msg = "a positional argument cannot follow a named one";
+                self.err("R25.name_after_position", a.pos, msg, None);
+                bad = true;
+                continue;
+            };
+            let Some(k) = ps.iter().position(|p| p.name == *n) else {
+                let cands = ps.iter().filter(|p| p.default.is_some());
+                let cands = cands.map(|p| p.name.as_str());
+                // a swapped pair of letters (`lable`) is one slip, though two edits
+                let key = |s: &str| {
+                    let mut v: Vec<char> = s.chars().collect();
+                    v.sort();
+                    v
+                };
+                let swapped = cands.clone().find(|c| key(c) == key(n));
+                let hint = closest(n, cands)
+                    .or(swapped)
+                    .map(|c| format!("did you mean {c}?"));
+                let msg = format!("`{name}` has no parameter `{n}`");
+                self.err("R25.name_unknown", a.pos, msg, hint);
+                bad = true;
+                continue;
+            };
+            if ps[k].default.is_none() {
+                let msg = format!("`{n}` has no default and is passed by position");
+                let d = Diag::new("R25.name_without_default", a.pos, msg)
+                    .hint(self.text(v))
+                    .fix(a.pos.offset, v.pos.offset, "");
+                self.diags.push(d);
+                bad = true;
+                continue;
+            }
+            if let Some(&(_, p)) = seen.iter().find(|s| s.0 == k) {
+                let msg = format!("`{n}` is given twice, first at {}", self.at(p));
+                self.err("R25.name_twice", a.pos, msg, None);
+                bad = true;
+                continue;
+            }
+            if order.is_none() {
+                if let Some(&(pk, _)) = seen.iter().find(|s| s.0 > k) {
+                    order = Some((a.pos, n.clone(), ps[pk].name.clone()));
+                }
+            }
+            seen.push((k, a.pos));
+            out.push((k, v));
+        }
+        if let Some((pos, n, later)) = order {
+            let msg = format!("`{n}` comes before `{later}` in the declaration");
+            let mut sorted: Vec<&Expr> = args[..npos].iter().collect();
+            let mut by_decl: Vec<(usize, &Expr)> = args[npos..]
+                .iter()
+                .filter_map(|a| match &a.kind {
+                    ExprKind::Named(n, _) => ps.iter().position(|p| p.name == *n).map(|k| (k, a)),
+                    _ => None,
+                })
+                .collect();
+            by_decl.sort_by_key(|x| x.0);
+            sorted.extend(by_decl.into_iter().map(|x| x.1));
+            let list: Vec<&str> = sorted.iter().map(|a| self.text(a)).collect();
+            let list = list.join(", ");
+            let mut d = Diag::new("R25.name_order", pos, msg).hint(list.clone());
+            if !bad {
+                let last = args.last().map_or(0, |a| a.end);
+                d = d.fix(args[0].pos.offset, last, list);
+            }
+            self.diags.push(d);
+            bad = true;
+        }
+        if bad {
+            return None;
+        }
+        if npos > ps.len() || npos < req {
+            let s = if req == 1 { "" } else { "s" };
+            let msg = format!("`{name}` takes {req} argument{s}, found {}", args.len());
+            let hint = self.header_block_hint(e, params, args.len());
+            self.err("R8.arg_count", e.pos, msg, hint);
+            return None;
+        }
+        if npos > req {
+            for (k, a) in out.iter().skip(req) {
+                let n = &ps[*k].name;
+                let msg = format!("`{n}` has a default and is passed by name");
+                let d = Diag::new("R25.positional_default", a.pos, msg)
+                    .hint(format!("{n}: {}", self.text(a)))
+                    .fix(a.pos.offset, a.pos.offset, format!("{n}: "));
+                self.diags.push(d);
+            }
+            return None;
+        }
+        Some(out)
     }
 
     /// Arguments for parameters `(type, mut, name)`; `callee` is the function, or `None` for a
@@ -3181,8 +3344,13 @@ impl<'a> Checker<'a> {
         params: Vec<(Ty, bool, String)>,
         callee: Option<usize>,
         args: &'a [Expr],
-        mut changeable: Vec<&'a Expr>,
+        changeable: Vec<&'a Expr>,
     ) -> bool {
+        if let Some(a) = args.iter().find(|a| matches!(a.kind, ExprKind::Named(..))) {
+            let msg = "a function value has no parameter names";
+            self.err("R25.name_on_value", a.pos, msg, None);
+            return false;
+        }
         let n = params.len();
         if args.len() != n {
             let s = if n == 1 { "" } else { "s" };
@@ -3191,10 +3359,23 @@ impl<'a> Checker<'a> {
             self.err("R8.arg_count", e.pos, msg, hint);
             return false;
         }
+        let map = args.iter().enumerate().collect();
+        self.args_map(e, name, params, callee, map, changeable)
+    }
+
+    fn args_map(
+        &mut self,
+        e: &'a Expr,
+        name: &str,
+        params: Vec<(Ty, bool, String)>,
+        callee: Option<usize>,
+        args: Vec<(usize, &'a Expr)>,
+        mut changeable: Vec<&'a Expr>,
+    ) -> bool {
         if let (Some(cur), Some(id)) = (self.cur, callee) {
             self.facts[cur].calls.push(id);
         }
-        for (j, a) in args.iter().enumerate() {
+        for (j, a) in args {
             let (pt, pmut) = (params[j].0, params[j].1);
             let pname = params[j].2.as_str();
             match (&a.kind, pmut) {

@@ -58,6 +58,7 @@ fn is_literal(e: &Expr) -> bool {
         | ExprKind::StructLit(..)
         | ExprKind::IfExpr(..)
         | ExprKind::Mut(_)
+        | ExprKind::Named(..)
         | ExprKind::SomeVal(_)
         | ExprKind::ErrVal(_)
         | ExprKind::OkVal(_)
@@ -284,7 +285,8 @@ fn changes(stmts: &[Stmt], n: &str) -> bool {
 fn sets(e: &Expr, n: &str) -> bool {
     match &e.kind {
         ExprKind::Mut(x) => matches!(&x.kind, ExprKind::Ident(p) if p == n) || sets(x, n),
-        ExprKind::Unary(_, x)
+        ExprKind::Named(_, x)
+        | ExprKind::Unary(_, x)
         | ExprKind::Paren(x)
         | ExprKind::Field(x, _)
         | ExprKind::SomeVal(x)
@@ -352,7 +354,8 @@ fn has_call(e: &Expr) -> bool {
         ExprKind::Call(..) | ExprKind::IfExpr(..) | ExprKind::Try(..) | ExprKind::FuncLit(_) => {
             true
         }
-        ExprKind::Unary(_, x)
+        ExprKind::Named(_, x)
+        | ExprKind::Unary(_, x)
         | ExprKind::Paren(x)
         | ExprKind::Mut(x)
         | ExprKind::Field(x, _)
@@ -1510,6 +1513,7 @@ impl<'a> Emitter<'a> {
             | ExprKind::StructLit(..)
             | ExprKind::IfExpr(..)
             | ExprKind::Mut(_)
+            | ExprKind::Named(..)
             | ExprKind::NoneVal
             | ExprKind::SomeVal(_)
             | ExprKind::ErrVal(_)
@@ -1575,6 +1579,7 @@ impl<'a> Emitter<'a> {
             | ExprKind::StructLit(..)
             | ExprKind::IfExpr(..)
             | ExprKind::Mut(_)
+            | ExprKind::Named(..)
             | ExprKind::NoneVal
             | ExprKind::SomeVal(_)
             | ExprKind::ErrVal(_)
@@ -1686,6 +1691,7 @@ impl<'a> Emitter<'a> {
             ExprKind::StructLit(name, inits) => self.struct_lit(name, inits),
             ExprKind::IfExpr(branches, last) => self.if_expr(self.ty(e), branches, last),
             ExprKind::Mut(x) => format!("(&({}))", self.lvalue(x)),
+            ExprKind::Named(_, x) => self.expr(x),
             ExprKind::FuncLit(l) => self.func_lit(e, l),
             ExprKind::Missing => "0".into(),
             ExprKind::ListLit(items) => self.list_lit(e, items),
@@ -2222,10 +2228,26 @@ impl<'a> Emitter<'a> {
         self.apply(&Self::cname(func), &items, at)
     }
 
-    /// The operands of a call: `mut` parameters take the place after `mut`.
-    fn args_of(&self, func: &Func, args: &'a [Expr], recv: Option<Arg<'a>>) -> Vec<Arg<'a>> {
+    /// The operands of a call: `mut` parameters take the place after `mut`; a parameter the
+    /// call leaves out takes its default (R25).
+    fn args_of(&self, func: &'a Func, args: &'a [Expr], recv: Option<Arg<'a>>) -> Vec<Arg<'a>> {
         let mut items: Vec<Arg<'a>> = recv.into_iter().collect();
-        for (p, a) in func.params.iter().zip(args) {
+        for (k, p) in func.params.iter().enumerate() {
+            let named = args.iter().find_map(|a| match &a.kind {
+                ExprKind::Named(n, v) if *n == p.name => Some(&**v),
+                _ => None,
+            });
+            let a = match args
+                .get(k)
+                .filter(|a| !matches!(a.kind, ExprKind::Named(..)))
+            {
+                Some(a) => a,
+                None => match (named, &p.default) {
+                    (Some(v), _) => v,
+                    (None, Some(d)) => d,
+                    (None, None) => unreachable!("missing argument"),
+                },
+            };
             items.push(match (&a.kind, p.mut_pos) {
                 (ExprKind::Mut(x), Some(_)) => Arg::Addr(x),
                 _ => Arg::Val(a, self.ty_of(&p.ty)),
@@ -2399,6 +2421,7 @@ impl<'a> Emitter<'a> {
             | ExprKind::StructLit(..)
             | ExprKind::IfExpr(..)
             | ExprKind::Mut(_)
+            | ExprKind::Named(..)
             | ExprKind::NoneVal
             | ExprKind::SomeVal(_)
             | ExprKind::ErrVal(_)

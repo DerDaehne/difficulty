@@ -1,0 +1,7 @@
+// expect: error[R25] 2:26
+void show(int n = 1, int m) {
+    print(n + m)
+}
+void main() {
+    show(1)
+}

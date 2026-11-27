@@ -376,6 +376,7 @@ impl<'c> Live<'c> {
             ExprKind::Unary(_, x)
             | ExprKind::Paren(x)
             | ExprKind::Mut(x)
+            | ExprKind::Named(_, x)
             | ExprKind::SomeVal(x)
             | ExprKind::ErrVal(x)
             | ExprKind::OkVal(Some(x)) => self.expr(x, live),
@@ -460,6 +461,7 @@ fn walk(e: &Expr, f: &mut dyn FnMut(&Expr)) {
         ExprKind::Unary(_, x)
         | ExprKind::Paren(x)
         | ExprKind::Mut(x)
+        | ExprKind::Named(_, x)
         | ExprKind::SomeVal(x)
         | ExprKind::ErrVal(x)
         | ExprKind::OkVal(Some(x))

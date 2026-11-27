@@ -333,6 +333,16 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `R18.test_twice` |  | test "…" is declared twice |
 | `R28.no_print_value` |  | `…` has no value to print |
 | `R28.no_text_value` |  | `…` has no value to put into text |
+| `R25.default_constant` |  | default must be a constant |
+| `R25.default_last` |  | `…` has no default but follows `…`, which has one |
+| `R25.default_not_allowed` |  | a `mut` parameter has no default (also: a function parameter; a type with a type parameter) |
+| `R25.name_after_position` |  | a positional argument cannot follow a named one |
+| `R25.name_order` | ja | `…` comes before `…` in the declaration |
+| `R25.name_twice` |  | `…` is given twice, first at … |
+| `R25.name_unknown` |  | `…` has no parameter `…` |
+| `R25.name_on_value` |  | a function value has no parameter names |
+| `R25.name_without_default` | ja | `…` has no default and is passed by position |
+| `R25.positional_default` | ja | `…` has a default and is passed by name |
 | `R26.block_not_accepted` |  | `…` cannot take a block: its last parameter has type … |
 | `R26.function_not_value` |  | `…` is a function and can only be called or passed as an argument |
 | `R26.function_type_place` |  | a function type is only allowed for a parameter |
@@ -346,16 +356,6 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 
 | ID | Fix | Meldung |
 |---|---|---|
-| R25.default_constant |  | default must be a constant |
-| R25.default_last |  | `…` has no default but follows `…`, which has one |
-| R25.default_not_allowed |  | a `mut` parameter has no default (also: a function parameter; a type with a type parameter) |
-| R25.name_after_position |  | a positional argument cannot follow a named one |
-| R25.name_order | ja | `…` comes before `…` in the declaration |
-| R25.name_twice |  | `…` is given twice, first at … |
-| R25.name_unknown |  | `…` has no parameter `…` |
-| R25.name_on_value |  | a function value has no parameter names |
-| R25.name_without_default | ja | `…` has no default and is passed by position |
-| R25.positional_default | ja | `…` has a default and is passed by name |
 | R27.constraint_every_type | ja | `…` is not a constraint: every type has it |
 | R27.constraint_unknown |  | `…` is not a constraint |
 | R27.type_arg_inferred_variant | ja | `…` is inferred from the values; remove `[…]` |
@@ -2453,23 +2453,178 @@ arg     = [ "mut" ] expr | func_lit | IDENT ":" expr ;   (* ersetzt `arg` aus §
 - **Funktionswerte (R26).** Ein Funktionstyp nennt weder Namen noch Defaults (`int(int, int)`); eine Funktion mit Defaults als Wert hat alle Parameter im Typ, der Aufruf über den Wert übergibt alle positional. Ein Name an einem Aufruf eines Funktionswerts ist `R25`, Meldung `` a function value has no parameter names ``, ohne Hinweis. (Vorschlag, offen: ein Default im Funktionstyp wäre eine zweite Stelle für denselben Wert.)
 - **Generics (R27).** Defaults und Typparameter vertragen sich nur so: ein Typparameter, der nur in Parametern ohne Default vorkommt, wird wie sonst abgeleitet; Default-Parameter sind nie Teil der Ableitung. Das Weglassen von Typargumenten richtet sich nur nach den Parametern ohne Default (R27).
 
-```text
-void tile(str value, str label = "", int size = 1) { … }
+```dif
+void tile(str value, str label = "", int size = 1) {
+    print("{value}/{label}/{size}")
+}
 
-tile("a")                     // gültig
-tile("a", label: "x")         // gültig
-tile("a", size: 2)            // gültig: label bleibt weggelassen
-tile("a", "x")                // R25: `label` has a default and is passed by name
-tile("a", size: 2, label: "x")// R25: `label` comes before `size` in the declaration
-tile("a", lable: "x")         // R25: `tile` has no parameter `lable`, hint: did you mean label?
+void main() {
+    tile("a")                       // a//1
+    tile("a", label: "x")           // a/x/1
+    tile("a", size: 2)              // a//2: label stays omitted
+    tile("a", label: "x", size: 2)  // a/x/2
+}
 ```
 
-```text
-main.dif:8:15: error[R25]: `label` has a default and is passed by name
+```dif error R25
+void tile(str value, str label = "", int size = 1) {
+    print("{value}/{label}/{size}")
+}
+
+void main() {
+    tile("a", "x")
+}
+```
+
+```
+main.dif:6:15: error[R25]: `label` has a default and is passed by name
   hint: label: "x"
 ```
 
-(Zeile 8, Spalte 15: das Argument `"x"` in `    tile("a", "x")`.)
+```dif error R25
+void tile(str value, str label = "", int size = 1) {
+    print("{value}/{label}/{size}")
+}
+
+void main() {
+    tile("a", size: 2, label: "x")
+}
+```
+
+```
+main.dif:6:24: error[R25]: `label` comes before `size` in the declaration
+  hint: "a", label: "x", size: 2
+```
+
+```dif error R25
+void tile(str value, str label = "", int size = 1) {
+    print("{value}/{label}/{size}")
+}
+
+void main() {
+    tile("a", lable: "x")
+}
+```
+
+```
+main.dif:6:15: error[R25]: `tile` has no parameter `lable`
+  hint: did you mean label?
+```
+
+```dif error R25
+int twice(int a) {
+    return a * 2
+}
+
+void main() {
+    print(twice(a: 1))
+}
+```
+
+```
+main.dif:6:17: error[R25]: `a` has no default and is passed by position
+  hint: 1
+```
+
+```dif error R25
+void tile(str value, int size = 1, str label = "") {
+    print("{value}/{label}/{size}")
+}
+
+void main() {
+    tile("a", size: 1, size: 2)
+}
+```
+
+```
+main.dif:6:24: error[R25]: `size` is given twice, first at main.dif:6:15
+```
+
+```dif error R25
+void tile(str value, str label = "", int size = 1) {
+    print("{value}/{label}/{size}")
+}
+
+void main() {
+    tile("a", size: 1, "x")
+}
+```
+
+```
+main.dif:6:24: error[R25]: a positional argument cannot follow a named one
+```
+
+```dif error R25
+int three() {
+    return 3
+}
+
+void tile(str value, int size = three()) {
+    print("{value}/{size}")
+}
+
+void main() {
+    tile("a")
+}
+```
+
+```
+main.dif:5:33: error[R25]: default must be a constant
+  hint: pass it at the call, or use a constant: const int SIZE = 4
+```
+
+```dif error R25
+void tile(str label = "", str value) {
+    print("{label}/{value}")
+}
+
+void main() {
+    tile("a")
+}
+```
+
+```
+main.dif:1:31: error[R25]: `value` has no default but follows `label`, which has one
+  hint: put parameters with a default last
+```
+
+```dif error R25
+void tile(mut int size = 1) {
+    size += 1
+}
+
+void main() {
+    tile()
+}
+```
+
+```
+main.dif:1:26: error[R25]: a `mut` parameter has no default
+```
+
+```dif
+const int PORT = 80
+
+struct Point {
+    int x
+}
+
+void Point.move(mut self, int dx, int step = 1) {
+    self.x += dx * step
+}
+
+str connect(str host, int port = PORT, bool tls = false) {
+    return "{host}:{port} {tls}"
+}
+
+void main() {
+    print(connect("a.de", tls: true))              // a.de:80 true
+    print(connect("a.de", port: 8080, tls: true))  // a.de:8080 true
+    Point p = Point{x: 1}
+    p.move(3, step: 2)
+    print(p.x)                                     // 7
+}
+```
 
 ### R26 — Funktionswerte und Blöcke
 
@@ -2484,7 +2639,7 @@ lit_param   = [ "mut" ] type IDENT ;
 
 **Grammatik:** `func_type`, `func_lit` hier; `param` (R2), `arg` und das Block-Argument am Ende von `postfix` (§2), `block` (R3).
 
-Teil 2d legt fest, was zu M2 gehört: Literale und Blöcke an Aufrufen, Funktionstypen als Typ eines Parameters, die Methoden aus §4.7. Speichern von Funktionen in Variablen, Feldern und Listen, benannte Parameter (R25) und eigene Generics (R27) folgen mit M3; Funktionstypen in `extern`-Deklarationen und C-Callbacks (R24) mit einer späteren Scheibe. Bis dahin passt an einen Funktionstyp ein Literal, eine benannte Funktion oder ein Varianten-Konstruktor.
+Teil 2d legt fest, was zu M2 gehört: Literale und Blöcke an Aufrufen, Funktionstypen als Typ eines Parameters, die Methoden aus §4.7. Speichern von Funktionen in Variablen, Feldern und Listen und eigene Generics (R27) folgen mit M3; Funktionstypen in `extern`-Deklarationen und C-Callbacks (R24) mit einer späteren Scheibe. Bis dahin passt an einen Funktionstyp ein Literal, eine benannte Funktion oder ein Varianten-Konstruktor.
 
 **Literal.**
 

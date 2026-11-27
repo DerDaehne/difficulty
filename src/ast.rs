@@ -56,6 +56,8 @@ pub struct Param {
     pub pos: Pos,
     /// Position of `mut` before the type (parameters only).
     pub mut_pos: Option<Pos>,
+    /// `= value` after the name (function parameters only, R25).
+    pub default: Option<Box<Expr>>,
 }
 
 /// A function, or a method `R T.name(…)` when `recv` names the type.
@@ -240,6 +242,8 @@ pub enum ExprKind {
     StructLit(String, Vec<FieldInit>),
     /// `if c { … } else if … else { … }` as a value.
     IfExpr(Vec<(Expr, ValueBlock)>, Box<ValueBlock>),
+    /// `name: value` as an argument (R25); the position is the name.
+    Named(String, Box<Expr>),
     /// `mut place` as an argument (R6).
     Mut(Box<Expr>),
     /// `none`

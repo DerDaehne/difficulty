@@ -1,0 +1,58 @@
+const int PORT = 80
+
+struct Point {
+    int x
+}
+
+enum Mode {
+    Fast
+    Slow
+}
+
+void Point.move(mut self, int dx, int step = 1) {
+    self.x += dx * step
+}
+
+str connect(str host, int port = PORT, bool tls = false) {
+    return "{host}:{port} {tls}"
+}
+
+int total([]int items, int extra = 1 + 2, ?int cap = none, Mode mode = Mode.Slow, Point p = Point{x: 4}, []int more = []) {
+    int sum = extra + p.x + more.len()
+    for int i in items {
+        sum += i
+    }
+    if mode == Mode.Fast {
+        sum += 100
+    }
+    return sum
+}
+
+void bump(mut int n, int by = 1) {
+    n += by
+}
+
+int apply(int(int) f, int v) {
+    return f(v)
+}
+
+int twice(int v, int k = 2) {
+    return v * k
+}
+
+void main() {
+    print(connect("a.de", tls: true))
+    print(connect("a.de", port: 8080, tls: true))
+    print(connect("a.de"))
+    Point p = Point{x: 1}
+    p.move(3, step: 2)
+    p.move(1)
+    print(p.x)
+    print(total([1, 2]))
+    print(total([1, 2], mode: Mode.Fast, p: Point{x: 0}))
+    int n = 5
+    bump(mut n)
+    bump(mut n, by: 10)
+    print(n)
+    print(apply(int(int v) { return twice(v) }, 4))
+}

@@ -457,6 +457,24 @@ void main() {
 }
 ```
 
+## Named parameters with defaults (R25)
+
+A parameter may have a default, a value fixed at compile time (literal, `const`, `none`, `[]`,
+struct literal). Defaults come last. At the call, pass them by name, in declaration order, or leave them out; all others by position (R25).
+
+```dif
+const int PORT = 80
+
+str connect(str host, int port = PORT, bool tls = false) {
+    return "{host}:{port} {tls}"
+}
+
+void main() {
+    print(connect("a.de", tls: true))              // a.de:80 true
+    print(connect("a.de", port: 8080, tls: true))
+}
+```
+
 ## std v0 at a glance
 
 Built into the compiler; no import except `use std.io` / `use std.os`. `f` is a function type.
