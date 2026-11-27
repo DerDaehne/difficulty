@@ -215,6 +215,9 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `R7.changes_self_needs_var` |  | `…` changes self and needs a variable |
 | `R7.method_receiver` |  | `…` is not a struct or enum of this module |
 | `R7.self_outside_method` |  | `self` exists only in methods |
+| `R8.add_needs_number` |  | `add` needs number values, found … |
+| `R8.alt_holds` |  | `…` holds …, but the cause is … |
+| `R8.alt_values` |  | `…` has … values, but the cause is one |
 | `R8.arg_count` |  | `…` takes … argument(s), found … |
 | `R8.array_length_mismatch` |  | … needs … elements, found … |
 | `R8.assign_fn` |  | cannot assign to function `…` |
@@ -285,6 +288,7 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `R12.opt_void` |  | ?void has no value that could be missing |
 | `R12.or_needs_result_fn` |  | `or` needs a function that returns U!F |
 | `R12.some_plain` |  | `some` needs a plain value, found … |
+| `R12.try_no_error_bind` |  | `try` on … has no error to bind |
 | `R12.try_error_mismatch` |  | `try` gives …, but the function returns … |
 | `R12.try_needs_result_fn` |  | `try` needs a function that returns T!E or ?T |
 | `R12.try_operand` |  | `try` needs a result of type T!E or ?T, found … |
