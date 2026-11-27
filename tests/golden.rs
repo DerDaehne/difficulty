@@ -47,7 +47,7 @@ fn run_in(name: &str, src: &str, san: bool) -> (String, String, i32) {
         "{name}: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let r = Command::new(&exe).output().unwrap();
+    let r = Command::new(&exe).current_dir(&dir).output().unwrap();
     let _ = std::fs::remove_dir_all(&dir);
     let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
     (

@@ -2993,13 +2993,14 @@ void main() {
 
 Ausgabe: `missing: does-not-exist.txt`, `0`, `unset`, `done`.
 
-`write_lines` und `read_lines` sind das Paar zu `lines()`. Das Beispiel schreibt auf `/dev/stdout` (nur Linux und macOS) statt in eine Datei, damit es nichts hinterlässt, und liest eine fehlende Datei:
+`write_lines` und `read_lines` sind das Paar zu `lines()`: das Beispiel schreibt eine Datei, liest sie zurück und liest eine fehlende Datei.
 
 ```dif
 use std.io
 
 void!io.IoErr main() {
-    try io.write_lines("/dev/stdout", ["one", "", "three"])
+    try io.write_lines("lines.txt", ["one", "", "three"])
+    print(try io.read_lines("lines.txt"))
     switch io.read_lines("no-such-dir/lines.txt") {
     case ok([]str ls):
         print(ls.len())
@@ -3009,7 +3010,7 @@ void!io.IoErr main() {
 }
 ```
 
-Ausgabe: `one`, ``, `three`, `IoErr.NotFound("no-such-dir/lines.txt")`.
+Ausgabe: `["one", "", "three"]`, `IoErr.NotFound("no-such-dir/lines.txt")`.
 
 Eine Zeile mit `read_line` lesen (ohne Eingabe ist das Ergebnis `ok(none)` und `try` gibt `none`, `??` setzt den Vorgabewert ein):
 
