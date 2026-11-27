@@ -157,7 +157,7 @@ fn readme_examples() {
 
 /// Sections of the spec whose examples are checked but not built and run;
 /// a section is listed here only while its backend is missing.
-const CHECK_ONLY: &[&str] = &["### R26 ", "### R13, Teil 2d"];
+const CHECK_ONLY: &[&str] = &[];
 
 /// Sections of part 2d (function literals, block argument, list methods with a function argument):
 /// their examples need the compiler of part 2d and are skipped until it exists; the compiler

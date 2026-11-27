@@ -2765,6 +2765,9 @@ impl<'a> Checker<'a> {
             if let Ty::Func(fi) = l.ty {
                 return self.call_param(e, f, name, fi, args);
             }
+            if l.ty == Ty::Err {
+                return (Ty::Err, Val::Runtime);
+            }
             let msg = format!("`{name}` is {}, not a function", self.tn(l.ty));
             self.err("R8.local_not_fn", f.pos, msg, None);
             return (Ty::Err, Val::Runtime);

@@ -1,0 +1,11 @@
+// expect: error[R6] 8:9
+void run(void() f) {
+    f()
+}
+void main() {
+    int n = 0
+    run() {
+        n += 1
+    }
+    print(n)
+}

@@ -10,7 +10,11 @@ use crate::checker::{Info, Num, Ty, TypeBody};
 use crate::diag::Pos;
 
 mod builtins;
+mod lit;
 mod types;
+
+/// Where the declarations of literals go, filled in at the end.
+const LITS_MARK: &str = "/*LITS*/\n";
 
 const RT: &str = include_str!("../rt/dif_rt.h");
 const UNICODE: &str = include_str!("../rt/dif_unicode.h");
@@ -181,6 +185,10 @@ fn emitter<'a>(file: &str, src: &'a str, info: &'a Info) -> Emitter<'a> {
         lows: HashMap::new(),
         steady: HashSet::new(),
         idx_temps: HashMap::new(),
+        caps: HashMap::new(),
+        lit_protos: String::new(),
+        lit_defs: String::new(),
+        wrappers: HashSet::new(),
     }
 }
 
@@ -228,6 +236,13 @@ struct Emitter<'a> {
     /// Runtime indices of the `mut` places of the call being built, by span of the index:
     /// evaluated once, before the overlap check (R6).
     idx_temps: HashMap<(u32, u32), String>,
+    /// The values a literal captured, by name: where its body finds them.
+    caps: HashMap<String, String>,
+    /// Environments and prototypes of literals and wrappers; their definitions.
+    lit_protos: String,
+    lit_defs: String,
+    /// Wrappers of named functions and constructors already written.
+    wrappers: HashSet<String>,
 }
 
 /// Does `n` get changed in `stmts`: assigned, or passed as `mut`?
@@ -401,6 +416,22 @@ impl<'a> Emitter<'a> {
             let e = self.parse_base(s);
             let i = self.info.ress.iter().position(|&x| x == (ty, e));
             ty = i.map_or(Ty::Err, |i| Ty::Res(i as u32));
+        }
+        if let Some(r) = s.strip_prefix('(') {
+            // a function type `R(T1, mut T2)` (R26)
+            *s = r;
+            let mut ps = Vec::new();
+            while !s.is_empty() && !s.starts_with(')') {
+                let m = s.strip_prefix("mut ");
+                if let Some(r) = m {
+                    *s = r;
+                }
+                ps.push((self.parse_top(s), m.is_some()));
+                *s = s.strip_prefix(',').unwrap_or(s);
+            }
+            *s = s.strip_prefix(')').unwrap_or(s);
+            let i = self.info.ftys.iter().position(|x| x.0 == ty && x.1 == ps);
+            ty = i.map_or(Ty::Err, |i| Ty::Func(i as u32));
         }
         ty
     }
@@ -729,6 +760,7 @@ impl<'a> Emitter<'a> {
         }
         c.push_str(&self.helpers());
         c.push_str(&self.descriptors());
+        c.push_str(LITS_MARK);
         if tests {
             c.push_str(TEST_RUNTIME);
         }
@@ -775,7 +807,7 @@ impl<'a> Emitter<'a> {
                 c,
                 "int main(int argc, char **argv) {{\n    setvbuf(stdout, NULL, _IOLBF, 0); // a crash keeps the lines printed so far\n    dif_init(argc, argv);\n    switch (argc > 1 ? atoi(argv[1]) : -1) {{\n{runs}    default: return 4;\n    }}\n    return 0;\n}}\n"
             );
-            return c;
+            return self.finish(c);
         }
         // `void!E main()`: an error ends the program with `error: <text>` and exit code 1 (R12)
         let main_ty = self
@@ -794,7 +826,7 @@ impl<'a> Emitter<'a> {
         } else {
             c.push_str("int main(int argc, char **argv) {\n    dif_init(argc, argv);\n    d_main();\n    return 0;\n}\n");
         }
-        c
+        self.finish(c)
     }
 
     /// `dif_ioerr_val`: the `io.IoErr` of the runtime's error record.
@@ -1411,18 +1443,8 @@ impl<'a> Emitter<'a> {
     /// expression is not such a place.
     fn place_ref(&mut self, e: &'a Expr) -> Option<String> {
         match &e.kind {
-            ExprKind::Ident(n) if !self.consts.contains_key(n.as_str()) => {
-                Some(if self.derefs.contains(n.as_str()) {
-                    format!("(*d_{n})")
-                } else {
-                    format!("d_{n}")
-                })
-            }
-            ExprKind::SelfRef => Some(if self.derefs.contains("self") {
-                "(*d_self)".into()
-            } else {
-                "d_self".into()
-            }),
+            ExprKind::Ident(n) if !self.consts.contains_key(n.as_str()) => Some(self.name_ref(n)),
+            ExprKind::SelfRef => Some(self.name_ref("self")),
             ExprKind::Paren(x) => self.place_ref(x),
             ExprKind::Field(base, name) if self.enum_of(base).is_none() => {
                 Some(format!("{}.f_{name}", self.bor(base)))
@@ -1547,6 +1569,18 @@ impl<'a> Emitter<'a> {
         if let Some(v) = self.info.folded.get(&(e.pos.offset, e.end)) {
             return self.int_const(self.ty(e), *v);
         }
+        if let Ty::Func(_) = self.ty(e) {
+            match &e.kind {
+                ExprKind::Ident(n) if self.funcs.contains_key(n.as_str()) => {
+                    return self.fn_value(self.funcs[n.as_str()], self.ty(e));
+                }
+                ExprKind::Field(base, v) if self.enum_of(base).is_some() => {
+                    let eid = self.enum_of(base).unwrap_or(0);
+                    return self.ctor_value(eid, v, self.ty(e));
+                }
+                _ => {}
+            }
+        }
         if let Some(r) = self.place_ref(e) {
             let t = self.ty(e);
             return if self.managed(t) { self.copy(t, &r) } else { r };
@@ -1608,7 +1642,8 @@ impl<'a> Emitter<'a> {
             ExprKind::StructLit(name, inits) => self.struct_lit(name, inits),
             ExprKind::IfExpr(branches, last) => self.if_expr(self.ty(e), branches, last),
             ExprKind::Mut(x) => format!("(&({}))", self.lvalue(x)),
-            ExprKind::Missing | ExprKind::FuncLit(_) => "0".into(),
+            ExprKind::FuncLit(l) => self.func_lit(e, l),
+            ExprKind::Missing => "0".into(),
             ExprKind::ListLit(items) => self.list_lit(e, items),
             ExprKind::MapLit(entries) => self.map_lit(e, entries),
             ExprKind::Index(base, idx, bp) => self.map_get(e, base, idx, *bp),
@@ -2098,6 +2133,12 @@ impl<'a> Emitter<'a> {
                     (e.pos.line as usize, e.pos.col as usize),
                 )
             }
+            ExprKind::Ident(name) if matches!(self.ty(f), Ty::Func(_)) => {
+                let Ty::Func(fi) = self.ty(f) else {
+                    return String::new();
+                };
+                self.call_value(e, name, fi, args)
+            }
             ExprKind::Ident(_) => self.convert(e, &args[0]),
             _ => unreachable!("call of something that is not a function"),
         }
@@ -2134,10 +2175,22 @@ impl<'a> Emitter<'a> {
     }
 
     fn apply(&mut self, name: &str, items: &[Arg<'a>], at: (usize, usize)) -> String {
+        self.apply_with(name, None, items, at)
+    }
+
+    /// `apply` with a first operand that needs no ordering (the environment of a function value).
+    fn apply_with(
+        &mut self,
+        name: &str,
+        lead: Option<String>,
+        items: &[Arg<'a>],
+        at: (usize, usize),
+    ) -> String {
         let outer = self.idx_temps.clone();
         let guard = self.overlap_guard(items, at);
-        let (pre, vals) = self.ordered(items);
+        let (pre, mut vals) = self.ordered(items);
         self.idx_temps = outer;
+        vals.splice(0..0, lead);
         let call = format!("{name}({})", vals.join(", "));
         Self::with_pre(guard + &pre, call)
     }

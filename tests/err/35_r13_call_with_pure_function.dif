@@ -1,0 +1,10 @@
+// expect: error[R13] 9:5
+int apply(int(int) f) {
+    return f(1)
+}
+int dbl(int n) {
+    return n * 2
+}
+void main() {
+    apply(dbl)
+}

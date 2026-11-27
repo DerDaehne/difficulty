@@ -1,0 +1,7 @@
+// expect: error[R8] 6:17
+int apply(int(int) f) {
+    return f(1)
+}
+void main() {
+    print(apply(void(int x) { print(x) }))
+}

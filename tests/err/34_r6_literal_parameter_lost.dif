@@ -1,0 +1,9 @@
+// expect: error[R6] 7:9
+void run(void(int) f) {
+    f(1)
+}
+void main() {
+    run(void(int v) {
+        v += 1
+    })
+}

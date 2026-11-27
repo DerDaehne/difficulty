@@ -163,6 +163,7 @@ impl<'a> Emitter<'a> {
         for t in self.universe() {
             self.type_def(t, &mut done, &mut c);
         }
+        c.push_str(&self.fn_type_defs());
         c
     }
 

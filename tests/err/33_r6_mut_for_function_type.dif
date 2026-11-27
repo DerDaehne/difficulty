@@ -1,0 +1,9 @@
+// expect: error[R6] 4:7
+void run(void(mut int) f) {
+    int n = 0
+    f(n)
+    print(n)
+}
+void main() {
+    run(void(mut int v) { v += 1 })
+}

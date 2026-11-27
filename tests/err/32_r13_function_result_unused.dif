@@ -1,0 +1,8 @@
+// expect: error[R13] 3:5
+int apply(int(int) f) {
+    f(1)
+    return 0
+}
+void main() {
+    print(apply(int(int x) { return x }))
+}

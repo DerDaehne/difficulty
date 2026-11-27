@@ -455,7 +455,28 @@ impl<'a> Parser<'a> {
                 None => break,
             }
         }
-        Some(k)
+        Some(self.fn_type_end(k).unwrap_or(k))
+    }
+
+    /// The end of a function type `(T1, mut T2)` after its return type that is followed by a
+    /// name, as in `int(int) f`; `k` is at the `(`.
+    fn fn_type_end(&self, k: usize) -> Option<usize> {
+        if *self.peek_n(k) != Tok::Op("(") {
+            return None;
+        }
+        let mut j = k + 1;
+        while *self.peek_n(j) != Tok::Op(")") {
+            if *self.peek_n(j) == Tok::Kw("mut") {
+                j += 1;
+            }
+            j = self.type_end(j)?;
+            match self.peek_n(j) {
+                Tok::Op(",") => j += 1,
+                Tok::Op(")") => {}
+                _ => return None,
+            }
+        }
+        matches!(self.peek_n(j + 1), Tok::Ident(_)).then_some(j + 1)
     }
 
     fn base_end(&self, k: usize) -> Option<usize> {
@@ -1382,6 +1403,7 @@ impl<'a> Parser<'a> {
         }
         match &e.kind {
             ExprKind::Call(..) => Some(Stmt::Call(e)),
+            ExprKind::FuncLit(l) if l.alt.is_some() => Some(Stmt::Call(e)),
             ExprKind::Try(x, _) if matches!(x.kind, ExprKind::Call(..)) => Some(Stmt::Call(e)),
             ExprKind::Missing => None,
             kind => {

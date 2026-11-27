@@ -121,7 +121,9 @@ impl<'a> Checker<'a> {
         self.capture(name, Ty::Func(fi));
         self.exprs.insert((f.pos.offset, f.end), Ty::Func(fi));
         let (ret, ps) = self.ftys[fi as usize].clone();
-        let params = ps.iter().map(|&(t, m)| (t, m, String::new())).collect();
+        let params = (ps.iter().enumerate())
+            .map(|(j, &(t, m))| (t, m, format!("argument {}", j + 1)))
+            .collect();
         let ok = self.args_to(e, name, params, None, args, Vec::new());
         self.last_callee = None;
         self.last_effect = Some(false);

@@ -1,0 +1,6 @@
+// expect: error[R26] 3:9
+void take(void() f) {
+    _ = f
+}
+void main() {
+}

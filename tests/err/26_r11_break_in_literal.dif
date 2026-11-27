@@ -1,0 +1,11 @@
+// expect: error[R11] 8:13
+void run(void() f) {
+    f()
+}
+void main() {
+    for int i in range(3) {
+        run() {
+            break
+        }
+    }
+}

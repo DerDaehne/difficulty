@@ -1,0 +1,10 @@
+// expect: error[R12] 7:17
+int apply(int(int) f) {
+    return f(1)
+}
+void main() {
+    print(apply(int(int x) {
+        int y = try x
+        return y
+    }))
+}

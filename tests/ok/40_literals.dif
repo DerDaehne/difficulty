@@ -1,0 +1,139 @@
+enum Shape {
+    Dot
+    Box(int size)
+}
+
+struct Box2 {
+    int w
+    str label
+}
+
+void times(int n, void() body) {
+    for int i in range(n) {
+        body()
+    }
+}
+
+int sum_with([]int xs, int(int) f) {
+    int total = 0
+    for int x in xs {
+        total += f(x)
+    }
+    return total
+}
+
+[]int mapped([]int xs, int(int) f) {
+    []int out = []
+    for int x in xs {
+        out.push(f(x))
+    }
+    return out
+}
+
+[]Shape shapes([]int xs, Shape(int) f) {
+    []Shape out = []
+    for int x in xs {
+        out.push(f(x))
+    }
+    return out
+}
+
+bool any_of([]int xs, bool(int) f) {
+    for int x in xs {
+        if f(x) {
+            return true
+        }
+    }
+    return false
+}
+
+void each([]int xs, void(int) f) {
+    for int x in xs {
+        f(x)
+    }
+}
+
+void apply_to(mut int x, void(mut int) f) {
+    f(mut x)
+}
+
+int twice(int n, int(int) f) {
+    return f(f(n))
+}
+
+int one(void() body) {
+    body()
+    return 1
+}
+
+int plus(int n) {
+    return n + 1
+}
+
+int triple(int n) {
+    return n * 3
+}
+
+void pass_on(void() b) {
+    times(2, b)
+}
+
+int bump(mut int n) {
+    n += 1
+    return n
+}
+
+struct Counter {
+    int step
+}
+
+int Counter.run(Counter c, int n) {
+    return twice(n, int(int v) { return v + self.step + c.step })
+}
+
+void main() {
+    int factor = 10
+    str tag = "n"
+    []int base = [1, 2, 3]
+    times(2) {
+        print("hi {tag}")
+    }
+    print(sum_with(base, int(int x) { return x * factor }))
+    factor = 100
+    print(sum_with(base, int(int x) { return x * factor }))
+    print(mapped(base, triple))
+    print(mapped(base, int(int x) { return x + base.len() }))
+    print(shapes(base, Shape.Box))
+    print(shapes(base, Shape(int n) { return Shape.Box(n * 2) }))
+    print(plus(one() { print("block") }))
+    if any_of(base, bool(int x) { return x > 2 }) {
+        print("big")
+    }
+    each(base, void(int x) {
+        if x == 2 {
+            return
+        }
+        print("{tag}{x}")
+    })
+    int n = 1
+    apply_to(mut n, void(mut int v) { v += 10 })
+    print(n)
+    // literals in literals: the inner one sees what the outer one captured
+    print(twice(1, int(int a) { return sum_with(base, int(int b) { return a + b + factor }) }))
+    // a literal in a loop captures anew each time
+    for int i in range(2) {
+        times(1) {
+            print("i{i}")
+        }
+    }
+    // the capture happens in order: after bump changed n, the literal sees the new value
+    int k = 5
+    print(sum_with([bump(mut k)], int(int x) { return x * k }))
+    Counter c = Counter{step: 1}
+    print(c.run(c, 0))
+    Box2 b = Box2{w: 3, label: "wide"}
+    each(base, void(int x) { print("{b.label}{b.w + x}") })
+    pass_on() {
+        print("again")
+    }
+}
