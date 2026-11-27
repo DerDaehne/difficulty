@@ -717,13 +717,21 @@ impl<'a> Emitter<'a> {
             },
             _ => None,
         };
-        let st = self.ty(src);
+        // `s.runes()`: decode in place, no list of runes
+        let runes = match &src.kind {
+            ExprKind::Call(f, args) if tried.is_none() && args.is_empty() => match &f.kind {
+                ExprKind::Field(b, m) if m == "runes" && self.ty(b) == Ty::Str => Some(&**b),
+                _ => None,
+            },
+            _ => None,
+        };
+        let st = runes.map_or(self.ty(src), |_| Ty::Str);
         let s = format!("s{}", self.uid);
         let i = format!("i{}", self.uid);
         self.uid += 1;
         self.line(d, "{");
         self.push_scope();
-        let v = self.bor(part.map_or(src, |p| p.0));
+        let v = self.bor(runes.unwrap_or_else(|| part.map_or(src, |p| p.0)));
         let (lo, hi) = (format!("lo{}", &s[1..]), format!("hi{}", &s[1..]));
         match st {
             Ty::List(_) => self.line(d + 1, &format!("dif_list *{s} = dif_list_inc({v});")),
@@ -764,13 +772,27 @@ impl<'a> Emitter<'a> {
                 n = format!("dif_map_cnt({s})");
                 (kd, vd) = (self.dty(k), self.dty(v));
             }
+            Ty::Str if runes.is_some() => {
+                n = format!("{s}.n");
+                (kd, vd) = (String::new(), String::new());
+            }
             _ => unreachable!("a loop over something that is no collection"),
         }
         let start = if part.is_some() { lo.as_str() } else { "0" };
-        self.line(
-            d + 1,
-            &format!("for (int64_t {i} = {start}, n_ = {n}; {i} < n_; {i}++) {{"),
-        );
+        if runes.is_some() {
+            let k = format!("k{}", &s[1..]);
+            self.line(
+                d + 1,
+                &format!("for (int64_t {i} = 0, n_ = {n}, {k} = 0; {i} < n_; {k}++) {{"),
+            );
+            self.line(d + 2, &format!("uint32_t c{k}; if ((unsigned char){s}.p[{i}] < 0x80) c{k} = (unsigned char){s}.p[{i}++]; else {i} += dif_utf8_step({s}.p + {i}, n_ - {i}, &c{k});"));
+            self.line(d + 2, &format!("(void){k};"));
+        } else {
+            self.line(
+                d + 1,
+                &format!("for (int64_t {i} = {start}, n_ = {n}; {i} < n_; {i}++) {{"),
+            );
+        }
         // the elements of the iteration: (variable, type, expression of the element)
         let mut vals: Vec<(&Param, Ty, String)> = Vec::new();
         let mut tried_elem: Option<(Ty, String)> = None;
@@ -791,6 +813,13 @@ impl<'a> Emitter<'a> {
                 );
                 vals.push((&vars[0], kt, k));
                 vals.push((&vars[1], vt, v));
+            }
+            Ty::Str => {
+                let k = format!("k{}", &s[1..]);
+                if vars.len() == 2 {
+                    vals.push((&vars[0], Ty::Int, k.clone()));
+                }
+                vals.push((&vars[vars.len() - 1], Ty::Rune, format!("c{k}")));
             }
             _ => {
                 let el = self.elem_of(st);

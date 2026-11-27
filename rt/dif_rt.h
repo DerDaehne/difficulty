@@ -204,7 +204,16 @@ typedef struct { const char *p; int64_t n; int64_t *rc; } dif_str;
 
 #define DIF_DATA(k) ((char *)(k) + 16)
 #define DIF_BLK(p) ((int64_t *)((char *)(p) - 16))
+// Blocks of up to 32 bytes (words) are recycled: a short list of freed ones, popped by the next small request.
+static int64_t *dif_small[64] __attribute__((unused));
+static int dif_nsmall __attribute__((unused));
 DIF_FN int64_t *dif_blk_new(int64_t cap) {
+    if (cap <= 32) {
+        int64_t *b = dif_nsmall ? dif_small[--dif_nsmall] : dif_alloc(16 + 32);
+        b[0] = 1;
+        b[1] = 32;
+        return b;
+    }
     int64_t *b = dif_alloc(dif_bytes(cap, 1, 16));
     b[0] = 1;
     b[1] = cap;
@@ -215,7 +224,9 @@ DIF_FN dif_str dif_str_inc(dif_str s) {
     return s;
 }
 DIF_FN void dif_str_dec(dif_str s) {
-    if (s.rc && --*s.rc == 0) free(s.rc);
+    if (!s.rc || --*s.rc != 0) return;
+    if (s.rc[1] == 32 && dif_nsmall < 64) dif_small[dif_nsmall++] = s.rc;
+    else free(s.rc);
 }
 // new text with a copy of the bytes
 DIF_FN dif_str dif_str_new(const char *p, int64_t n) {
@@ -255,6 +266,15 @@ DIF_FN void dif_str_append(dif_str *s, dif_str t) {
     dif_str r = {DIF_DATA(b), cap, b};
     dif_str_dec(*s);
     *s = r;
+}
+// `s = ""`: a small unshared text is emptied in place, so the next appends need no new block
+DIF_FN void dif_str_clear(dif_str *s) {
+    if (s->rc && *s->rc == 1 && s->p == DIF_DATA(s->rc) && s->rc[1] <= 256) {
+        s->n = 0;
+        return;
+    }
+    dif_str_dec(*s);
+    *s = DIF_EMPTY;
 }
 DIF_FN dif_str dif_cat(dif_str a, dif_str b) {
     if (a.n == 0) return dif_str_inc(b);
@@ -1287,6 +1307,11 @@ DIF_FN int dif_utf8_step(const char *p, int64_t n, uint32_t *cp) {
 }
 DIF_FN bool dif_utf8_valid(const char *p, int64_t n) {
     for (int64_t i = 0; i < n;) {
+        if (i >= 0 && n - i >= 8) { // ASCII fast path: eight bytes at a time
+            uint64_t w;
+            memcpy(&w, p + (size_t)i, 8);
+            if (!(w & 0x8080808080808080u)) { i += 8; continue; }
+        }
         uint32_t cp;
         int k = dif_utf8_decode(p + i, n - i, &cp);
         if (!k) return false;
@@ -1734,29 +1759,18 @@ DIF_FN bool dif_io_write_lines(dif_str path, const dif_list *lines, dif_ioerr *e
 // read error. stdout is written first, so prompts appear before the program waits.
 DIF_FN int dif_io_read_line(dif_str *out, dif_ioerr *e) {
     fflush(stdout);
-    dif_buf b = dif_buf_new();
-    char t[256];
-    int k = 0, ch;
-    bool any = false;
-    while ((ch = getc(stdin)) != EOF) {
-        any = true;
-        if (ch == '\n') break;
-        t[k++] = (char)ch;
-        if (k == (int)sizeof t) dif_put(&b, t, k), k = 0;
-    }
-    dif_put(&b, t, k);
+    static char *line; // one reused line buffer; the str gets its own exact-size block
+    static size_t cap;
     dif_str path = DIF_S("<stdin>");
-    if (!any && ferror(stdin)) {
-        dif_buf_free(&b);
+    ssize_t n = getdelim(&line, &cap, '\n', stdin);
+    if (n < 0) {
+        if (!ferror(stdin)) return 0;
         return dif_ioerr_errno(e, path, errno), clearerr(stdin), -1;
     }
-    if (!any) return dif_buf_free(&b), 0;
-    if (b.n > 0 && b.p[b.n - 1] == '\r') b.n--; // also in a last line without \n
-    if (!dif_utf8_valid(b.p, b.n)) {
-        dif_buf_free(&b);
-        return dif_ioerr_set(e, DIF_IO_INVALID_UTF8, path, NULL), -1;
-    }
-    return *out = dif_take(&b), 1;
+    if (n > 0 && line[n - 1] == '\n') n--;
+    if (n > 0 && line[n - 1] == '\r') n--; // also in a last line without \n
+    if (!dif_utf8_valid(line, n)) return dif_ioerr_set(e, DIF_IO_INVALID_UTF8, path, NULL), -1;
+    return *out = dif_str_new(line, n), 1;
 }
 
 static int dif_argc __attribute__((unused));

@@ -1272,6 +1272,14 @@ impl<'a> Emitter<'a> {
         let t = self.ty(place);
         let ct = self.c_ty(t);
         if op == "=" {
+            // `s = ""`: an unshared text keeps its block for the next round of appends
+            if t == Ty::Str
+                && matches!(&value.kind, ExprKind::Str(segs) if segs.iter().all(|g| matches!(g, StrSeg::Lit(l) if l.is_empty())))
+            {
+                let lv = self.lvalue(place);
+                self.line(d, &format!("dif_str_clear(&({lv}));"));
+                return;
+            }
             let v = self.at(t, value);
             let local = matches!(&place.kind, ExprKind::Ident(_));
             let l = if self.managed(t) {
@@ -1649,6 +1657,11 @@ impl<'a> Emitter<'a> {
                 }
                 if *op == "-" && t == Ty::Int && self.safe_sub(l, r) {
                     return format!("({} - {})", self.expr(l), self.expr(r));
+                }
+                // `s == ""`, `s != ""`: the length decides
+                let empty = |x: &Expr| matches!(&x.kind, ExprKind::Str(g) if g.iter().all(|s| matches!(s, StrSeg::Lit(l) if l.is_empty())));
+                if t == Ty::Str && matches!(*op, "==" | "!=") && empty(r) {
+                    return format!("({}.n {op} 0)", self.bor(l));
                 }
                 let items = if self.managed(t) {
                     [Arg::Ref(l), Arg::Ref(r)]
