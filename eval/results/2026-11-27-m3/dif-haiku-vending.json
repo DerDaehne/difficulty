@@ -1,0 +1,27 @@
+{
+  "lang": "dif",
+  "model": "haiku",
+  "task": "vending",
+  "dry_run": false,
+  "rounds": 1,
+  "pass1": true,
+  "pass5": true,
+  "tokens": {
+    "input": 2,
+    "cache_creation": 11865,
+    "cache_read": 0,
+    "output": 4555
+  },
+  "codes": {},
+  "prompt_chars": [
+    25928
+  ],
+  "history": [
+    {
+      "round": 1,
+      "ok": true,
+      "codes": [],
+      "feedback": null
+    }
+  ]
+}

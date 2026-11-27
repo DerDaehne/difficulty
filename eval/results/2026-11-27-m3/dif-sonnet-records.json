@@ -1,0 +1,38 @@
+{
+  "lang": "dif",
+  "model": "sonnet",
+  "task": "records",
+  "dry_run": false,
+  "rounds": 2,
+  "pass1": false,
+  "pass5": true,
+  "tokens": {
+    "input": 4,
+    "cache_creation": 24621,
+    "cache_read": 0,
+    "output": 3872
+  },
+  "codes": {
+    "S1": 1
+  },
+  "prompt_chars": [
+    25535,
+    28436
+  ],
+  "history": [
+    {
+      "round": 1,
+      "ok": false,
+      "codes": [
+        "S1"
+      ],
+      "feedback": "dif check:\n{\"v\":1,\"code\":\"S1\",\"id\":\"S1.expected_expr\",\"severity\":\"error\",\"file\":\"main.dif\",\"line\":94,\"col\":21,\"offset\":2281,\"message\":\"expected an expression, found `=`\"}\n"
+    },
+    {
+      "round": 2,
+      "ok": true,
+      "codes": [],
+      "feedback": null
+    }
+  ]
+}

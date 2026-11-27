@@ -285,3 +285,20 @@ Allokation je Wort (11 ms) und Map-Zugriffe mit Sortieren (13 ms, davon 3 ms Sor
 C braucht dafür keine Allokation je Wort, sondern zeigt in den Eingabepuffer. Weiter käme man
 nur mit Aufbau der Wörter als Teilstrings des Zeilentexts oder mit `lower` am Ort, also mit
 Änderungen der Sprache oder der Speichersemantik.
+
+## Agenten-Messung 2 (Stand M3 ohne std in difficulty)
+
+Gleiches Protokoll wie Lauf 1, nur difficulty, Aufgabentext von `vending` geklärt, Compiler mit
+Raw-Strings, Formatbreiten, benannten Parametern, gespeicherten Funktionswerten und Generics.
+Rohdaten: `eval/results/2026-11-27-m3/`.
+
+| Sprache | Modell | pass@1 | pass@5 | Runden im Mittel | Tokens (Eingabe+Cache / Ausgabe) |
+|---|---|---|---|---|---|
+| difficulty | Haiku | 5/5 | 5/5 | 1,0 | 58 809 / 53 797 |
+| difficulty | Sonnet | 3/5 | 5/5 | 1,4 | 83 637 / 13 371 |
+
+Die beiden Fehlversuche von Sonnet waren Compiler-Meldungen, beide in der zweiten Runde repariert:
+`R4` (`min` als freie Funktion statt `a.min(b)`; der Hinweis schlug `main` vor) und `S1`
+(`=` an einer Stelle, an der ein Ausdruck stehen muss). Haiku löste alle fünf Aufgaben im ersten
+Versuch. Bei fünf Aufgaben und einem Lauf je Modell sind das Schwankungen, keine Tendenz; Python
+wurde in diesem Lauf nicht wiederholt (Lauf 1: Haiku 4/5, Sonnet 5/5).

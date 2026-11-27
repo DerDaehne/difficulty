@@ -1,0 +1,27 @@
+{
+  "lang": "dif",
+  "model": "sonnet",
+  "task": "vending",
+  "dry_run": false,
+  "rounds": 1,
+  "pass1": true,
+  "pass5": true,
+  "tokens": {
+    "input": 2,
+    "cache_creation": 11844,
+    "cache_read": 0,
+    "output": 1623
+  },
+  "codes": {},
+  "prompt_chars": [
+    25928
+  ],
+  "history": [
+    {
+      "round": 1,
+      "ok": true,
+      "codes": [],
+      "feedback": null
+    }
+  ]
+}

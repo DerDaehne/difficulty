@@ -1,0 +1,38 @@
+{
+  "lang": "dif",
+  "model": "sonnet",
+  "task": "wordcount",
+  "dry_run": false,
+  "rounds": 2,
+  "pass1": false,
+  "pass5": true,
+  "tokens": {
+    "input": 4,
+    "cache_creation": 23508,
+    "cache_read": 0,
+    "output": 2119
+  },
+  "codes": {
+    "R4": 1
+  },
+  "prompt_chars": [
+    24862,
+    26401
+  ],
+  "history": [
+    {
+      "round": 1,
+      "ok": false,
+      "codes": [
+        "R4"
+      ],
+      "feedback": "dif check:\n{\"v\":1,\"code\":\"R4\",\"id\":\"R4.unknown_name\",\"severity\":\"error\",\"file\":\"main.dif\",\"line\":44,\"col\":13,\"offset\":1027,\"message\":\"unknown name `min`\",\"hint\":\"did you mean main?\"}\n"
+    },
+    {
+      "round": 2,
+      "ok": true,
+      "codes": [],
+      "feedback": null
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "lang": "dif",
+  "model": "haiku",
+  "task": "records",
+  "dry_run": false,
+  "rounds": 1,
+  "pass1": true,
+  "pass5": true,
+  "tokens": {
+    "input": 2,
+    "cache_creation": 11786,
+    "cache_read": 0,
+    "output": 11578
+  },
+  "codes": {},
+  "prompt_chars": [
+    25535
+  ],
+  "history": [
+    {
+      "round": 1,
+      "ok": true,
+      "codes": [],
+      "feedback": null
+    }
+  ]
+}
