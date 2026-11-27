@@ -3,7 +3,7 @@ struct Counter {
     int n
 }
 
-void Counter.inc() {
+void Counter.inc(mut self) {
     self.n += 1
 }
 

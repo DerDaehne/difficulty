@@ -859,11 +859,7 @@ impl<'a> Emitter<'a> {
     }
 
     fn changes_self(&self, f: &Func) -> bool {
-        f.recv.as_ref().is_some_and(|r| {
-            self.info
-                .self_changes
-                .contains(&(r.name.clone(), f.name.clone()))
-        })
+        f.mut_self.is_some()
     }
 
     fn header(&self, f: &Func) -> String {

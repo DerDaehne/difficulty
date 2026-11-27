@@ -65,6 +65,8 @@ pub struct Func {
     pub recv: Option<TypeRef>,
     pub name: String,
     pub pos: Pos,
+    /// Position of `mut self` (methods only).
+    pub mut_self: Option<Pos>,
     pub params: Vec<Param>,
     pub body: Block,
 }

@@ -184,8 +184,6 @@ pub struct Info {
     pub exprs: HashMap<(u32, u32), Ty>,
     /// `Ty::Named(i)` is `types[i]`.
     pub types: Vec<TypeDef>,
-    /// Methods (type name, method name) that change `self`; they take it by pointer.
-    pub self_changes: HashSet<(String, String)>,
     /// `Ty::Opt(i)` is `?opts[i]`.
     pub opts: Vec<Ty>,
     /// `Ty::Res(i)` is `ress[i].0 ! ress[i].1`.
@@ -229,20 +227,10 @@ pub fn check(file: &str, src: &str, m: &Module) -> (Vec<Diag>, Info) {
             },
         })
         .collect();
-    let mut self_changes = HashSet::new();
-    if let Some(d) = &c.derived {
-        for (i, f) in c.fns.iter().enumerate() {
-            if let (Some(t), true) = (f.recv, d[i].changes_self) {
-                let tname = c.types[t as usize].name.to_string();
-                self_changes.insert((tname, f.decl.name.clone()));
-            }
-        }
-    }
     let info = Info {
         folded: c.folded,
         exprs: c.exprs,
         types,
-        self_changes,
         opts: c.opts,
         ress: c.ress,
         part2b: c.uses_2b,
@@ -355,7 +343,7 @@ fn derive(fns: &[FnInfo], facts: &[Facts]) -> Vec<Derived> {
             for &(callee, from, to) in &f.deps {
                 let src = match from {
                     Slot::Param(j) => d[callee].changes.get(j).copied().unwrap_or(false),
-                    Slot::SelfSlot => d[callee].changes_self,
+                    Slot::SelfSlot => fns[callee].decl.mut_self.is_some(),
                 };
                 let tgt = match to {
                     Slot::Param(k) => &mut d[i].changes[k],
@@ -1058,18 +1046,24 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// The header of a function with `mut` added to or removed from one parameter.
-    fn signature(&self, id: usize, toggle: usize) -> String {
+    /// The header of a function with `mut` added to or removed from one parameter
+    /// (`None`: from `self`).
+    fn signature(&self, id: usize, toggle: Option<usize>) -> String {
         let f = self.fns[id].decl;
         let params: Vec<String> = f
             .params
             .iter()
             .enumerate()
             .map(|(k, p)| {
-                let m = (p.mut_pos.is_some()) != (k == toggle);
+                let m = p.mut_pos.is_some() != (Some(k) == toggle);
                 format!("{}{} {}", if m { "mut " } else { "" }, p.ty.name, p.name)
             })
             .collect();
+        let params: Vec<String> = if f.mut_self.is_some() != toggle.is_none() {
+            ["mut self".to_string()].into_iter().chain(params).collect()
+        } else {
+            params
+        };
         let recv = f
             .recv
             .as_ref()
@@ -1112,6 +1106,7 @@ impl<'a> Checker<'a> {
             self.err("R8", f.pos, msg, Some(hint));
         }
         if let Some(d) = &self.derived {
+            let changes_self = d[id].changes_self;
             let unneeded: Vec<(usize, Pos)> = f
                 .params
                 .iter()
@@ -1120,8 +1115,12 @@ impl<'a> Checker<'a> {
                 .collect();
             for (k, mp) in unneeded {
                 let msg = format!("`{}` is never changed; remove mut", f.params[k].name);
-                let hint = self.signature(id, k);
+                let hint = self.signature(id, Some(k));
                 self.err("R6", mp, msg, Some(hint));
+            }
+            if let Some(mp) = f.mut_self.filter(|_| !changes_self) {
+                let hint = self.signature(id, None);
+                self.err("R6", mp, "`self` is never changed; remove mut", Some(hint));
             }
             // a broken body has its own causes; lost changes there would only add noise
             if self.diags.len() == errors_before {
@@ -1138,7 +1137,7 @@ impl<'a> Checker<'a> {
             .filter(|p| p.mut_pos.is_some())
             .map(|p| p.name.clone())
             .collect();
-        if f.recv.is_some() {
+        if f.mut_self.is_some() {
             escape.push("self".into());
         }
         for (place, pos) in live::lost(&f.body, &self.call_changes, &escape) {
@@ -1146,7 +1145,12 @@ impl<'a> Checker<'a> {
             if root != "self" && !self.fn_locals.contains(&root) {
                 continue; // a const, a function or an unknown name: reported elsewhere
             }
-            match f.params.iter().position(|p| p.name == root) {
+            let slot = if root == "self" && f.mut_self.is_none() {
+                Some(None)
+            } else {
+                f.params.iter().position(|p| p.name == root).map(Some)
+            };
+            match slot {
                 Some(k) => {
                     let msg = format!("the change to `{place}` is lost: `{root}` is a copy");
                     let hint = format!("take it as mut: {}", self.signature(id, k));
@@ -2659,7 +2663,7 @@ impl<'a> Checker<'a> {
                 Ty::Named(t) => self.types[t as usize]
                     .methods
                     .get(m)
-                    .is_some_and(|&id| self.derived.as_ref().is_some_and(|d| d[id].changes_self)),
+                    .is_some_and(|&id| self.fns[id].decl.mut_self.is_some()),
                 _ => self.builtin_changes(inner, m),
             };
             if changes {
@@ -2697,16 +2701,16 @@ impl<'a> Checker<'a> {
             return (Ty::Err, Val::Runtime);
         };
         let mut changeable = Vec::new();
-        let changes_self = self.derived.as_ref().map(|d| d[id].changes_self);
-        if changes_self != Some(false) {
-            // the receiver is changed (or might be, in the first pass)
+        let changes_self = self.fns[id].decl.mut_self.is_some();
+        if changes_self {
+            // the receiver is changed
             if let Some(slot) = self.root_slot(base) {
                 if let Some(cur) = self.cur {
                     self.facts[cur].deps.push((id, Slot::SelfSlot, slot));
                 }
             }
         }
-        if changes_self == Some(true) {
+        if changes_self {
             match self.root_of(base) {
                 Some((root, false)) if is_place(base) => {
                     self.call_changes

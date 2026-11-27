@@ -772,6 +772,7 @@ impl<'a> Parser<'a> {
         };
         let (name, pos) = self.name()?;
         let mut params = Vec::new();
+        let mut mut_self = None;
         if self.is_op("{") {
             let p = self.pos();
             let hint = format!("{}() {{", self.text(header, self.last_end));
@@ -798,6 +799,23 @@ impl<'a> Parser<'a> {
             // `name: T` and `-> T` from other languages: one R2 with the whole header
             let mut foreign: Option<(Pos, &str)> = None;
             while !self.is_op(")") {
+                if self.is_kw("mut") && *self.peek_n(1) == Tok::Kw("self") {
+                    let p = self.pos();
+                    if recv.is_some() && params.is_empty() && mut_self.is_none() {
+                        mut_self = Some(p);
+                    } else {
+                        let msg = "`mut self` is only the first parameter of a method";
+                        let hint = "write it as `void T.name(mut self, …)`".to_string();
+                        self.err("R7", p, msg, Some(hint));
+                    }
+                    self.bump();
+                    self.bump();
+                    if !self.is_op(",") {
+                        break;
+                    }
+                    self.bump();
+                    continue;
+                }
                 let mut_pos = self.is_kw("mut").then(|| self.pos());
                 if mut_pos.is_some() {
                     self.bump();
@@ -852,6 +870,7 @@ impl<'a> Parser<'a> {
             recv,
             name,
             pos,
+            mut_self,
             params,
             body,
         })

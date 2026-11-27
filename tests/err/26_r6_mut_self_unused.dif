@@ -1,0 +1,14 @@
+// expect: error[R6] 6:15
+struct Point {
+    int x
+}
+
+int Point.get(mut self) {
+    return self.x
+}
+
+void main() {
+    Point p = Point{x: 1}
+    print(p.get())
+    print(p)
+}

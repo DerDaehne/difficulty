@@ -658,7 +658,7 @@ main.dif:2:11: error[R8]: `[]` needs a place of type []T
 Teil 2a legt fest:
 
 - **Orte und Wurzeln.** Ein Ort ist eine Variable, ein Parameter oder `self` (seine *Wurzel*), gefolgt von Feldern: `p`, `p.x`, `scene.player.pos`. Was einen Ort ändert, ändert seine Wurzel.
-- **Ändern und Lesen.** Ändern heißt: einem Ort zuweisen; mit `+=` usw. rechnen; ihn mit `mut` an einen Parameter übergeben, den die aufgerufene Funktion ändert; auf ihm eine Methode aufrufen, die `self` ändert. Die letzten drei lesen den Ort zugleich. Lesen heißt jede andere Benutzung der Wurzel oder eines Teils davon.
+- **Ändern und Lesen.** Ändern heißt: einem Ort zuweisen; mit `+=` usw. rechnen; ihn mit `mut` an einen Parameter übergeben, den die aufgerufene Funktion ändert; auf ihm eine Methode mit `mut self` aufrufen. Die letzten drei lesen den Ort zugleich. Lesen heißt jede andere Benutzung der Wurzel oder eines Teils davon.
 - **Signatur und Aufruf.** Ein Parameter `mut T p` ändert den Ort, den der Aufrufer mit `mut` übergibt: `shift(mut b, 5)`, `shift(mut scene.player, 5)`. Ein Ort mit `const`-Wurzel geht nie mit `mut` hinein (`R4`, `` cannot pass const `k` as mut ``). Meldungen, jeweils `R6` am Argument:
   - `mut` fehlt: `` `shift` takes `p` as mut ``, Hinweis: der Aufruf samt `mut`;
   - `mut` zu viel: `` `show` takes `p` without mut ``, Hinweis: der Aufruf ohne `mut`;
@@ -669,7 +669,7 @@ Teil 2a legt fest:
   - sonst: `` `x.y` is changed but never read afterwards ``, Hinweis `use the value, or remove the change`.
   
   Gemeldet wird je Ort (Wurzel mit Feldpfad) die erste verlorene Änderung. Der Anfangswert einer Deklaration ist keine Änderung: `int x = 0` gefolgt von `x = 1; x = 2; print(x)` meldet `x = 1`.
-- **Keine Aliase.** In einem Aufruf geht ein Ort höchstens einmal veränderbar hinein: als `self` einer Methode, die `self` ändert, oder als `mut`-Argument. Zwei solche Orte dürfen sich nicht überlappen (`a` und `a.x`, oder zweimal `a.x`), sonst `R6` am zweiten, Meldung `` `p` goes into this call changeable twice ``, Hinweis `pass it changeable only once`. Liest der Aufruf denselben Ort zusätzlich als Argument ohne `mut`, bekommt dieses Argument den Wert von vor dem Aufruf. Ein Aufruf im Argument eines anderen ist ein eigener Aufruf: `f(mut a, g(mut a))` ist erlaubt, `g` ist fertig, bevor `f` beginnt.
+- **Keine Aliase.** In einem Aufruf geht ein Ort höchstens einmal veränderbar hinein: als `self` einer Methode mit `mut self` oder als `mut`-Argument. Zwei solche Orte dürfen sich nicht überlappen (`a` und `a.x`, oder zweimal `a.x`), sonst `R6` am zweiten, Meldung `` `p` goes into this call changeable twice ``, Hinweis `pass it changeable only once`. Liest der Aufruf denselben Ort zusätzlich als Argument ohne `mut`, bekommt dieses Argument den Wert von vor dem Aufruf. Ein Aufruf im Argument eines anderen ist ein eigener Aufruf: `f(mut a, g(mut a))` ist erlaubt, `g` ist fertig, bevor `f` beginnt.
 
 Teil 2c ergänzt Elemente:
 
@@ -679,7 +679,7 @@ Teil 2c ergänzt Elemente:
 Teil 2d ergänzt Funktionsliterale und Blöcke (R26):
 
 - **Ein Literal ändert nichts ringsum.** Es nimmt beim Auswerten eine Kopie jedes Namens der Umgebung, den es benutzt, und liest nur diese Kopien (R26). Darum ist ein Literal nie ein Weg in einen Aufruf: „Keine Aliase“ gilt unverändert und kennt keine Literale, ein Schnappschuss-Sonderfall entfällt. Ein Literal sieht immer den Wert von vor dem Aufruf: `xs.sort_by(…)` mit einem Literal, das `xs` liest, liest die Liste vor dem Sortieren.
-- **Änderung an einem eingefangenen Namen.** Weist ein Literal oder Block einem Namen der Umgebung oder einem Teil davon zu, rechnet es mit `+=` usw. oder ruft es darauf eine Methode, die `self` ändert, ist das immer `R6` an der Änderung: Meldung `` the change to `x` is lost: `x` is a copy ``, Hinweis `a function literal sees a copy; return the value or use a for loop`. `x` ist die Wurzel (`p.x = 1` meldet `p`); gemeldet wird pro Wurzel die erste Änderung. Das gilt für jeden Namen der Umgebung: Variablen, Parameter mit und ohne `mut`, `self` und die Namen äußerer Literale. Eine `const`-Wurzel bleibt `R4`. Ein Griff (R5) ist keine Ausnahme der Regel, sondern fällt nicht darunter: seine Kopie ist derselbe Griff, und eine Methode, die hinter den Griff schreibt, ändert den Namen nicht.
+- **Änderung an einem eingefangenen Namen.** Weist ein Literal oder Block einem Namen der Umgebung oder einem Teil davon zu, rechnet es mit `+=` usw. oder ruft es darauf eine Methode mit `mut self`, ist das immer `R6` an der Änderung: Meldung `` the change to `x` is lost: `x` is a copy ``, Hinweis `a function literal sees a copy; return the value or use a for loop`. `x` ist die Wurzel (`p.x = 1` meldet `p`); gemeldet wird pro Wurzel die erste Änderung. Das gilt für jeden Namen der Umgebung: Variablen, Parameter mit und ohne `mut`, `self` und die Namen äußerer Literale. Eine `const`-Wurzel bleibt `R4`. Ein Griff (R5) ist keine Ausnahme der Regel, sondern fällt nicht darunter: seine Kopie ist derselbe Griff, und eine Methode, die hinter den Griff schreibt, ändert den Namen nicht.
 - **Verlorene Änderung.** Was ein Literal liest, gilt am Aufruf als gelesen: eine Änderung vor dem Aufruf, die nur das Literal liest, ist nicht verloren. Parameter und Variablen des Literals selbst folgen den Regeln einer Funktion (siehe oben): die Änderung an einem Parameter ohne `mut` meldet `` the change to `p` is lost: `p` is a copy `` ohne Hinweis, weil sein Typ vom Aufruf kommt.
 
 ```dif
@@ -799,22 +799,22 @@ main.dif:6:9: error[R6]: `p` is never changed; remove mut
 
 ### R7 — Methoden
 
-**Regel.** Eine Methode ist eine Funktion an einem Typ: `R T.name(params)`. In ihr ist `self` immer der Ort, an dem sie aufgerufen wird, und darf geändert werden. Methoden, die `self` nicht ändern, gehen auch auf Ausdrücken.
+**Regel.** Eine Methode ist eine Funktion an einem Typ: `R T.name(params)`. In ihr ist `self` der Ort, an dem sie aufgerufen wird. Ändert sie `self`, steht `mut self` als erster Parameter: `void Point.move(mut self, int dx)`. Methoden ohne `mut self` gehen auch auf Ausdrücken.
 
 ```ebnf
-method_decl = type IDENT "." IDENT "(" [ params ] ")" block ;   (* R Typ.name(…) *)
+method_decl = type IDENT "." IDENT "(" [ "mut" "self" [ "," ] ] [ params ] ")" block ;   (* R Typ.name(…) *)
 ```
 
 Ein Methodenaufruf `x.name(…)` ist ein `postfix` aus §2.
 
 Teil 2a legt fest:
 
-- Methoden gibt es für die `struct`- und `enum`-Typen des Moduls und, eingebaut, für `str`, `rune`, Zahlen, Listen, Arrays und Maps (§4); eigene Methoden an anderen Typen sind `R7`. Der Name steht in der Form `Typ.name`, darum findet `grep "Point.scale"` die Definition. `self` steht nie in der Parameterliste.
-- In der Methode ist `self` der Ort, auf dem sie aufgerufen wird, vom Typ `Typ`. Sie darf ihn lesen und ändern (`self.x *= k`, `self = Point{x: 0, y: 0}`). `self` außerhalb einer Methode ist `R7`.
-- Der Compiler leitet ab, ob eine Methode `self` ändert: sie ändert (R6) einen Ort mit der Wurzel `self`, also etwa `self.x = 1`, `shift(mut self.pos, 1)` oder `self.inner.bump()` mit einer Methode `bump`, die `self` ändert. Die Ableitung geht über alle Aufrufe, auch rekursive.
-- Eine Methode, die `self` ändert, braucht vor dem Punkt einen Ort (R6), dessen Wurzel keine `const`-Variable ist; auch Teilorte wie `scene.player.move(1)`. Vor einem anderen Ausdruck ist sie `R7` am Aufruf, Meldung `` `Counter.inc` changes self and needs a variable ``, Hinweis `store the value in a variable first`. Am Aufruf steht kein `mut`: der Methodenaufruf zeigt schon, dass der Ort vor dem Punkt gemeint ist. Für R6 zählt der Aufruf als Lesen und Ändern dieses Ortes.
-- Eine Methode, die `self` nicht ändert, geht auf jedem Ausdruck: `fresh().total()`, `a.moved(1).moved(2)`.
-- Eingebaute Methoden (§4) folgen denselben Regeln; die Tabellen dort nennen, welche `self` ändern. In der Meldung steht der Typ: `` `[]int.push` changes self and needs a variable ``.
+- Methoden gibt es für die `struct`- und `enum`-Typen des Moduls und, eingebaut, für `str`, `rune`, Zahlen, Listen, Arrays und Maps (§4); eigene Methoden an anderen Typen sind `R7`. Der Name steht in der Form `Typ.name`, darum findet `grep "Point.scale"` die Definition. Außer `mut self` steht `self` nie in der Parameterliste; `mut self` ist nur der erste Parameter einer Methode, sonst `R7`, Meldung `` `mut self` is only the first parameter of a method ``.
+- In der Methode ist `self` der Ort, auf dem sie aufgerufen wird, vom Typ `Typ`. Sie darf ihn lesen; ändern darf sie ihn nur mit `mut self` (`self.x *= k`, `self = Point{x: 0, y: 0}`). `self` außerhalb einer Methode ist `R7`.
+- `mut self` steht in der Signatur wie `mut` an einem Parameter (R6); aus dem Rumpf wird es nicht abgeleitet, eine Änderung im Rumpf bricht also nie fremde Aufrufe. Eine Methode ändert `self`, wenn sie (R6) einen Ort mit der Wurzel `self` ändert, etwa `self.x = 1`, `shift(mut self.pos, 1)` oder `self.inner.bump()` mit einer Methode `bump(mut self)`. Dann gilt wie bei Parametern: ohne `mut self` ist die Änderung verloren, `R6` an der Änderung, Meldung `` the change to `self.x` is lost: `self` is a copy ``, Hinweis `take it as mut: void Point.move(mut self, int dx)`; ein `mut self`, das nie ändert, ist `R6` an `mut`, Meldung `` `self` is never changed; remove mut ``, Hinweis die Signatur ohne `mut self`.
+- Eine Methode mit `mut self` braucht vor dem Punkt einen Ort (R6), dessen Wurzel keine `const`-Variable ist; auch Teilorte wie `scene.player.move(1)`. Vor einem anderen Ausdruck ist sie `R7` am Aufruf, Meldung `` `Counter.inc` changes self and needs a variable ``, Hinweis `store the value in a variable first`. Am Aufruf steht kein `mut`: der Methodenaufruf zeigt schon, dass der Ort vor dem Punkt gemeint ist. Für R6 zählt der Aufruf als Lesen und Ändern dieses Ortes.
+- Eine Methode ohne `mut self` geht auf jedem Ausdruck: `fresh().total()`, `a.moved(1).moved(2)`.
+- Eingebaute Methoden (§4) folgen denselben Regeln; die Tabellen dort nennen, welche `self` ändern (als hätten sie `mut self`). In der Meldung steht der Typ: `` `[]int.push` changes self and needs a variable ``.
 - Ein unbekannter Methodenname ist `R4`, mit dem ähnlichsten Namen als Hinweis.
 
 ```dif
@@ -829,7 +829,7 @@ Point Point.moved(int dx) {
     return q
 }
 
-void Point.scale(int k) {
+void Point.scale(mut self, int k) {
     self.x *= k
     self.y *= k
 }
@@ -856,7 +856,7 @@ struct Counter {
     int n
 }
 
-void Counter.inc() {
+void Counter.inc(mut self) {
     self.n += 1
 }
 
@@ -872,6 +872,48 @@ void main() {
 ```
 main.dif:14:5: error[R7]: `Counter.inc` changes self and needs a variable
   hint: store the value in a variable first
+```
+
+```dif error R6
+struct Point {
+    int x
+}
+
+void Point.move(int dx) {
+    self.x += dx
+}
+
+void main() {
+    Point p = Point{x: 1}
+    p.move(2)
+    print(p)
+}
+```
+
+```
+main.dif:6:5: error[R6]: the change to `self.x` is lost: `self` is a copy
+  hint: take it as mut: void Point.move(mut self, int dx)
+```
+
+```dif error R6
+struct Point {
+    int x
+}
+
+int Point.get(mut self) {
+    return self.x
+}
+
+void main() {
+    Point p = Point{x: 1}
+    print(p.get())
+    print(p)
+}
+```
+
+```
+main.dif:5:15: error[R6]: `self` is never changed; remove mut
+  hint: int Point.get()
 ```
 
 ### R8 — Keine Typmischung

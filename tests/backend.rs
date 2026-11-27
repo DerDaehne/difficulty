@@ -224,7 +224,7 @@ int bump(mut Box b) {
     return b.n
 }
 
-void Box.twice() {
+void Box.twice(mut self) {
     self.n *= 2
 }
 

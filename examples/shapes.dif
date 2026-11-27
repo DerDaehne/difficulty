@@ -33,7 +33,7 @@ str Shape.kind() {
     }
 }
 
-void Canvas.draw(Shape s) {
+void Canvas.draw(mut self, Shape s) {
     self.last = s
     self.drawn += 1
 }

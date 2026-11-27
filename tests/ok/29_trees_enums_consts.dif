@@ -16,7 +16,7 @@ int Tree.total() {
     return sum
 }
 
-void Tree.grow(int n) {
+void Tree.grow(mut self, int n) {
     if n == 0 {
         return
     }

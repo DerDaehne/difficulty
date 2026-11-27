@@ -16,7 +16,7 @@ enum Shape {
 
 enum Seat { Free, Taken }
 
-void Point.move(int dx) {
+void Point.move(mut self, int dx) {
     self.x += dx
 }
 
@@ -180,9 +180,29 @@ fn declarations() {
             "R6",
             "the change to `n` is lost",
         ),
+        (
+            "struct P {\n    int x\n}\n\nint P.get(mut self) {\n    return self.x\n}\n",
+            "R6",
+            "`self` is never changed; remove mut",
+        ),
+        (
+            "struct P {\n    int x\n}\n\nvoid P.move(int dx) {\n    self.x += dx\n}\n",
+            "R6",
+            "the change to `self.x` is lost: `self` is a copy",
+        ),
+        (
+            "struct P {\n    int x\n}\n\nvoid P.move(int a, mut self) {\n    self.x += a\n}\n",
+            "R7",
+            "`mut self` is only the first parameter of a method",
+        ),
+        (
+            "void f(mut self) {\n}\n",
+            "R7",
+            "`mut self` is only the first parameter of a method",
+        ),
         // a change to a part of self that is overwritten before anyone reads it
         (
-            "struct P {\n    int x\n}\n\nvoid P.r() {\n    self.x = 0\n    self = P{x: 1}\n}\n",
+            "struct P {\n    int x\n}\n\nvoid P.r(mut self) {\n    self.x = 0\n    self = P{x: 1}\n}\n",
             "R6",
             "`self.x` is changed but never read afterwards",
         ),
@@ -192,8 +212,8 @@ fn declarations() {
         assert_eq!(c, *code, "{src}: {m}");
         assert!(m.contains(msg), "{src}: {m}");
     }
-    // a method that changes self through another one is derived (R7)
-    let src = "struct C {\n    int n\n}\n\nvoid C.inc() {\n    self.n += 1\n}\n\nvoid C.twice() {\n    self.inc()\n    self.inc()\n}\n\nC fresh() {\n    return C{n: 0}\n}\n\nvoid main() {\n    fresh().twice()\n}\n";
+    // a method that changes self needs mut self; the call needs a variable (R7)
+    let src = "struct C {\n    int n\n}\n\nvoid C.inc(mut self) {\n    self.n += 1\n}\n\nvoid C.twice(mut self) {\n    self.inc()\n    self.inc()\n}\n\nC fresh() {\n    return C{n: 0}\n}\n\nvoid main() {\n    fresh().twice()\n}\n";
     let (c, m) = one(src);
     assert_eq!(
         (c, m.as_str()),

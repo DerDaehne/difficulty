@@ -11,7 +11,7 @@ struct Board {
     map[str][]int tags = {}
 }
 
-void Board.add(str title) {
+void Board.add(mut self, str title) {
     self.tasks.push(Task{title: title})
 }
 

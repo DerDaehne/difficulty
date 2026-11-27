@@ -86,7 +86,7 @@ Vollständig und ohne „außer“. Diese Liste ist auch der Kern von `llms.txt`
 | R4 | Variablen sind veränderlich, `const` nicht. Global gibt es nur `const`. Ein Name gilt bis zum Ende seines Blocks und wird darin nicht neu deklariert. | `const int MAX = 8` |
 | R5 | Zuweisung und Rückgabe kopieren den Wert; die Kopie ist unabhängig, intern aber billig. Ein **Griff** ist ein Wert, dessen Kopie dasselbe Objekt bezeichnet (Kanal, Task, `shared`, Datei, C-Objekt und die Handle-Typen der Standardbibliothek wie `db.Conn`, `html.Page`, `xml.Writer`, `ui.Builder`): kopiert wird der Griff, nicht das Ding. Seine Methoden dürfen hinter den Griff schreiben, ohne den Wert zu ändern: kein `mut self`, kein `mut` am Aufruf, kein `R6`. Griffe entstehen nur in der Standardbibliothek und aus C (opake Typen); eigene Typen sind in v0 nie Griffe. Parameter ohne `mut` sind lokale Kopien, wie in C. | `Point b = a` · `b.x = 9` ändert `a` nicht |
 | R6 | Soll eine Funktion ein Argument ändern, steht `mut` in der Signatur und am Aufruf; die Änderung landet beim Aufrufer. Eine Änderung, die danach nie gelesen wird, ist ein Fehler (sie träfe nur eine Kopie). `mut` nimmt Orte: Variablen, Felder und Elemente. Ein Ort geht höchstens einmal veränderbar in einen Aufruf: als `self` oder als `mut`-Argument; überlappen zwei Orte, ist das ein Fehler, bei Elementen mit Laufzeit-Index ein Abbruch. Liest derselbe Aufruf einen Ort zusätzlich, bekommt der lesende Teil einen Schnappschuss. | `void shift(mut Point p, int dx)` · `shift(mut scene.player.pos, 5)` · `normalize(mut tasks[i])` · `void nudge(Point p) { p.x += 1 }` → Fehler |
-| R7 | Eine Methode ist eine Funktion an einem Typ: `R T.name(params)`. In ihr ist `self` immer der Ort, an dem sie aufgerufen wird, und darf geändert werden. Methoden, die `self` nicht ändern, gehen auch auf Ausdrücken. | `hall.book(3, 5)` · `(dx * dx + dy * dy).sqrt()` · `xs.push(4)` · `int Hall.free() { return self.seats.count(Seat.Free) }` |
+| R7 | Eine Methode ist eine Funktion an einem Typ: `R T.name(params)`. In ihr ist `self` der Ort, an dem sie aufgerufen wird. Ändert sie `self`, steht `mut self` als erster Parameter. Methoden ohne `mut self` gehen auch auf Ausdrücken. | `hall.book(3, 5)` · `(dx * dx + dy * dy).sqrt()` · `xs.push(4)` · `int Hall.free() { return self.seats.count(Seat.Free) }` |
 | R8 | Typen mischen sich nie von selbst. Operatoren verlangen gleiche Typen; `T(x)` wandelt exakt um oder bricht ab; absichtlich runden mit `round()`/`trunc()`; Text baut man mit `"{x}"`. Ausdrücke nur aus Literalen rechnen im Typ ihrer Stelle; ohne Stelle ist ein Literal ohne Punkt `int`, mit Punkt `f64`; Float-Literale werden auf den nächsten Wert gerundet. „Steht beim Kompilieren fest“ heißt: nur Literale und `const`. | `f64(n)` · `int(x.round())` · `f64 h = 7 / 2` ist `3.5` · `int k = 7 / 2` ist `3` · `print(7 / 2)` ist `3` |
 | R9 | Bedingungen sind `bool`, nichts anderes. | `if xs.len() > 0` statt `if xs` |
 | R10 | `switch` deckt jeden möglichen Wert ab: alle Varianten oder `default`. Jeder `case` ist ein eigener Block und endet von selbst. Varianten eines `enum` schreibt man mit ihrem Typ; `T!E` und `?T` sind keine `enum`s, sie haben die eingebauten Formen `ok`, `err`, `some`, `none`. | `case Seat.Taken:` · `case ok(int n):` |
@@ -117,7 +117,7 @@ Vollständig und ohne „außer“. Diese Liste ist auch der Kern von `llms.txt`
 | Sonderfall im Entwurf | Auflösung |
 |---|---|
 | `self` ohne Typ in einer sonst typisierten Parameterliste | `self` wird nicht deklariert, es ist Teil des Methoden-Begriffs (R7) |
-| `mut self` in der Signatur | entfällt: `self` ist immer die Variable vor dem Punkt (R7) |
+| `mut self` abgeleitet statt geschrieben | entfällt (ADR 016): `mut self` steht in der Signatur wie `mut` an einem Parameter (R7, R6) |
 | `mut` am Aufruf, aber nicht vor Methoden | `mut` gehört nur zur Übergabe von Argumenten; die Variable vor dem Punkt gehört der Methode (R6, R7) |
 | `mut T x` in der Signatur **und** `mut x` am Aufruf | nur noch am Aufruf; der Compiler sieht am Rumpf, welche Parameter sich ändern (R6) |
 | vergessenes `mut` → Änderung landet still in einer Kopie, auch wenn die Funktion ein Ergebnis liefert | eine Funktion, die einen Parameter ändert, bekommt ihn mit `mut`; fehlt es, Fehler mit Fix (R6) |
@@ -238,13 +238,13 @@ struct Point {
     int y
 }
 
-Point Point.moved(int dx) {            // Methode: self ist die Variable vor dem Punkt
+Point Point.moved(int dx) {            // Methode: self ist der Ort vor dem Punkt
     Point q = self                     // Kopie von self
     q.x += dx
     return q
 }
 
-void Point.scale(int k) {              // ändert self, also den Aufrufer
+void Point.scale(mut self, int k) {              // mut self: ändert den Aufrufer
     self.x *= k
     self.y *= k
 }
@@ -283,10 +283,10 @@ void main() {
 }
 ```
 
-- Keine Klassen, keine Vererbung. Methoden heißen `Rückgabetyp Typ.name(…)` und werden nur im Modul des Typs definiert; `grep "Point.scale"` findet die Definition. `self` steht nie in der Parameterliste.
+- Keine Klassen, keine Vererbung. Methoden heißen `Rückgabetyp Typ.name(…)` und werden nur im Modul des Typs definiert; `grep "Point.scale"` findet die Definition. Außer `mut self` steht `self` nie in der Parameterliste.
 - `mut` steht in der Signatur und am Aufruf, an beiden Stellen sieht man, was sich ändert. Parameter ohne `mut` sind lokale Kopien wie in C (`gcd`).
 - Eine Änderung, die danach nie gelesen wird, ist ein Fehler, weil sie nur eine Kopie träfe: `void nudge(Point p) { p.x += 1 }` und `for Task t in tasks { t.done = true }` werden gemeldet, mit Hinweis auf `mut Point p` bzw. `tasks[i].done = true`.
-- Ob eine Methode `self` ändert, leitet der Compiler ab; er braucht es für `const`-Variablen und für `dif doc`.
+- Ob eine Methode `self` ändert, steht in der Signatur (`mut self`); der Compiler prüft es wie bei `mut`-Parametern (R6).
 - Jede Zuweisung und Übergabe ist logisch eine Kopie. Teuer wird das nie unnötig: `str`, `[]T`, `map` sind referenzgezählt und werden erst beim Schreiben kopiert, und nur wenn sie geteilt sind. Große Parameter übergibt der Compiler intern per Zeiger.
 - **Keine Referenzen im sicheren Code → keine Zyklen → Referenzzählung allein räumt alles deterministisch ab.** Darum braucht difficulty weder GC noch Borrow-Checker.
 - Eine Variable geht pro Aufruf höchstens einmal veränderbar hinein: `swap(mut a, mut a)` und `a.merge(mut a)` sind Compilerfehler (keine Aliase). `a.merge(a)` ist erlaubt: das gelesene `a` ist ein Schnappschuss.
@@ -1032,7 +1032,7 @@ int!BookErr index(int row, int seat) {
     return (row - 1) * SEATS + (seat - 1)
 }
 
-void!BookErr Hall.book(int row, int seat) {
+void!BookErr Hall.book(mut self, int row, int seat) {
     int i = try index(row, seat)
     if self.seats[i] == Seat.Taken {
         return err(BookErr.AlreadyTaken(row, seat))
@@ -1040,7 +1040,7 @@ void!BookErr Hall.book(int row, int seat) {
     self.seats[i] = Seat.Taken
 }
 
-void!BookErr Hall.cancel(int row, int seat) {
+void!BookErr Hall.cancel(mut self, int row, int seat) {
     int i = try index(row, seat)
     if self.seats[i] == Seat.Free {
         return err(BookErr.NotBooked(row, seat))
@@ -1048,7 +1048,7 @@ void!BookErr Hall.cancel(int row, int seat) {
     self.seats[i] = Seat.Free
 }
 
-Block!BookErr Hall.book_group(int n) {
+Block!BookErr Hall.book_group(mut self, int n) {
     if n < 1 || n > SEATS {
         return err(BookErr.BadGroup(n))
     }
@@ -1293,7 +1293,7 @@ Diagnosen für typisches Vorwissen greifen vor dem generischen Parserfehler, vie
 | `break` im `case` | kein Fallthrough, darum unnötig; wer die Schleife verlassen wollte: `return` (R11) |
 | `shift(p, 5)`, obwohl `shift` `p` ändert | `shift(mut p, 5)` per `dif fix` (R6) |
 | `print(mut p)`, obwohl `print` nichts ändert | `mut` entfernen (R6) |
-| `self` oder `this` in der Parameterliste | entfernen, `self` ist in jeder Methode da (R7) |
+| `self` oder `this` in der Parameterliste | nur `mut self` als erster Parameter; sonst entfernen, `self` ist in jeder Methode da (R7) |
 | `p->x` | `p.x` |
 | `null`, `nil`, `None` | `?T` und `none` |
 | `elif` | `else if` |
@@ -1390,9 +1390,9 @@ Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate)
 | Leitbild | Python-Einfachheit, C-Klarheit; keine Rust-Symbolik, kein Java-Boilerplate; keine Objekte, aber Funktionen an structs |
 | Signaturen | C-Stil, Typ vorn: `int add(int a, int b)`, struct-Felder `int x` |
 | Variablen | immer expliziter Typ (`int n = 0`), `const` für Unveränderliches, keine Inferenz |
-| Methoden | `Rückgabetyp Typ.name(…)`; `self` wird nicht deklariert und ist in jeder Methode die Variable, an der sie aufgerufen wird; sie darf geändert werden |
+| Methoden | `Rückgabetyp Typ.name(…)`; `self` ist in jeder Methode der Ort, an dem sie aufgerufen wird; ändert sie ihn, steht `mut self` als erster Parameter |
 | Übergabe | `mut` in Signatur und Aufruf (`void shift(mut Point p, int dx)`, `shift(mut p, 5)`); Parameter ohne `mut` sind lokale Kopien wie in C; eine nie gelesene Änderung ist ein Fehler (R6) |
-| Methodenaufruf | `hall.book(3, 5)` ohne `mut`: `self` ist immer die Variable vor dem Punkt; ein Aufruf ohne Wirkung ist ein Fehler (R13) |
+| Methodenaufruf | `hall.book(3, 5)` ohne `mut` (auch bei `mut self`): `self` ist der Ort vor dem Punkt; ein Aufruf ohne Wirkung ist ein Fehler (R13) |
 | Regeln | Design-Grundsätze und Regeln R1–R31 ohne Sonderfälle (§3); Fehlercodes = Regelnummern |
 | Fehler | `int!AgeErr parse_age(str s)`, `void!BookErr`, `?str`; `try`, `err(...)` |
 | Verzweigung | `switch`/`case`, kein Fallthrough, vollständig |

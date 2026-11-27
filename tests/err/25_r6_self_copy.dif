@@ -1,0 +1,14 @@
+// expect: error[R6] 7:5
+struct Point {
+    int x
+}
+
+void Point.move(int dx) {
+    self.x += dx
+}
+
+void main() {
+    Point p = Point{x: 1}
+    p.move(2)
+    print(p)
+}
