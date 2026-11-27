@@ -153,6 +153,11 @@ fn fix_examples() {
         ("R3.else_next_line", "void main() {\n    if true {\n        print(1)\n    }\n    else {\n        print(2)\n    }\n}\n", "void main() {\n    if true {\n        print(1)\n    } else {\n        print(2)\n    }\n}\n"),
         ("R3.elif", "void main() {\n    if true {\n        print(1)\n    } elif false {\n        print(2)\n    }\n}\n", "void main() {\n    if true {\n        print(1)\n    } else if false {\n        print(2)\n    }\n}\n"),
         ("R9.condition", "void main() {\n    int n = 3\n    if n {\n        print(n)\n    }\n}\n", "void main() {\n    int n = 3\n    if n != 0 {\n        print(n)\n    }\n}\n"),
+        ("R6.mut_missing", "void bump(mut int n) {\n    n += 1\n}\n\nvoid main() {\n    int x = 0\n    bump(x)\n    print(x)\n}\n", "void bump(mut int n) {\n    n += 1\n}\n\nvoid main() {\n    int x = 0\n    bump(mut x)\n    print(x)\n}\n"),
+        ("R6.mut_extra", "void show(int n) {\n    print(n)\n}\n\nvoid main() {\n    int x = 0\n    show(mut x)\n}\n", "void show(int n) {\n    print(n)\n}\n\nvoid main() {\n    int x = 0\n    show(x)\n}\n"),
+        ("R6.mut_unneeded", "int sum(mut int a, int b) {\n    return a + b\n}\n", "int sum(int a, int b) {\n    return a + b\n}\n"),
+        ("R18.expect_outside_test", "void main() {\n    expect(1 == 1)\n}\n", "void main() {\n    assert(1 == 1)\n}\n"),
+        ("S1.struct_lit_header", "struct Point {\n    int x\n}\n\nvoid main() {\n    Point p = Point{x: 0}\n    if p == Point{x: 0} {\n        print(p.x)\n    }\n}\n", "struct Point {\n    int x\n}\n\nvoid main() {\n    Point p = Point{x: 0}\n    if p == (Point{x: 0}) {\n        print(p.x)\n    }\n}\n"),
         ("S1.assign_in_cond", "void main() {\n    int n = 3\n    if n = 3 {\n        print(n)\n    }\n}\n", "void main() {\n    int n = 3\n    if n == 3 {\n        print(n)\n    }\n}\n"),
     ];
     for (id, src, want) in cases {
@@ -178,4 +183,54 @@ fn json_example_of_the_spec() {
     let src = "void main() {\n    var x = 5\n    print(x)\n}\n";
     let d = dif::check_source(src).remove(0);
     assert_eq!(d.json("main.dif"), line);
+}
+
+/// `i++` gets a fix only as a statement of its own, not inside an expression.
+#[test]
+fn incdec_fix_only_as_statement() {
+    let fix_of = |body: &str| {
+        let src = format!("void main() {{\n    int i = 0\n{body}\n    print(i)\n}}\n");
+        let ds: Vec<_> = dif::check_source(&src)
+            .into_iter()
+            .filter(|d| d.id == "L7.incdec")
+            .collect();
+        assert_eq!(ds.len(), 1, "{body}");
+        ds[0].fix.is_some()
+    };
+    assert!(fix_of("    i++"));
+    assert!(fix_of("    --i"));
+    assert!(!fix_of("    int j = i++"));
+    assert!(!fix_of("    print(i++)"));
+    assert!(!fix_of("    int j = --i"));
+}
+
+/// Every diagnostic call in the sources names its id (`"R15.name"`), not a bare code; found by
+/// reading the source, so branches no test reaches are covered too.
+#[test]
+fn no_bare_codes_in_sources() {
+    let mut files = vec![];
+    for dir in ["src", "src/checker"] {
+        for e in std::fs::read_dir(Path::new(ROOT).join(dir)).unwrap() {
+            let p = e.unwrap().path();
+            if p.extension().is_some_and(|x| x == "rs") {
+                files.push(p);
+            }
+        }
+    }
+    let mut bare = vec![];
+    for f in files {
+        let text = std::fs::read_to_string(&f).unwrap();
+        for call in ["err(", "Diag::new("] {
+            for (i, _) in text.match_indices(call) {
+                let rest = text[i + call.len()..].trim_start();
+                if let Some(lit) = rest.strip_prefix('"') {
+                    let lit = lit.split('"').next().unwrap_or("");
+                    if !well_formed(lit) {
+                        bare.push(format!("{}: {lit}", f.display()));
+                    }
+                }
+            }
+        }
+    }
+    assert!(bare.is_empty(), "diagnostics without an id: {bare:?}");
 }

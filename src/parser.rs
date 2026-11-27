@@ -1525,11 +1525,23 @@ impl<'a> Parser<'a> {
         };
         let mut d = Diag::new("L7.incdec", p, format!("`{op}` does not exist"));
         d.hint = hint;
-        if is_place(e) {
-            let (from, to) = (p.offset.min(e.pos.offset), self.last_end.max(e.end));
+        let (from, to) = (p.offset.min(e.pos.offset), self.last_end.max(e.end));
+        if is_place(e) && self.alone(from) {
             d = d.fix(from, to, format!("{text} {}= 1", &op[..1]));
         }
         self.report(d);
+    }
+
+    /// The last consumed tokens, from byte `from`, are a whole statement: the line starts there
+    /// and ends right after them.
+    fn alone(&self, from: u32) -> bool {
+        let first = (0..self.i).rev().find(|&j| self.t[j].pos.offset == from);
+        let starts = match first {
+            Some(0) => true,
+            Some(j) => matches!(self.t[j - 1].tok, Tok::Nl | Tok::Op("{")),
+            None => false,
+        };
+        starts && matches!(self.peek(), Tok::Nl | Tok::Eof | Tok::Op("}") | Tok::Semi)
     }
 
     fn postfix(&mut self) -> Expr {
