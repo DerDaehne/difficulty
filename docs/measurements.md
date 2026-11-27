@@ -252,3 +252,36 @@ erneutem Hash) und räumte den doppelten Schlüssel danach weg; jetzt liefert
 byteweise (FNV); jetzt liest er 8 Byte je Schritt (kurze Schlüssel: zwei überlappende
 Lesezugriffe). Reihenfolge der Einträge (R28) bleibt die Einfügereihenfolge. Die
 Wortzählung blieb damit (vor dem Umbau der Strings gemessen) bei rund 9× C. Mit beiden Umbauten zusammen: dif 105 ms, C 25 ms, Python 244 ms (4,3× C, 0,43× Python).
+
+### Wortzählung: Einlesen, Schleife, Wortaufbau
+
+Gleiche Varianten wie oben (Wanduhr, Median aus 7 Läufen, gleicher Text, gleiche Toolchain);
+jede Stufe enthält die davor.
+
+| Stufe | vorher (ms) | nachher (ms) |
+|---|---|---|
+| nur `io.lines()` und `line.len()` | 32 | 8 |
+| plus Schleife über `line.runes()` | 55 | 27 |
+| plus Wort zeichenweise aufbauen | 86 | 37 |
+| plus `word.lower()` je Wort | 92 | 48 |
+| vollständig `bench/wc.dif` | 108 | 60 |
+
+Geändert (nur Runtime und Backend, kein Programm ändert sich):
+
+- `io.lines()` las mit `getc` Zeichen für Zeichen; jetzt liest `getdelim` in einen
+  wiederverwendeten Puffer, je Zeile entsteht ein Block genauer Größe. Die UTF-8-Prüfung
+  überspringt ASCII in 8-Byte-Schritten. Fehlerverhalten (`InvalidUtf8`) unverändert.
+- `for rune r in s.runes()` baut keine Liste mehr; das erzeugte C dekodiert im Schleifenkopf
+  (ASCII-Schnellweg, sonst `dif_utf8_step`).
+- `s = ""` auf einem nicht geteilten kleinen Text behält den Block (der nächste Wortaufbau
+  braucht keine Allokation); `s == ""` und `s != ""` prüfen die Länge; Blöcke bis 32 Byte
+  werden über eine kurze Liste wiederverwendet; ASCII-`str(r)` schreibt direkt in freien Platz.
+
+Ergebnis `bench/run.sh`: dif 60 bis 68 ms gegen C 25 bis 29 ms, das sind 2,3 bis 2,7× C
+(vorher 4,3×), Python 0,26× (Streuung des Rechners ±3 ms je Lauf). Das Ziel 2× C wird knapp
+verfehlt. Der Rest verteilt sich ungefähr gleich auf Einlesen (8 ms, eine Allokation je Zeile),
+die Zeichenschleife (19 ms, verzweigungsreich wie in C), Wortaufbau (10 ms), `lower()` mit
+Allokation je Wort (11 ms) und Map-Zugriffe mit Sortieren (13 ms, davon 3 ms Sortieren).
+C braucht dafür keine Allokation je Wort, sondern zeigt in den Eingabepuffer. Weiter käme man
+nur mit Aufbau der Wörter als Teilstrings des Zeilentexts oder mit `lower` am Ort, also mit
+Änderungen der Sprache oder der Speichersemantik.

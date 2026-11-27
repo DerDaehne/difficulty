@@ -1346,6 +1346,10 @@ DIF_FN dif_str dif_rune_str(uint32_t cp) { // str(r)
 }
 // `s += str(r)`: the UTF-8 bytes go straight on, no temporary text
 DIF_FN void dif_str_append_rune(dif_str *s, uint32_t cp) {
+    if (cp < 0x80 && s->rc && *s->rc == 1 && s->p == DIF_DATA(s->rc) && s->n < s->rc[1]) { // ASCII into spare room
+        ((char *)s->p)[s->n++] = (char)cp;
+        return;
+    }
     char t[4];
     int k = dif_utf8_encode(cp, t);
     dif_str_append(s, (dif_str){t, k, NULL});
