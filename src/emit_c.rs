@@ -8,6 +8,7 @@ use std::fmt::Write;
 use crate::ast::*;
 use crate::checker::{Info, Num, Ty, TypeBody};
 use crate::diag::Pos;
+use crate::lexer::Conv;
 
 mod builtins;
 mod lit;
@@ -2253,12 +2254,35 @@ impl<'a> Emitter<'a> {
                     parts.push(l.trim_end_matches(';').to_string());
                 }
                 StrSeg::Fmt(x, f) => {
-                    let v = self.expr(x);
-                    let prec = match f {
-                        crate::lexer::Fmt::G => -1,
-                        crate::lexer::Fmt::Fixed(n) => *n as i32,
+                    let t = self.ty(x);
+                    let inner = match f.conv {
+                        Conv::None => {
+                            let v = self.bor(x);
+                            self.put(t, &format!("&{b}"), &v, false)
+                                .trim_end_matches(';')
+                                .to_string()
+                        }
+                        c => {
+                            let v = self.expr(x);
+                            let prec = match c {
+                                Conv::Fixed(n) => n as i32,
+                                _ => -1,
+                            };
+                            format!("dif_put_f64_fmt(&{b}, {v}, {prec})")
+                        }
                     };
-                    parts.push(format!("dif_put_f64_fmt(&{b}, {v}, {prec})"));
+                    if f.width == 0 {
+                        parts.push(inner);
+                    } else {
+                        let right = match f.align {
+                            Some(a) => a == '>',
+                            None => t.is_number(),
+                        };
+                        parts.push(format!(
+                            "({{ int64_t s_ = {b}.n; {inner}; dif_pad(&{b}, s_, {}, {}, {}); }})",
+                            f.width, right as i32, f.zero as i32
+                        ));
+                    }
                 }
                 StrSeg::Expr(x) => {
                     let t = self.ty(x);

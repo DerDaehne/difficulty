@@ -44,7 +44,7 @@ const STR_METHODS: &[&str] = &[
     "parse_int",
     "parse_f64",
 ];
-const RUNE_METHODS: &[&str] = &["is_digit", "is_letter", "is_space"];
+const RUNE_METHODS: &[&str] = &["is_digit", "is_letter", "is_space", "to_digit"];
 const INT_METHODS: &[&str] = &[
     "abs", "min", "max", "to_int", "to_i8", "to_i16", "to_i32", "to_u8", "to_u16", "to_u32",
     "to_u64",
@@ -915,6 +915,7 @@ impl<'a> Checker<'a> {
             }),
             Ty::Rune => Some(match m {
                 "is_digit" | "is_letter" | "is_space" => sig(&[], boolean, false),
+                "to_digit" => sig(&[], self.opt(int), false),
                 _ => return None,
             }),
             Ty::Num(Num::F64) => Some(match m {

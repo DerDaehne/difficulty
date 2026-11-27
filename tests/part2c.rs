@@ -126,17 +126,46 @@ fn format_specifications() {
     ok(&in_main(
         "f64 x = 2.5\nprint(\"{x:g} {x:.2f} {x:.0f} {x:.20f}\")",
     ));
-    assert_eq!(
-        diags(&in_main("f64 x = 2.5\nprint(\"{x:q}\")")),
-        ["3:15 S1 unknown format `q` | formats are g and .Nf, e.g. {x:.2f}"]
+    let hint = "formats look like {x:>8}, {n:03}, {x:8.2f}, {x:g}";
+    for (spec, shown) in [
+        ("q", "q"),
+        (".f", ".f"),
+        ("", ""),
+        ("00", "00"),
+        ("0", "0"),
+        ("^5", "^5"),
+    ] {
+        assert_eq!(
+            diags(&in_main(&format!("f64 x = 2.5\nprint(\"{{x:{spec}}}\")"))),
+            [format!("3:15 S1 unknown format `{shown}` | {hint}")]
+        );
+    }
+    ok(&in_main(
+        "f64 x = 2.5\nint n = 7\nprint(\"{x:5} {n:<5} {n:>05} {x:08.2f} {x:7g} {n:3}\")",
+    ));
+    bad(
+        "int n = 1\nprint(\"{n:>}\")",
+        "3:15 S1 `>` needs a width | write the width after it, e.g. {x:>8}",
     );
-    assert_eq!(
-        diags(&in_main("f64 x = 2.5\nprint(\"{x:.f}\")")),
-        ["3:15 S1 unknown format `.f` | formats are g and .Nf, e.g. {x:.2f}"]
+    bad(
+        "int n = 1\nprint(\"{n:<05}\")",
+        "3:15 S1 `0` cannot go with `<` | drop `<`: zeros always go on the left, e.g. {n:03}",
     );
-    assert_eq!(
-        diags(&in_main("f64 x = 2.5\nprint(\"{x:5}\")")),
-        ["3:15 S1 unknown format `5` | formats are g and .Nf, e.g. {x:.2f}"]
+    bad(
+        "int n = 1\nprint(\"{n:1001}\")",
+        "3:15 S1 width at most 1000",
+    );
+    bad(
+        "str s = \"a\"\nprint(\"{s:05}\")",
+        "3:13 R8 the format with `0` needs a number, found str | fill with spaces: drop the `0`",
+    );
+    bad(
+        "rune r = 'a'\nprint(\"{r:03}\")",
+        "3:13 R8 the format with `0` needs a number, found rune | fill with spaces: drop the `0`",
+    );
+    bad(
+        "str s = \"a\"\nprint(\"{s:8.2f}\")",
+        "3:13 R8 the format .2f needs f64, found str | f64(s)",
     );
     assert_eq!(
         diags(&in_main("f64 x = 2.5\nprint(\"{x:.21f}\")")),

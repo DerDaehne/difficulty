@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::diag::{Diag, Pos};
-use crate::lexer::Fmt;
+use crate::lexer::Conv;
 use crate::live::{self, CallChanges};
 
 mod lit;
@@ -111,7 +111,7 @@ impl Ty {
     }
 
     /// A number or a literal: the types R8 lets a literal take.
-    fn is_number(self) -> bool {
+    pub(crate) fn is_number(self) -> bool {
         self.is_int() || self.is_float()
     }
 
@@ -2280,15 +2280,32 @@ impl<'a> Checker<'a> {
                             known = false;
                             self.uses_2c = true;
                             let (t, _) = self.rvalue(x);
-                            if t != Ty::Err && t != Ty::Num(Num::F64) {
-                                let spec = match f {
-                                    Fmt::G => "g".to_string(),
-                                    Fmt::Fixed(n) => format!(".{n}f"),
+                            if t == Ty::Void {
+                                let msg =
+                                    format!("`{}` has no value to put into text", self.text(x));
+                                self.err("R28.no_text_value", x.pos, msg, None);
+                            } else if t != Ty::Err && f.conv != Conv::None && t != Ty::Num(Num::F64)
+                            {
+                                let spec = match f.conv {
+                                    Conv::G => "g".to_string(),
+                                    Conv::Fixed(n) => format!(".{n}f"),
+                                    Conv::None => String::new(),
                                 };
                                 let msg =
                                     format!("the format {spec} needs f64, found {}", self.tn(t));
                                 let hint = format!("f64({})", self.text(x));
                                 self.err("R8.format_type", x.pos, msg, Some(hint));
+                            } else if t != Ty::Err && f.zero && !t.is_number() {
+                                let msg = format!(
+                                    "the format with `0` needs a number, found {}",
+                                    self.tn(t)
+                                );
+                                self.err(
+                                    "R8.format_zero",
+                                    x.pos,
+                                    msg,
+                                    Some("fill with spaces: drop the `0`".to_string()),
+                                );
                             }
                         }
                     }

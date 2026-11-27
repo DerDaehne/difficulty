@@ -374,13 +374,15 @@ Output: `[1, 2, 3, 4] 1 {"to": 2, "be": 2, "or": 1} Task{title: "WRITE", tags: [
   `int` and `i32`. A literal takes the type of its place (`u8 b = 200`, `f64 x = 3`); a float
   literal only `f64`. Each width aborts on overflow; `+% -% *%` wrap. `f64` is IEEE (`1.0 / 0.0`
   is `inf`, `NaN != NaN`, `%` is fmod); text is the shortest digits that read back (`22.5`,
-  `1e21`); `{x:.2f}`, `{x:g}` format only `f64`.
+  `1e21`). Formats `{x:[<|>][0][width][.Nf|g]}`: `{n:03}` `007`, `{-5:04}` `-005`, `{s:>8}`,
+  `{x:8.2f}`; width counts codepoints, never cuts; numbers right, else left; `0` only for numbers;
+  `.Nf`, `g` only for `f64`.
 - **Conversions (R31).** `T(x)` is exact or aborts (`u8(300)`: `300 does not fit in u8`;
   `int(2.5)`: `2.5 is not an exact int`): between ints, `f64(n)`, `int(x.round())`, `rune(n)`,
   `str(r)`. `n.to_u8()` gives `?u8`. Nothing converts by itself, `str` and numbers never.
 - **`str` and `rune`.** `'a'` is a `rune`; no `s[i]`: `s.slice(a, b)` counts bytes, `s.runes()`,
   `len()`. Methods: `split lines trim trim_start trim_end lower upper contains starts_with
-  ends_with find replace repeat parse_int parse_f64 is_empty`; `rune`: `is_digit is_letter is_space`.
+  ends_with find replace repeat parse_int parse_f64 is_empty`; `rune`: `is_digit is_letter is_space to_digit` (`?int`, ASCII only).
 - **Lists `[]T` and arrays `[N]T` (R5).** Values: `ys = xs` copies, a write to one never shows
   in the other (copy-on-write inside, `push` is O(1)). `xs[i]` is checked (abort, R14);
   `xs[i] = v`, `xs[i].f = v`, `normalize(mut xs[i])` write. Methods: `len is_empty push pop insert
@@ -460,7 +462,7 @@ Built into the compiler; no import except `use std.io` / `use std.os`. `f` is a 
 - **Functions:** `print(x)`, `range(a, b)` (only in `for`), `repeat(x, n)`, `expect(c)` (tests),
   `assert(c)`, conversions `int(x) f64(x) str(r) u8(x) rune(n) …`.
 - **`str`:** `len is_empty runes split lines trim trim_start trim_end lower upper contains starts_with
-  ends_with find replace repeat slice parse_int parse_f64`. **`rune`:** `is_digit is_letter is_space`.
+  ends_with find replace repeat slice parse_int parse_f64`. **`rune`:** `is_digit is_letter is_space to_digit` (`?int`, ASCII only).
 - **Numbers:** `abs min max to_u8 to_i8 … to_u64` (`?T`); `f64`: `round trunc floor ceil sqrt abs min max`.
 - **`[]T` / `[N]T`:** `len is_empty push pop insert remove first last contains index_of count sort
   reverse swap slice join`, and with a function: `filter(bool(T)) map(R(T)) sort_by(bool(T, T))

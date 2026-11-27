@@ -150,6 +150,7 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `S1.expected_use` |  | expected `std.name` after `use`, found … |
 | `S1.f32_unavailable` |  | `f32` is not available in v0 |
 | `S1.fn_needs_params` |  | function `…` needs a parameter list |
+| `S1.format_no_width` |  | `…` needs a width |
 | `S1.interp_extra` |  | an interpolation holds one expression; found … after it |
 | `S1.interp_forbidden` |  | `…` inside an interpolation |
 | `S1.needs_value` |  | `…` needs a value: …(x) |
@@ -165,6 +166,8 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `S1.unclosed_bracket` |  | `(` (`[`) is never closed |
 | `S1.unexpected_token` |  | unexpected … |
 | `S1.unknown_format` |  | unknown format `…` |
+| `S1.width` |  | width at most 1000 |
+| `S1.zero_left` |  | `0` cannot go with `<` |
 | `S2.chained_cmp` |  | comparisons cannot be chained |
 | `S3.mixed_and_or` |  | `&&` and `\|\|` are mixed without parentheses |
 | `S4.no_effect` |  | `…` does nothing as a statement |
@@ -243,6 +246,7 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `R8.enum_values_switch` |  | the values of an enum are read with switch |
 | `R8.fn_as_value` |  | `…` is a function; call it: …(…) |
 | `R8.format_type` |  | the format … needs f64, found … |
+| `R8.format_zero` |  | the format with `0` needs a number, found … |
 | `R8.index_str` |  | cannot index str |
 | `R8.index_type` |  | cannot index … |
 | `R8.int_range` |  | integer constant out of range |
@@ -375,7 +379,8 @@ STRING   = '"' { char | escape | interp } '"' ;
 char     = (* jedes Zeichen außer '"', "\", "{", "}" und dem Zeilenende *) ;
 escape   = "\" ( "n" | "t" | "r" | "\" | '"' | "'" | "{" | "}" | "0" ) | "\u{" hexdigit { hexdigit } "}" ;
 interp   = "{" expr [ ":" format ] "}" ;
-format   = "g" | "." digit { digit } "f" ;
+format   = [ "<" | ">" ] [ "0" ] [ width ] [ "g" | "." digit { digit } "f" ] ;
+width    = ( "1" … "9" ) { digit } ;
 RUNE     = "'" ( rchar | escape ) "'" ;
 rchar    = (* jedes Zeichen außer "'", "\" und dem Zeilenende *) ;
 ```
@@ -390,7 +395,7 @@ Teil 2c ergänzt:
 
 - **Zahl-Literale.** `INT` und `FLOAT` stehen ohne Typ da; welchen Typ sie haben und ob sie passen, legt R8 fest. Ein Literal mit Punkt oder Exponenten ist ein Float-Literal, eines ohne beides ein Ganzzahl-Literal. Eine Methode auf einem Zahl-Literal steht in Klammern, `(5).abs()`; `5.abs()` ist `L8`, Hinweis `put the number in parentheses: (5).abs()`.
 - **rune-Literal.** `'a'` ist ein einzelner Unicode-Codepoint vom Typ `rune`; `'\n'`, `'\''`, `'\u{1F600}'` und `'é'` sind es ebenso. Die Escapes sind dieselben wie im String; `'"'` und `'{'` brauchen keinen. Ein Literal, das leer ist (`''`), mehr als einen Codepoint enthält (`'ab'`, auch ein Buchstabe mit angehängtem Akzent) oder vor dem Zeilenende nicht schließt, ist `L9` an dem öffnenden `'`. Meldung bei leerem oder zu langem Inhalt: `` a rune literal holds exactly one character ``, Hinweis `use a string for more than one character: "ab"` (bei `''`: `write a character between the quotes: 'a'`); bei fehlendem Ende `` rune literal is not closed ``, Hinweis `add ' at the end`. `\u{…}` mit einem Wert über 10FFFF oder einem Surrogat (D800 … DFFF) ist `L6`, Meldung `` not a Unicode character ``, im String wie im rune-Literal.
-- **Formatangabe.** `{x:g}` und `{x:.2f}` formatieren einen `f64` (R29); `.` nennt höchstens 20 Nachkommastellen (`S1`, Meldung `` precision at most 20 ``). Jede andere Angabe (`{x:q}`, `{x:.f}`, `{x:5}`) ist `S1` am ersten Zeichen nach `:`, Meldung `` unknown format `q` ``, Hinweis `formats are g and .Nf, e.g. {x:.2f}`. Eine Formatangabe an einem Wert, der kein `f64` ist, ist `R8` (R29).
+- **Formatangabe** `{x:[<|>][0][Breite][.Nf|g]}`, eine kleine Teilmenge der Python-Formatangabe, an jedem Wert, der als Text eingesetzt werden kann. `Breite` ist eine Ganzzahl von 1 bis 1000 und zählt Codepoints; ist der Text länger, wird er nicht abgeschnitten. `<` und `>` richten links und rechts aus; ohne Angabe stehen Zahlen (alle Ganzzahltypen und `f64`) rechts, alles andere links. Aufgefüllt wird mit Leerzeichen, mit `0` (nur für Zahlen) mit Nullen, bei einer negativen Zahl hinter dem Minus wie in Python: `{7:02}` ist `07`, `{-5:04}` ist `-005`, `{"ab":>4}` ist `  ab`, `{3.14159:8.2f}` ist `    3.14`. `g` und `.Nf` (höchstens 20 Nachkommastellen, `S1`, Meldung `` precision at most 20 ``) formatieren einen `f64` (R29). Es gibt nur diese Form, keine Synonyme. Alles andere ist ein Fehler, nie stilles Ignorieren: eine unbekannte Angabe (`{x:q}`, `{x:.f}`, `{x:^5}`, `0` oder eine Breite mit führender `0` ohne Breite dahinter) ist `S1` am ersten Zeichen nach `:`, Meldung `` unknown format `q` ``, Hinweis `formats look like {x:>8}, {n:03}, {x:8.2f}, {x:g}`; `<` oder `>` ohne Breite ist `S1`, Meldung `` `>` needs a width ``, Hinweis `write the width after it, e.g. {x:>8}`; `0` zusammen mit `<` ist `S1`, Meldung `` `0` cannot go with `<` ``, Hinweis `` drop `<`: zeros always go on the left, e.g. {n:03} ``; eine Breite über 1000 ist `S1`, Meldung `` width at most 1000 ``. Am Ausdruck: `0` an einem Wert, der keine Zahl ist, ist `R8`, Meldung `` the format with `0` needs a number, found str ``, Hinweis ``fill with spaces: drop the `0` ``; `g` oder `.Nf` an einem Wert, der kein `f64` ist, ist `R8` (R29).
 
 ```dif snippet
 rune a = 'a'
@@ -2768,7 +2773,7 @@ Teil 2c legt fest:
 - **`i8 … u64`** rechnen wie `int` auf ihrer Breite: `+ - *` und Vorzeichen `-` brechen ab, wenn das Ergebnis nicht in den Typ passt (`integer overflow in +`); `/` rundet Richtung 0, `%` hat das Vorzeichen des Dividenden, Division und `%` durch 0 brechen ab, ebenso `MIN / -1` (`-128 / -1` bei `i8`; `MIN % -1` ist `0`). `+% -% *%` rechnen modulo 2^Bits des Typs. `~` kehrt die Bits des Typs um. `<<` und `>>` verschieben um `0 … Bits-1` Stellen, andere Weiten brechen ab (`shift by 8 out of range 0..7` bei `u8`); `<<` verliert Bits über der Breite ohne Abbruch, `>>` füllt bei Typen mit Vorzeichen mit dem Vorzeichen, bei `u8 … u64` mit 0. Die Weite hat den Typ des Operanden (R8).
 - **`f64`** ist IEEE 754 binary64 mit Rundung zum nächsten Wert, bei Gleichstand zum geraden. `+ - * /`, `%` (wie C `fmod`, Vorzeichen des Dividenden) und das Vorzeichen `-` brechen nie ab: ein Überlauf ist `inf` (ein Literal, das `inf` oder fälschlich 0 würde, ist dagegen `R8`, siehe dort), `1.0 / 0.0` ist `inf`, auch beim Kompilieren, `0.0 / 0.0` und `x % 0.0` sind `NaN`. Jede Operation rundet für sich auf `f64`: der Compiler fasst `a * b + c` nicht zusammen (kein FMA) und rechnet nie mit größerer Breite. Vergleiche mit `NaN` sind `false`, außer `!=`.
 - **Textform von `f64`:** die kürzeste Dezimalfolge, die beim Zurücklesen (Literal, `parse_f64`) denselben Wert ergibt. Hat der Wert die wissenschaftliche Schreibweise `d.ddd × 10^e`, steht er ohne Exponenten, wenn `-6 ≤ e ≤ 20` (`5`, `22.5`, `0.000001`, `100000000000000000000`), sonst als `d.ddde<e>` ohne `+` und führende Nullen (`1e21`, `1.5e-7`). Ein ganzer Wert hat keinen Dezimalpunkt. `0`, `-0`, `inf`, `-inf` und `NaN` stehen so da.
-- **Formatangaben** (§1.4) gelten nur für `f64`; an einem anderen Typ ist die Angabe `R8` am Ausdruck, Meldung `` the format .2f needs f64, found int ``, Hinweis `f64(n)`. `{x:.Nf}` schreibt `N` Nachkommastellen genau wie C `printf("%.Nf")` (der exakte Wert wird gerundet, bei genauer Mitte zur geraden Ziffer: `{2.5:.0f}` ist `2`); `{x:g}` schreibt wie C `%g` (sechs gültige Ziffern, ohne überflüssige Nullen, Exponent als `e+21`). `inf`, `-inf` und `NaN` schreiben beide wie die Textform.
+- **`g` und `.Nf`** (§1.4) gelten nur für `f64`; an einem anderen Typ ist die Angabe `R8` am Ausdruck, Meldung `` the format .2f needs f64, found int ``, Hinweis `f64(n)`. `{x:.Nf}` schreibt `N` Nachkommastellen genau wie C `printf("%.Nf")` (der exakte Wert wird gerundet, bei genauer Mitte zur geraden Ziffer: `{2.5:.0f}` ist `2`); `{x:g}` schreibt wie C `%g` (sechs gültige Ziffern, ohne überflüssige Nullen, Exponent als `e+21`). `inf`, `-inf` und `NaN` schreiben beide wie die Textform.
 
 ```dif snippet
 u8 b = 200
@@ -3055,6 +3060,7 @@ Ein `str` ist unveränderlich (R5, Teil 2c). Längen, Positionen und `slice` zä
 | `bool rune.is_digit()` | Unicode-Kategorie `Nd` (`'٣'` ja, `'½'` nein) | |
 | `bool rune.is_letter()` | Unicode-Kategorien `L*` (`'ä'` ja) | |
 | `bool rune.is_space()` | `White_Space` (Unicode) | |
+| `?int rune.to_digit()` | `'0' … '9'` (nur ASCII-Ziffern) geben `some(0 … 9)`, jedes andere Zeichen `none` (`'٣'`: `none`) | |
 | `str(r)` | der Text aus dem einen Zeichen `r` (R31) | |
 
 ```dif snippet
@@ -3079,9 +3085,11 @@ print("straße".upper())
 print('7'.is_digit())
 print('x'.is_letter())
 print(' '.is_space())
+print('7'.to_digit())
+print('x'.to_digit())
 ```
 
-Ausgabe: `HALLO, WELT`, `15`, `4`, `2`, `["a", "b", "", "c"]`, `["a", "b"]`, `al`, `some(2)`, `none`, `42`, `none`, `some(7)`, `some(-150)`, `ababab`, `a+b+c`, `äpfel`, `STRAßE`, `true`, `true`, `true`.
+Ausgabe: `HALLO, WELT`, `15`, `4`, `2`, `["a", "b", "", "c"]`, `["a", "b"]`, `al`, `some(2)`, `none`, `42`, `none`, `some(7)`, `some(-150)`, `ababab`, `a+b+c`, `äpfel`, `STRAßE`, `true`, `true`, `true`, `some(7)`, `none`.
 
 ```dif panic "slice 1..2 is not on character boundaries"
 str s = "äö"

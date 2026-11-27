@@ -1422,6 +1422,19 @@ DIF_FN void dif_put_f64(dif_buf *b, double x) {
         }
     }
 }
+// `{x:>8}` `{n:03}`: pads the text written since `from` to w codepoints (right: spaces or, with
+// zero, zeros after a leading '-' on the left; else spaces on the right); never cuts
+DIF_FN void dif_pad(dif_buf *b, int64_t from, int64_t w, int right, int zero) {
+    int64_t cp = 0;
+    for (int64_t i = from; i < b->n; i++) cp += (b->p[i] & 0xC0) != 0x80;
+    if (cp >= w) return;
+    int64_t pad = w - cp, old = b->n;
+    for (int64_t i = 0; i < pad; i++) dif_put(b, " ", 1);
+    if (!right) return;
+    int64_t sign = zero && old > from && b->p[from] == '-';
+    memmove(b->p + from + sign + pad, b->p + from + sign, (size_t)(old - from - sign));
+    memset(b->p + from + sign, zero ? '0' : ' ', (size_t)pad);
+}
 // `{x:.Nf}` (prec = N) and `{x:g}` (prec < 0) like C printf; inf, -inf and NaN as in the text form
 DIF_FN void dif_put_f64_fmt(dif_buf *b, double x, int prec) {
     if (x != x || isinf(x)) { dif_put_f64(b, x); return; }

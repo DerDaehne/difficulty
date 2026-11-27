@@ -35,7 +35,7 @@ Expr!CalcErr Parser.fail(mut self) {
 Expr!CalcErr Parser.number(mut self) {
     int value = 0
     while self.pos < self.chars.len() && self.chars[self.pos].is_digit() {
-        value = value * 10 + (int(self.chars[self.pos]) - int('0'))
+        value = value * 10 + (self.chars[self.pos].to_digit() ?? 0)
         self.pos += 1
     }
     return Expr.Num(value)

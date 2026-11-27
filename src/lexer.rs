@@ -27,11 +27,90 @@ pub enum StrPart {
     Fmt(Vec<Token>, Fmt),
 }
 
-/// The format of an interpolation (§1.4): `g` or `.Nf` with `N` up to 20.
+/// The format of an interpolation (§1.4): `[<|>][0][width][.Nf|g]`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Fmt {
+pub struct Fmt {
+    /// `<`, `>` or none.
+    pub align: Option<char>,
+    pub zero: bool,
+    /// 0 = no width.
+    pub width: u32,
+    pub conv: Conv,
+}
+
+/// The number part of a format: `g` or `.Nf` with `N` up to 20.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Conv {
+    None,
     G,
     Fixed(u8),
+}
+
+impl Fmt {
+    /// Parses the text after `:`; the error is (id, message, hint).
+    fn parse(spec: &str) -> Result<Fmt, (&'static str, String, Option<&'static str>)> {
+        let unknown = || {
+            let hint = "formats look like {x:>8}, {n:03}, {x:8.2f}, {x:g}";
+            (
+                "S1.unknown_format",
+                format!("unknown format `{spec}`"),
+                Some(hint),
+            )
+        };
+        let mut r = spec;
+        let align = r.chars().next().filter(|c| matches!(c, '<' | '>'));
+        if align.is_some() {
+            r = &r[1..];
+        }
+        let zero = r.starts_with('0');
+        if zero {
+            r = &r[1..];
+        }
+        let nd = r.bytes().take_while(u8::is_ascii_digit).count();
+        let (w, rest) = r.split_at(nd);
+        if (zero && w.is_empty()) || w.starts_with('0') {
+            return Err(unknown());
+        }
+        let width = match w.parse::<u32>() {
+            Ok(n) if n <= 1000 => n,
+            Err(_) if w.is_empty() => 0,
+            _ => return Err(("S1.width", "width at most 1000".into(), None)),
+        };
+        let conv = match rest {
+            "" => Conv::None,
+            "g" => Conv::G,
+            _ => match rest.strip_prefix('.').and_then(|d| d.strip_suffix('f')) {
+                Some(d) if !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()) => {
+                    match d.parse::<u8>().ok().filter(|&n| n <= 20) {
+                        Some(n) => Conv::Fixed(n),
+                        None => return Err(("S1.precision", "precision at most 20".into(), None)),
+                    }
+                }
+                _ => return Err(unknown()),
+            },
+        };
+        if spec.is_empty() {
+            return Err(unknown());
+        }
+        if align.is_some() && width == 0 {
+            let msg = format!("`{}` needs a width", align.unwrap_or('>'));
+            return Err((
+                "S1.format_no_width",
+                msg,
+                Some("write the width after it, e.g. {x:>8}"),
+            ));
+        }
+        if zero && align == Some('<') {
+            let hint = "drop `<`: zeros always go on the left, e.g. {n:03}";
+            return Err(("S1.zero_left", "`0` cannot go with `<`".into(), Some(hint)));
+        }
+        Ok(Fmt {
+            align,
+            zero,
+            width,
+            conv,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -711,20 +790,9 @@ impl<'a> Lexer<'a> {
                 offset: start.offset + k as u32 + 1,
             };
             let spec = &text[k + 1..];
-            let digits = spec.strip_prefix('.').and_then(|r| r.strip_suffix('f'));
-            match (spec, digits) {
-                ("g", _) => fmt = Some(Fmt::G),
-                (_, Some(d)) if !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()) => {
-                    match d.parse::<u8>().ok().filter(|&n| n <= 20) {
-                        Some(n) => fmt = Some(Fmt::Fixed(n)),
-                        None => self.err("S1.precision", q, "precision at most 20", None),
-                    }
-                }
-                _ => {
-                    let msg = format!("unknown format `{spec}`");
-                    let hint = "formats are g and .Nf, e.g. {x:.2f}";
-                    self.err("S1.unknown_format", q, msg, Some(hint));
-                }
+            match Fmt::parse(spec) {
+                Ok(f) => fmt = Some(f),
+                Err((id, msg, hint)) => self.err(id, q, msg, hint),
             }
             text = &text[..k];
             if text.trim().is_empty() {

@@ -71,8 +71,7 @@ Record!str parse_record(str line) {
 str money(int cents) {
     int frac = cents.abs() % 100
     str sign = if cents < 0 { "-" } else { "" }
-    str pad = if frac < 10 { "0" } else { "" }
-    return "{sign}{cents.abs() / 100}.{pad}{frac}"
+    return "{sign}{cents.abs() / 100}.{frac:02}"
 }
 
 void!io.IoErr main() {

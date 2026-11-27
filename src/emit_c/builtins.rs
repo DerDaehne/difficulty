@@ -223,6 +223,11 @@ impl<'a> Emitter<'a> {
             Ty::Str => self.str_method(e, base, m, args, (l, c)),
             Ty::Rune => {
                 let v = self.expr(base);
+                if m == "to_digit" {
+                    let setup = format!("uint32_t r_ = {v};");
+                    let cond = "r_ >= '0' && r_ <= '9'";
+                    return self.some_if(self.ty(e), &setup, cond, "(int64_t)(r_ - '0')");
+                }
                 format!("dif_rune_{m}({v})")
             }
             Ty::Num(Num::F64) => {
