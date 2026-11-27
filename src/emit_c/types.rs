@@ -96,9 +96,49 @@ impl<'a> Emitter<'a> {
             Ty::Arr(i) => self.managed(self.info.arrs[i as usize].0),
             Ty::Named(id) => match &self.info.types[id as usize].body {
                 TypeBody::Struct(fs) => fs.iter().any(|f| self.managed(f.1)),
-                TypeBody::Enum(vs) => vs.iter().any(|v| v.1.iter().any(|f| self.managed(f.0))),
+                TypeBody::Enum(vs) => vs
+                    .iter()
+                    .any(|v| v.1.iter().any(|f| self.boxed(id, f.0) || self.managed(f.0))),
             },
             _ => false,
+        }
+    }
+
+    /// Does a value of type `t` hold the enum `target` by value (struct field, array,
+    /// `?T`, `T!E`, or the payload of another enum)?
+    fn holds(&self, t: Ty, target: u32, seen: &mut HashSet<u32>) -> bool {
+        match t {
+            Ty::Named(id) if id == target => true,
+            Ty::Named(id) => {
+                seen.insert(id)
+                    && match &self.info.types[id as usize].body {
+                        TypeBody::Struct(fs) => fs.iter().any(|f| self.holds(f.1, target, seen)),
+                        TypeBody::Enum(vs) => vs
+                            .iter()
+                            .any(|v| v.1.iter().any(|f| self.holds(f.0, target, seen))),
+                    }
+            }
+            Ty::Opt(i) => self.holds(self.info.opts[i as usize], target, seen),
+            Ty::Res(i) => {
+                let (v, e) = self.info.ress[i as usize];
+                self.holds(v, target, seen) || self.holds(e, target, seen)
+            }
+            Ty::Arr(i) => self.holds(self.info.arrs[i as usize].0, target, seen),
+            _ => false,
+        }
+    }
+
+    /// Is a payload field of type `t` in enum `eid` kept in a counted block (R5)? It is
+    /// when the field leads back to the enum; then the field is a `T *` into the block.
+    pub(super) fn boxed(&self, eid: u32, t: Ty) -> bool {
+        self.holds(t, eid, &mut HashSet::new())
+    }
+
+    /// The C lvalue of payload field `j` of variant `k`: `path` is `<value>.u.v<k>.f<j>`.
+    pub(super) fn fld(&self, eid: u32, k: usize, j: usize, path: String) -> String {
+        match &self.info.types[eid as usize].body {
+            TypeBody::Enum(vs) if self.boxed(eid, vs[k].1[j].0) => format!("(*{path})"),
+            _ => path,
         }
     }
 
@@ -160,6 +200,13 @@ impl<'a> Emitter<'a> {
     pub(super) fn type_defs(&self) -> String {
         let mut done = HashSet::new();
         let mut c = String::new();
+        // a block pointer needs only the name of its type
+        for t in self.universe() {
+            if matches!(t, Ty::Named(_) | Ty::Opt(_) | Ty::Res(_) | Ty::Arr(_)) {
+                let n = self.c_ty(t);
+                let _ = writeln!(c, "typedef struct {n} {n};");
+            }
+        }
         for t in self.universe() {
             self.type_def(t, &mut done, &mut c);
         }
@@ -209,7 +256,11 @@ impl<'a> Emitter<'a> {
                 let d = &self.info.types[i as usize];
                 let contained: Vec<Ty> = match &d.body {
                     TypeBody::Struct(fs) => fs.iter().map(|f| f.1).collect(),
-                    TypeBody::Enum(vs) => vs.iter().flat_map(|v| v.1.iter().map(|f| f.0)).collect(),
+                    TypeBody::Enum(vs) => vs
+                        .iter()
+                        .flat_map(|v| v.1.iter().map(|f| f.0))
+                        .filter(|&f| !self.boxed(i, f))
+                        .collect(),
                 };
                 let body = match &d.body {
                     TypeBody::Struct(fs) => {
@@ -225,13 +276,12 @@ impl<'a> Emitter<'a> {
                             .enumerate()
                             .filter(|(_, v)| !v.1.is_empty())
                             .map(|(k, v)| {
-                                let m = members(
-                                    &mut v
-                                        .1
-                                        .iter()
-                                        .enumerate()
-                                        .map(|(j, f)| (f.0, format!("f{j}"))),
-                                );
+                                let m: Vec<String> = (v.1.iter().enumerate())
+                                    .map(|(j, f)| {
+                                        let star = if self.boxed(i, f.0) { " *" } else { " " };
+                                        format!("{}{star}f{j};", self.c_ty(f.0))
+                                    })
+                                    .collect();
                                 format!("struct {{ {} }} v{k};", m.join(" "))
                             })
                             .collect();
@@ -249,7 +299,8 @@ impl<'a> Emitter<'a> {
         for u in contained {
             self.type_def(u, done, c);
         }
-        let _ = writeln!(c, "typedef struct {{ {body} }} {};", self.c_ty(t));
+        let n = self.c_ty(t);
+        let _ = writeln!(c, "struct {n} {{ {body} }};");
     }
 
     /// Every type that has helpers.
@@ -393,7 +444,16 @@ impl<'a> Emitter<'a> {
                     for (k, v) in vs.iter().enumerate() {
                         let mut body = String::new();
                         for (j, f) in v.1.iter().enumerate() {
-                            body.push_str(&one(f.0, &format!("{p}->u.v{k}.f{j}")));
+                            let place = format!("{p}->u.v{k}.f{j}");
+                            if self.boxed(id, f.0) {
+                                let _ = if release {
+                                    writeln!(body, "    dif_box_dec(&{}, {place});", self.dty(f.0))
+                                } else {
+                                    writeln!(body, "    dif_box_inc({place});")
+                                };
+                            } else {
+                                body.push_str(&one(f.0, &place));
+                            }
                         }
                         if !body.is_empty() {
                             let _ = write!(c, "    if ({p}->tag == {k}) {{\n{body}    }}\n");
@@ -455,7 +515,7 @@ impl<'a> Emitter<'a> {
                     for (k, v) in vs.iter().enumerate().filter(|(_, v)| !v.1.is_empty()) {
                         let mut body = String::new();
                         for (j, f) in v.1.iter().enumerate() {
-                            body.push_str(&h(f.0, &format!("v->u.v{k}.f{j}")));
+                            body.push_str(&h(f.0, &self.fld(id, k, j, format!("v->u.v{k}.f{j}"))));
                         }
                         let _ = write!(c, "    if (v->tag == {k}) {{\n{body}    }}\n");
                     }
@@ -547,8 +607,9 @@ impl<'a> Emitter<'a> {
                                     v.1.iter()
                                         .enumerate()
                                         .map(|(j, f)| {
-                                            let x = format!("a.u.v{k}.f{j}");
-                                            self.eq(f.0, &x, &format!("b.u.v{k}.f{j}"))
+                                            let x = self.fld(id, k, j, format!("a.u.v{k}.f{j}"));
+                                            let y = self.fld(id, k, j, format!("b.u.v{k}.f{j}"));
+                                            self.eq(f.0, &x, &y)
                                         })
                                         .collect();
                                 let _ = writeln!(
@@ -573,7 +634,7 @@ impl<'a> Emitter<'a> {
                                 for (j, f) in v.1.iter().enumerate() {
                                     let sep = if j == 0 { "" } else { ", " };
                                     let _ = writeln!(text, "        {}", Self::lit("b", sep));
-                                    let x = format!("v.u.v{k}.f{j}");
+                                    let x = self.fld(id, k, j, format!("v.u.v{k}.f{j}"));
                                     let _ =
                                         writeln!(text, "        {}", self.put(f.0, "b", &x, true));
                                 }

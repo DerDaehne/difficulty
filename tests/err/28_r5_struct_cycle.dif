@@ -1,0 +1,7 @@
+// expect: error[R5] 2:8
+struct Node {
+    Node next
+}
+
+void main() {
+}

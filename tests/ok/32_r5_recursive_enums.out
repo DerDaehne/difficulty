@@ -1,0 +1,8 @@
+Expr.Add(Expr.Num(2), Expr.Neg(Expr.Add(Expr.Num(3), Expr.Num(4))))
+-5
+true
+false
+Rule.Both(Pair{left: Rule.Atom("a"), right: Rule.Not(Rule.Atom("b"))})
+Rule.Many([Rule.Both(Pair{left: Rule.Atom("a"), right: Rule.Not(Rule.Atom("b"))}), Rule.Atom("c")])
+100000
+100000

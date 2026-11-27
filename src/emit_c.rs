@@ -1358,7 +1358,7 @@ impl<'a> Emitter<'a> {
                             (
                                 b.name.clone(),
                                 self.ty_of(&b.ty),
-                                format!("{s}.u.v{k}.f{j}"),
+                                self.fld(eid, k, j, format!("{s}.u.v{k}.f{j}")),
                             )
                         })
                         .collect()
@@ -1972,12 +1972,23 @@ impl<'a> Emitter<'a> {
         }
     }
 
+    /// The value `v` of payload field `j` as the field holds it: moved into a counted block
+    /// when the field is boxed (R5).
+    fn boxing(&self, eid: u32, k: usize, j: usize, v: String) -> String {
+        let t = self.variant_fields(eid, k)[j];
+        if !self.boxed(eid, t) {
+            return v;
+        }
+        let ct = self.c_ty(t);
+        format!("({{ {ct} t_ = ({v}); {ct} *b_ = dif_box_new(sizeof t_); *b_ = t_; b_; }})")
+    }
+
     /// `E.V` of variant `k` with the field values already written in C.
     fn variant_of(&mut self, eid: u32, k: usize, vals: Vec<String>) -> String {
         let (s, mut c, end) = self.building(Ty::Named(eid));
         let _ = write!(c, "{s}.tag = {k}; ");
         for (j, v) in vals.iter().enumerate() {
-            let _ = write!(c, "{s}.u.v{k}.f{j} = {v}; ");
+            let _ = write!(c, "{s}.u.v{k}.f{j} = {}; ", self.boxing(eid, k, j, v.clone()));
         }
         c.push_str(&end);
         c
@@ -1994,6 +2005,7 @@ impl<'a> Emitter<'a> {
         let fields = self.variant_fields(eid, k);
         for (j, a) in args.iter().enumerate() {
             let v = self.at(fields[j], a);
+            let v = self.boxing(eid, k, j, v);
             let _ = write!(c, "{s}.u.v{k}.f{j} = {v}; ");
         }
         c.push_str(&end);

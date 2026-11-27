@@ -433,6 +433,44 @@ DIF_FN void dif_dec(const dif_ty *t, void *p) {
     if (t->dec) t->dec(t, p);
 }
 
+// Boxes: the counted block behind a recursive enum payload. The payload follows a 16-byte
+// header; `dif_box_new` returns a pointer to it. A box is immutable once shared, so a copy
+// is only a count step. Release is iterative: a box that reaches zero is queued and the
+// outermost release works the queue, so a value of any depth frees in constant stack.
+typedef struct dif_boxh dif_boxh;
+struct dif_boxh {
+    union { int64_t rc; dif_boxh *next; } u;
+    const dif_ty *t;
+};
+static dif_boxh *dif_box_q __attribute__((unused));
+static int dif_box_busy __attribute__((unused));
+DIF_FN void *dif_box_new(size_t n) {
+    dif_boxh *h = dif_alloc(sizeof *h + n);
+    h->u.rc = 1;
+    h->t = NULL;
+    return h + 1;
+}
+DIF_FN void dif_box_inc(void *p) { // NULL: a value that was never filled
+    if (p) ((dif_boxh *)p - 1)->u.rc++;
+}
+DIF_FN void dif_box_dec(const dif_ty *t, void *p) {
+    if (!p) return;
+    dif_boxh *h = (dif_boxh *)p - 1;
+    if (--h->u.rc > 0) return;
+    h->t = t;
+    h->u.next = dif_box_q;
+    dif_box_q = h;
+    if (dif_box_busy) return;
+    dif_box_busy = 1;
+    while (dif_box_q) {
+        h = dif_box_q;
+        dif_box_q = h->u.next;
+        dif_dec(h->t, h + 1);
+        free(h);
+    }
+    dif_box_busy = 0;
+}
+
 // hashing: equal values hash equal (0.0 and -0.0 are the same key). A NaN anywhere in a
 // key sets `dif_nan_seen`; the map functions turn that into the abort of R14.
 static int dif_nan_seen __attribute__((unused));

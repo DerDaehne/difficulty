@@ -973,10 +973,8 @@ impl<'a> Checker<'a> {
             .map(|t| {
                 let tys: Vec<Ty> = match &t.kind {
                     Kind::Struct(fs) => fs.iter().map(|f| f.ty).collect(),
-                    Kind::Enum(vs) => vs
-                        .iter()
-                        .flat_map(|v| v.fields.iter().map(|f| f.0))
-                        .collect(),
+                    // a variant keeps its payload in a counted block: no fixed size needed
+                    Kind::Enum(_) => Vec::new(),
                 };
                 let mut ids = Vec::new();
                 for t in tys {

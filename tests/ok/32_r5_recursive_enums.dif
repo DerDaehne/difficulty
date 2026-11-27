@@ -1,0 +1,66 @@
+enum Expr {
+    Num(int n)
+    Add(Expr a, Expr b)
+    Neg(Expr e)
+}
+
+struct Pair {
+    Rule left
+    Rule right
+}
+
+enum Rule {
+    Atom(str name)
+    Both(Pair p)
+    Not(Rule r)
+    Many([]Rule rs)
+}
+
+enum Cons {
+    Nil
+    Link(int head, Cons tail)
+}
+
+int eval(Expr e) {
+    switch e {
+    case Expr.Num(int n):
+        return n
+    case Expr.Add(Expr a, Expr b):
+        return eval(a) + eval(b)
+    case Expr.Neg(Expr x):
+        return -eval(x)
+    }
+}
+
+int len(Cons c) {
+    int n = 0
+    Cons cur = c
+    while true {
+        switch cur {
+        case Cons.Nil:
+            return n
+        case Cons.Link(_, Cons t):
+            n += 1
+            cur = t
+        }
+    }
+}
+
+void main() {
+    Expr e = Expr.Add(Expr.Num(2), Expr.Neg(Expr.Add(Expr.Num(3), Expr.Num(4))))
+    Expr copy = e
+    print(e)
+    print(eval(copy))
+    print(e == copy)
+    print(e == Expr.Num(2))
+    Rule r = Rule.Both(Pair{left: Rule.Atom("a"), right: Rule.Not(Rule.Atom("b"))})
+    print(r)
+    print(Rule.Many([r, Rule.Atom("c")]))
+    Cons list = Cons.Nil
+    for int i in range(0, 100000) {
+        list = Cons.Link(i, list)
+    }
+    print(len(list))
+    Cons other = list
+    print(len(other))
+}

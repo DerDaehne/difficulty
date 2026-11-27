@@ -146,9 +146,9 @@ fn declarations() {
             "fields of a struct stand one per line",
         ),
         (
-            "enum Tree {\n    Leaf\n    Node(Tree l, Tree r)\n}\n",
+            "enum Tree {\n    Leaf\n    Node(Pair p)\n}\n\nstruct Pair {\n    Tree l\n    Pair r\n}\n",
             "R5",
-            "`Tree` contains itself",
+            "`Pair` contains itself",
         ),
         (
             "struct A {\n    B b\n}\n\nstruct B {\n    A a\n}\n",
@@ -226,4 +226,17 @@ fn method_on_void_call_says_no_value() {
     let (code, msg) = one(&prog("Point p = Point{x: 1, y: 2}\np.move(1).move(2)"));
     assert_eq!(code, "R8");
     assert!(msg.contains("returns nothing"), "{msg}");
+}
+
+/// An enum may contain itself in a variant payload, directly, in turns with another enum,
+/// or through a struct field inside a payload (R5); a cycle of struct fields alone may not.
+#[test]
+fn recursive_enums_pass_r5() {
+    let ok = |src: &str| assert!(check_source(src).is_empty(), "{src}");
+    ok("enum Tree {\n    Leaf\n    Node(Tree l, Tree r)\n}\n");
+    ok("enum A {\n    X(B b)\n    Y\n}\n\nenum B {\n    P(A a)\n}\n");
+    ok("struct S {\n    E e\n}\n\nenum E {\n    A(S s)\n    B\n}\n");
+    ok("enum E {\n    A([2]E xs)\n    B(?E e)\n    C\n}\n");
+    let (c, m) = one("struct S {\n    E e\n    S s\n}\n\nenum E {\n    A\n}\n");
+    assert_eq!((c, m.as_str()), ("R5", "`S` contains itself"));
 }
