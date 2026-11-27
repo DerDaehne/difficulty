@@ -1141,18 +1141,19 @@ impl<'a> Checker<'a> {
         if f.recv.is_some() {
             escape.push("self".into());
         }
-        for (root, pos) in live::lost(&f.body, &self.call_changes, &escape) {
+        for (place, pos) in live::lost(&f.body, &self.call_changes, &escape) {
+            let root = place.split('.').next().unwrap_or("").to_string();
             if root != "self" && !self.fn_locals.contains(&root) {
                 continue; // a const, a function or an unknown name: reported elsewhere
             }
             match f.params.iter().position(|p| p.name == root) {
                 Some(k) => {
-                    let msg = format!("the change to `{root}` is lost: `{root}` is a copy");
+                    let msg = format!("the change to `{place}` is lost: `{root}` is a copy");
                     let hint = format!("take it as mut: {}", self.signature(id, k));
                     self.err("R6", pos, msg, Some(hint));
                 }
                 None => {
-                    let msg = format!("`{root}` is changed but never read afterwards");
+                    let msg = format!("`{place}` is changed but never read afterwards");
                     let hint = self
                         .lost_hints
                         .get(&pos.offset)
@@ -3165,9 +3166,12 @@ impl<'a> Checker<'a> {
         let before = self.diags.len();
         self.block(&t.body);
         if self.derived.is_some() && self.diags.len() == before {
-            for (root, pos) in live::lost(&t.body, &self.call_changes, &[]) {
-                if self.fn_locals.contains(&root) {
-                    let msg = format!("`{root}` is changed but never read afterwards");
+            for (place, pos) in live::lost(&t.body, &self.call_changes, &[]) {
+                if self
+                    .fn_locals
+                    .contains(place.split('.').next().unwrap_or(""))
+                {
+                    let msg = format!("`{place}` is changed but never read afterwards");
                     let hint = self
                         .lost_hints
                         .get(&pos.offset)

@@ -1,6 +1,8 @@
-//! Lost changes (spec R6): a change to a root (variable, parameter, `self`) that no
-//! path reads before the root is assigned anew or the function ends. A backward
-//! liveness analysis over the structured syntax tree; loops iterate to a fixpoint.
+//! Lost changes (spec R6): a change to a place (`p`, `p.x`, `p.inner.y`: a root and
+//! fields; an index stays with the indexed container) that no path reads before the
+//! place is assigned anew or the function ends. A read of the place, a part of it or a
+//! whole containing it counts. A backward liveness analysis over the structured syntax
+//! tree; loops iterate to a fixpoint.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -13,7 +15,7 @@ type Set = BTreeSet<String>;
 /// callee changes, and the receiver of a method that changes `self`.
 pub type CallChanges = HashMap<(u32, u32), Vec<(String, Pos)>>;
 
-/// The first lost change of each root, in source order. `escape` holds the roots
+/// The first lost change of each place (a dotted path), in source order. `escape` holds the roots
 /// that count as read when the function ends (`mut` parameters, `self`).
 pub fn lost(body: &Block, changes: &CallChanges, escape: &[String]) -> Vec<(String, Pos)> {
     let mut l = Live {
@@ -48,19 +50,43 @@ struct Live<'c> {
     head: Vec<Set>,
 }
 
-fn root(e: &Expr) -> Option<String> {
+/// The path of a place and whether an index cut it (`p.xs[i].f` is `p.xs`).
+fn path(e: &Expr) -> Option<(String, bool)> {
     match &e.kind {
-        ExprKind::Ident(n) => Some(n.clone()),
-        ExprKind::SelfRef => Some("self".into()),
-        ExprKind::Field(b, _) | ExprKind::Index(b, _, _) => root(b),
+        ExprKind::Ident(n) => Some((n.clone(), false)),
+        ExprKind::SelfRef => Some(("self".into(), false)),
+        ExprKind::Field(b, f) => path(b).map(|(s, cut)| {
+            if cut {
+                (s, true)
+            } else {
+                (format!("{s}.{f}"), false)
+            }
+        }),
+        ExprKind::Index(b, _, _) => path(b).map(|(s, _)| (s, true)),
         _ => None,
     }
 }
 
+/// Drop `p` and everything below it (`p.x`) from the set.
+fn kill(live: &mut Set, p: &str) {
+    let below = format!("{p}.");
+    live.retain(|l| l != p && !l.starts_with(&below));
+}
+
+/// Is `c` read by a live path: the same, a part of it, or a whole containing it?
+fn read(live: &Set, c: &str) -> bool {
+    live.iter().any(|l| {
+        l == c
+            || l.strip_prefix(c).is_some_and(|r| r.starts_with('.'))
+            || c.strip_prefix(l.as_str())
+                .is_some_and(|r| r.starts_with('.'))
+    })
+}
+
 impl Live<'_> {
-    fn change(&mut self, root: &str, pos: Pos, live: &Set) {
-        if self.report && !live.contains(root) {
-            self.lost.push((root.to_string(), pos));
+    fn change(&mut self, place: &str, pos: Pos, live: &Set) {
+        if self.report && !read(live, place) {
+            self.lost.push((place.to_string(), pos));
         }
     }
 
@@ -74,17 +100,16 @@ impl Live<'_> {
     fn stmt(&mut self, s: &Stmt, mut live: Set) -> Set {
         match s {
             Stmt::Var(v) => {
-                live.remove(&v.name);
+                kill(&mut live, &v.name);
                 self.expr(&v.value, live)
             }
             Stmt::Assign {
                 place, op, value, ..
             } => {
-                if let Some(r) = root(place) {
+                if let Some((r, cut)) = path(place) {
                     self.change(&r, place.pos, &live);
-                    let whole = matches!(place.kind, ExprKind::Ident(_) | ExprKind::SelfRef);
-                    if whole && *op == "=" {
-                        live.remove(&r);
+                    if !cut && *op == "=" {
+                        kill(&mut live, &r);
                     }
                     if *op != "=" {
                         live.insert(r);
@@ -138,7 +163,7 @@ impl Live<'_> {
                 let head = self.fixpoint(&exit, |l, head| {
                     let mut body_in = l.block(body, head.clone());
                     for v in vars {
-                        body_in.remove(&v.name);
+                        kill(&mut body_in, &v.name);
                     }
                     let mut h = exit.clone();
                     h.extend(body_in);
@@ -164,14 +189,14 @@ impl Live<'_> {
                                 binds: Some(bs), ..
                             } => {
                                 for b in bs.iter().flatten() {
-                                    inner.remove(&b.name);
+                                    kill(&mut inner, &b.name);
                                 }
                             }
                             Pattern::Result {
                                 bind: Some(Some(b)),
                                 ..
                             } => {
-                                inner.remove(&b.name);
+                                kill(&mut inner, &b.name);
                             }
                             _ => {}
                         }
@@ -221,13 +246,8 @@ impl Live<'_> {
 
     fn expr(&mut self, e: &Expr, mut live: Set) -> Set {
         match &e.kind {
-            ExprKind::Ident(n) => {
-                live.insert(n.clone());
-                live
-            }
-            ExprKind::SelfRef => {
-                live.insert("self".into());
-                live
+            ExprKind::Ident(_) | ExprKind::SelfRef | ExprKind::Field(..) | ExprKind::Index(..) => {
+                self.place(e, "", live)
             }
             ExprKind::Call(f, args) => {
                 if let Some(chs) = self.changes.get(&(e.pos.offset, e.end)) {
@@ -238,7 +258,11 @@ impl Live<'_> {
                 for a in args.iter().rev() {
                     live = self.expr(a, live);
                 }
-                self.expr(f, live)
+                // a method call reads its whole receiver
+                match &f.kind {
+                    ExprKind::Field(b, _) => self.expr(b, live),
+                    _ => self.expr(f, live),
+                }
             }
             ExprKind::IfExpr(branches, last) => {
                 let mut acc = self.value_block(last, live.clone());
@@ -293,12 +317,32 @@ impl Live<'_> {
                 }
                 self.expr(x, after)
             }
-            ExprKind::Field(b, _) => self.expr(b, live),
-            ExprKind::Binary(_, l, r, _) | ExprKind::Index(l, r, _) => {
+            ExprKind::Binary(_, l, r, _) => {
                 let live = self.expr(r, live);
                 self.expr(l, live)
             }
             _ => live,
+        }
+    }
+
+    /// Read a field chain: `p.a.b` reads the path `p.a.b`; an index reads the container
+    /// (the suffix after it is dropped) and the index expression.
+    fn place(&mut self, e: &Expr, suffix: &str, mut live: Set) -> Set {
+        match &e.kind {
+            ExprKind::Ident(n) => {
+                live.insert(format!("{n}{suffix}"));
+                live
+            }
+            ExprKind::SelfRef => {
+                live.insert(format!("self{suffix}"));
+                live
+            }
+            ExprKind::Field(b, f) => self.place(b, &format!(".{f}{suffix}"), live),
+            ExprKind::Index(b, i, _) => {
+                live = self.expr(i, live);
+                self.place(b, "", live)
+            }
+            _ => self.expr(e, live),
         }
     }
 

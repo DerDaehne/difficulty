@@ -184,7 +184,7 @@ fn declarations() {
         (
             "struct P {\n    int x\n}\n\nvoid P.r() {\n    self.x = 0\n    self = P{x: 1}\n}\n",
             "R6",
-            "`self` is changed but never read afterwards",
+            "`self.x` is changed but never read afterwards",
         ),
     ];
     for (src, code, msg) in cases {

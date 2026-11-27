@@ -663,9 +663,9 @@ Teil 2a legt fest:
   - `mut` zu viel: `` `show` takes `p` without mut ``, Hinweis: der Aufruf ohne `mut`;
   - kein Ort nach `mut` (`mut f()`, `mut 1`): `only a variable, field or element can be passed as mut`.
 - **Überflüssiges `mut`.** Ändert eine Funktion einen `mut`-Parameter nie (kein Ort mit dieser Wurzel wird geändert), ist das `R6` am `mut` des Parameters, Meldung `` `p` is never changed; remove mut ``, Hinweis: die Signatur ohne `mut`. Aufrufe, die dort `mut` übergeben, werden nicht zusätzlich gemeldet und zählen nicht als Änderung.
-- **Verlorene Änderung.** Eine Änderung ist verloren, wenn auf keinem Weg danach ihre Wurzel gelesen wird, bevor die Wurzel ganz neu zugewiesen wird (`v = …`; eine Teilzuweisung `v.x = …` beendet nichts) oder die Funktion endet. Am Ende einer Funktion gelten `mut`-Parameter und `self` als gelesen, weil die Änderung beim Aufrufer landet. In einer Schleife zählt der nächste Durchlauf als „danach“; ein `n += 1` im Rumpf liest dort den Wert des vorigen Durchlaufs und gilt darum als gelesen. Eine verlorene Änderung ist `R6` an ihrem Ort:
-  - an einem Parameter ohne `mut`: `` the change to `p` is lost: `p` is a copy ``, Hinweis `take it as mut: ` und die Signatur samt `mut`;
-  - sonst: `` `x` is changed but never read afterwards ``, Hinweis `use the value, or remove the change`.
+- **Verlorene Änderung.** Orte sind Pfade aus Wurzel und Feldern (`p`, `p.x`, `p.inner.y`); ein Index gehört zum indizierten Ort (`xs[i]` ist `xs`, `p.items[i].f` ist `p.items`), weil er erst zur Laufzeit feststeht. Eine Änderung eines Ortes ist verloren, wenn auf keinem Weg danach dieser Ort, ein Teil davon (`p.x.z`) oder ein Ganzes, das ihn enthält (`p`, etwa als Argument, in `print(p)`, `return p` oder `q = p`), gelesen wird, bevor der Ort ganz neu zugewiesen wird (`p.x = …` beendet `p.x` und alles darunter, `v = …` alles unter `v`; ein Index beendet nichts) oder die Funktion endet. Ein Lesen von `p.y` rettet also eine Änderung von `p.x` nicht; ein Methodenaufruf `p.show()` liest `p` ganz. Aufrufe mit `mut p.x` ändern wie bisher den Ort der Wurzel `p`. Am Ende einer Funktion gelten `mut`-Parameter und `self` als gelesen, weil die Änderung beim Aufrufer landet. In einer Schleife zählt der nächste Durchlauf als „danach“; ein `n += 1` im Rumpf liest dort den Wert des vorigen Durchlaufs und gilt darum als gelesen. Eine verlorene Änderung ist `R6` an ihrem Ort; die Meldung nennt den Pfad:
+  - an einem Parameter ohne `mut`: `` the change to `p.x` is lost: `p` is a copy `` (bei einer ganzen Änderung `` the change to `p` is lost … ``), Hinweis `take it as mut: ` und die Signatur samt `mut`;
+  - sonst: `` `x.y` is changed but never read afterwards ``, Hinweis `use the value, or remove the change`.
   
   Gemeldet wird pro Wurzel die erste verlorene Änderung. Der Anfangswert einer Deklaration ist keine Änderung: `int x = 0` gefolgt von `x = 1; x = 2; print(x)` meldet `x = 1`.
 - **Keine Aliase.** In einem Aufruf geht ein Ort höchstens einmal veränderbar hinein: als `self` einer Methode, die `self` ändert, als `mut`-Argument oder über ein Funktionsliteral, das ihn ändert (R26). Zwei solche Orte dürfen sich nicht überlappen (`a` und `a.x`, oder zweimal `a.x`), sonst `R6` am zweiten, Meldung `` `p` goes into this call changeable twice ``, Hinweis `pass it changeable only once`. Liest der Aufruf denselben Ort zusätzlich als Argument ohne `mut`, bekommt dieses Argument den Wert von vor dem Aufruf. Ein Aufruf im Argument eines anderen ist ein eigener Aufruf: `f(mut a, g(mut a))` ist erlaubt, `g` ist fertig, bevor `f` beginnt.
@@ -742,11 +742,14 @@ struct Point {
 
 void nudge(Point p) {
     p.x += 1
+    print(p.y)
 }
 ```
 
+Das Lesen von `p.y` liest die Änderung an `p.x` nicht.
+
 ```
-main.dif:7:5: error[R6]: the change to `p` is lost: `p` is a copy
+main.dif:7:5: error[R6]: the change to `p.x` is lost: `p` is a copy
   hint: take it as mut: void nudge(mut Point p)
 ```
 

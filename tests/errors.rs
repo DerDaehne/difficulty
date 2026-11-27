@@ -572,3 +572,46 @@ fn lost_changes_with_try_r6() {
         "use the value, or remove the change",
     );
 }
+
+#[test]
+fn lost_changes_per_field_r6() {
+    let pre = "struct In {\n    int z\n}\n\nstruct P {\n    int x\n    int y\n    In inner\n    []int xs\n}\n\n";
+    let ok = |body: &str| {
+        let src = format!("{pre}void f(P p, int i) {{\n{body}}}\n");
+        assert_eq!(check_source(&src), vec![], "{body}");
+    };
+    let lost = |body: &str, msg: &str| {
+        let src = format!("{pre}void f(P p, int i) {{\n    P q = p\n{body}    print(q.y)\n}}\n");
+        let d = check_source(&src);
+        assert!(d.iter().any(|m| m.msg.contains(msg)), "{body}: {d:?}");
+    };
+    // field after field: reading `p.y` does not read `p.x`
+    lost(
+        "    q.x = 1\n",
+        "`q.x` is changed but never read afterwards",
+    );
+    lost(
+        "    q.inner.z = 1\n    print(q.inner.z)\n    q.inner.z = 2\n",
+        "`q.inner.z`",
+    );
+    lost("    q.x = 1\n    q.x = 2\n    print(q.x)\n", "`q.x`");
+    // the part, a part of it, or the whole containing it reads the change
+    ok("    P q = p\n    q.x = 1\n    print(q.x)\n");
+    ok("    P q = p\n    q.inner.z = 1\n    print(q.inner)\n");
+    ok("    P q = p\n    q.inner.z = 1\n    print(q)\n");
+    ok("    P q = p\n    q.x = 1\n    P r = q\n    print(r)\n");
+    ok("    P q = p\n    q.xs[i] = 1\n    print(q.xs)\n");
+    ok("    P q = p\n    q.xs[i] = 1\n    print(q.xs[0])\n");
+    // over a loop
+    ok("    P q = p\n    for int j in range(3) {\n        print(q.x)\n        q.x += 1\n    }\n");
+    lost(
+        "    for int j in range(3) {\n        q.x = j\n        print(q.y)\n    }\n",
+        "`q.x`",
+    );
+    // over try
+    let t =
+        "enum E { Bad }\nint!E get() {\n    return 1\n}\n\nstruct P {\n    int x\n    int y\n}\n\n";
+    let src =
+        format!("{t}void!E f(mut P p) {{\n    p.x = 1\n    int a = try get()\n    p.y = a\n}}\n");
+    assert_eq!(check_source(&src), vec![]);
+}
