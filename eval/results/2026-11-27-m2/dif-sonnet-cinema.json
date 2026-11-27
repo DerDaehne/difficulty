@@ -1,0 +1,27 @@
+{
+  "lang": "dif",
+  "model": "sonnet",
+  "task": "cinema",
+  "dry_run": false,
+  "rounds": 1,
+  "pass1": true,
+  "pass5": true,
+  "tokens": {
+    "input": 2,
+    "cache_creation": 10813,
+    "cache_read": 0,
+    "output": 2970
+  },
+  "codes": {},
+  "prompt_chars": [
+    23404
+  ],
+  "history": [
+    {
+      "round": 1,
+      "ok": true,
+      "codes": [],
+      "feedback": null
+    }
+  ]
+}

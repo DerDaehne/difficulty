@@ -1,0 +1,34 @@
+{
+  "lang": "dif",
+  "model": "sonnet",
+  "task": "vending",
+  "dry_run": false,
+  "rounds": 2,
+  "pass1": false,
+  "pass5": true,
+  "tokens": {
+    "input": 4,
+    "cache_creation": 22291,
+    "cache_read": 0,
+    "output": 3200
+  },
+  "codes": {},
+  "prompt_chars": [
+    23158,
+    26477
+  ],
+  "history": [
+    {
+      "round": 1,
+      "ok": false,
+      "codes": [],
+      "feedback": "test strikes: output differs from the expected one (first difference at line 12)\nyour output (first 500 characters):\nrejected\nrejected\nrejected\nlocked\nerror: locked\nerror: locked\nerror: locked\nstate locked credit 0\nunlocked\nrejected\nstate idle credit 0\ncredit 10\ncredit 20\nrejected\nstate active credit 20"
+    },
+    {
+      "round": 2,
+      "ok": true,
+      "codes": [],
+      "feedback": null
+    }
+  ]
+}

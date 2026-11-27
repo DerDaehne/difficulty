@@ -136,3 +136,31 @@ der Variablen ein Move (`DIF_MOVE`), die Liste ist ungeteilt, und das Schreiben 
 Aufrufer die Liste weiter, die er danach noch liest, kopiert `bump` weiter (`dif check --hints`
 nennt den Parameter). Der Test `tests/copies.rs` hält beides fest (Bewegung unter 40 ms,
 Kopie mehr als dreimal so langsam).
+
+## Agenten-Messung 1 (Stand M2)
+
+Erster Lauf des Messgerüsts aus `eval/` (Aufgaben, Protokoll und Kosten: [eval/README.md](../eval/README.md)).
+Je Sprache, Modell und Aufgabe ein Lauf mit höchstens 5 Runden; der Kontext jedes Aufrufs ist nur
+`llms.txt` (bei difficulty) und die Aufgabe, das Feedback nach einem Fehlversuch zeigt nie die erwartete
+Ausgabe. Compiler auf dem Stand der Teile 1 bis 2d mit Standardbibliothek v0. Rohdaten:
+`eval/results/2026-11-27-m2/`.
+
+| Sprache | Modell | pass@1 | pass@5 | Runden im Mittel | Tokens (Eingabe+Cache / Ausgabe) |
+|---|---|---|---|---|---|
+| difficulty | Haiku | 4/5 | 5/5 | 1,2 | 64 623 / 56 115 |
+| difficulty | Sonnet | 4/5 | 5/5 | 1,2 | 64 556 / 13 615 |
+| Python | Haiku | 4/5 | 5/5 | 1,6 | 13 032 / 21 894 |
+| Python | Sonnet | 5/5 | 5/5 | 1,0 | 6 096 / 5 883 |
+
+Beobachtungen:
+
+- Kein einziger difficulty-Lauf hat eine Meldung des Compilers bekommen: alle Programme übersetzten
+  im ersten Versuch. Die Regelverstöße je Regel sind damit in diesem Lauf null.
+- Der einzige Fehlversuch in difficulty ist bei beiden Modellen dieselbe Aufgabe (`vending`, Test
+  `strikes`, erste Abweichung in Zeile 12) mit identischer Ausgabe; Haiku brauchte für dieselbe Aufgabe
+  in Python vier Runden. Das spricht für eine Mehrdeutigkeit im Aufgabentext, nicht für die Sprache.
+  Beide reparierten es in der zweiten Runde.
+- Ziel aus PLAN §10 „pass@1 ≥ Python“: mit Haiku erreicht (4/5 gegen 4/5), mit Sonnet knapp nicht
+  (4/5 gegen 5/5). Bei fünf Aufgaben ist ein Lauf der ganze Unterschied.
+- Kosten: Ein difficulty-Aufruf trägt `llms.txt` mit (etwa 10 500 Eingabetokens gegen 1 200 bei Python).
+  Haiku schreibt in difficulty deutlich mehr Ausgabe als Sonnet.

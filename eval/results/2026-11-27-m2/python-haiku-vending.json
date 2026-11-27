@@ -1,0 +1,48 @@
+{
+  "lang": "python",
+  "model": "haiku",
+  "task": "vending",
+  "dry_run": false,
+  "rounds": 4,
+  "pass1": false,
+  "pass5": true,
+  "tokens": {
+    "input": 8,
+    "cache_creation": 8154,
+    "cache_read": 0,
+    "output": 12719
+  },
+  "codes": {},
+  "prompt_chars": [
+    1980,
+    4915,
+    5000,
+    5142
+  ],
+  "history": [
+    {
+      "round": 1,
+      "ok": false,
+      "codes": [],
+      "feedback": "test exact: output differs from the expected one (first difference at line 3)\nyour output (first 500 characters):\ncredit 50\ncredit 60\nvend A change 60\ncredit 100\ncredit 150\nvend C change 150\nstate idle credit 0"
+    },
+    {
+      "round": 2,
+      "ok": false,
+      "codes": [],
+      "feedback": "test exact: output differs from the expected one (first difference at line 3)\nyour output (first 500 characters):\ncredit 50\ncredit 60\nvend A change 60\ncredit 100\ncredit 150\nvend C change 150\nstate idle credit 0"
+    },
+    {
+      "round": 3,
+      "ok": false,
+      "codes": [],
+      "feedback": "test strikes: output differs from the expected one (first difference at line 12)\nyour output (first 500 characters):\nrejected\nrejected\nrejected\nlocked\nerror: locked\nerror: locked\nerror: locked\nstate locked credit 0\nunlocked\nrejected\nstate idle credit 0\ncredit 10\ncredit 20\nrejected\nstate active credit 20"
+    },
+    {
+      "round": 4,
+      "ok": true,
+      "codes": [],
+      "feedback": null
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "lang": "dif",
+  "model": "sonnet",
+  "task": "wordcount",
+  "dry_run": false,
+  "rounds": 1,
+  "pass1": true,
+  "pass5": true,
+  "tokens": {
+    "input": 2,
+    "cache_creation": 10286,
+    "cache_read": 0,
+    "output": 1306
+  },
+  "codes": {},
+  "prompt_chars": [
+    22148
+  ],
+  "history": [
+    {
+      "round": 1,
+      "ok": true,
+      "codes": [],
+      "feedback": null
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "lang": "dif",
+  "model": "haiku",
+  "task": "cinema",
+  "dry_run": false,
+  "rounds": 1,
+  "pass1": true,
+  "pass5": true,
+  "tokens": {
+    "input": 2,
+    "cache_creation": 10833,
+    "cache_read": 0,
+    "output": 9009
+  },
+  "codes": {},
+  "prompt_chars": [
+    23404
+  ],
+  "history": [
+    {
+      "round": 1,
+      "ok": true,
+      "codes": [],
+      "feedback": null
+    }
+  ]
+}

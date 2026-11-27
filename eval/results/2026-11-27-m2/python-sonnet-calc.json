@@ -1,0 +1,27 @@
+{
+  "lang": "python",
+  "model": "sonnet",
+  "task": "calc",
+  "dry_run": false,
+  "rounds": 1,
+  "pass1": true,
+  "pass5": true,
+  "tokens": {
+    "input": 2,
+    "cache_creation": 1170,
+    "cache_read": 0,
+    "output": 1666
+  },
+  "codes": {},
+  "prompt_chars": [
+    1596
+  ],
+  "history": [
+    {
+      "round": 1,
+      "ok": true,
+      "codes": [],
+      "feedback": null
+    }
+  ]
+}
