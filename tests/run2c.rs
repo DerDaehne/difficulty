@@ -17,10 +17,8 @@ fn work(name: &str) -> PathBuf {
 
 /// Every build gets its own directory, so two tests may use the same name.
 fn build(name: &str, src: &str) -> (PathBuf, PathBuf) {
-    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let k = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let c = dif::compile("main.dif", src.as_bytes()).unwrap_or_else(|d| panic!("{d:#?}"));
-    let dir = work(&format!("{name}-{k}"));
+    let dir = work(name);
     let (c_file, exe) = (dir.join("main.c"), dir.join("main"));
     std::fs::write(&c_file, c).unwrap();
     let san: &[&str] = if std::env::var_os("DIF_SAN").is_some() {
