@@ -171,22 +171,20 @@ impl<'a> Checker<'a> {
     /// A written type (`T`, `?T`, `T!E`, `[]T`, `[N]T`, `map[K]V`, R2); `ret` allows
     /// `void` as `T` or `E`.
     pub(super) fn ty(&mut self, t: &TypeRef, ret: bool) -> Ty {
-        self.ty_with(t, ret, false)
+        self.ty_with(t, ret)
     }
 
-    /// A parameter type: a function type `R(T1, mut T2)` is allowed here only (R26).
+    /// A parameter type; a function type `R(T1, mut T2)` is a type like any other (R26).
     pub(super) fn param_ty(&mut self, t: &TypeRef) -> Ty {
-        self.ty_with(t, false, true)
+        self.ty_with(t, false)
     }
 
-    fn ty_with(&mut self, t: &TypeRef, ret: bool, fn_ok: bool) -> Ty {
+    fn ty_with(&mut self, t: &TypeRef, ret: bool) -> Ty {
         if t.name == "?" {
             return Ty::Err;
         }
         let mut s = t.name.as_str();
-        self.fn_ok = fn_ok;
         let r = self.ty_top(&mut s, t.pos, ret, true);
-        self.fn_ok = false;
         if self.is_2c(r) {
             self.uses_2c = true;
         }
@@ -200,8 +198,16 @@ impl<'a> Checker<'a> {
         }
         // `void(…)` is a function type: `void` is fine there, and only there
         let ret0 = ret;
-        let ret = ret || (top && self.fn_ok);
-        let mut ty = self.ty_base(s, pos, ret);
+        let ret = ret || top;
+        let mut ty = if opt && s.starts_with('(') {
+            // `?(void())`: an optional function (the `?` of `?void()` would be the result's)
+            *s = &s[1..];
+            let t = self.ty_top(s, pos, false, true);
+            *s = s.strip_prefix(')').unwrap_or(s);
+            t
+        } else {
+            self.ty_base(s, pos, ret)
+        };
         if opt {
             ty = self.opt_of(ty, pos);
         }
@@ -212,26 +218,26 @@ impl<'a> Checker<'a> {
         }
         if s.starts_with('(') {
             *s = &s[1..];
-            let allowed = top && self.fn_ok;
             let mut ps = Vec::new();
             while !s.is_empty() && !s.starts_with(')') {
                 let m = s.strip_prefix("mut ");
                 if let Some(r) = m {
                     *s = r;
                 }
-                let t = self.ty_top(s, pos, false, false);
+                let t = self.ty_top(s, pos, false, true);
                 ps.push((t, m.is_some()));
                 *s = s.strip_prefix(',').unwrap_or(s);
             }
             *s = s.strip_prefix(')').unwrap_or(s);
-            if !allowed {
-                let msg = "a function type is only allowed for a parameter";
-                self.err("R26.function_type_place", pos, msg, None);
-                return Ty::Err;
-            }
             return self.func_ty(ty, ps);
         }
-        if ty == Ty::Void && !ret0 {
+        let void_inside = match ty {
+            Ty::Res(i) => {
+                self.ress[i as usize].0 == Ty::Void || self.ress[i as usize].1 == Ty::Void
+            }
+            t => t == Ty::Void,
+        };
+        if void_inside && !ret0 {
             self.err(
                 "R8.void_not_type",
                 pos,
@@ -255,7 +261,7 @@ impl<'a> Checker<'a> {
     fn ty_elem(&mut self, s: &mut &str, pos: Pos) -> Ty {
         if let Some(r) = s.strip_prefix('(') {
             *s = r;
-            let t = self.ty_top(s, pos, false, false);
+            let t = self.ty_top(s, pos, false, true);
             *s = s.strip_prefix(')').unwrap_or(s);
             return t;
         }

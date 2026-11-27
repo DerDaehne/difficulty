@@ -1,6 +1,0 @@
-// expect: error[R26] 3:5
-struct S {
-    int(int) cb
-}
-void main() {
-}

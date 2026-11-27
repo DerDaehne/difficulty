@@ -644,6 +644,45 @@ DIF_FN uint64_t dif_hash_bytes(const char *p, int64_t n) {
     return dif_hash_u64(((h ^ a) * 0xff51afd7ed558ccdULL) ^ b);
 }
 
+// Function values (R26): a code pointer and a counted environment. The environment holds
+// copies of the values a literal captured; a named function has an environment without
+// values that is never freed (its count is 0 and stays). A copy of the value counts up, a
+// release counts down and
+// frees the captured values at zero. Equal: the same code and equal captured values.
+typedef struct dif_env dif_env;
+struct dif_env {
+    int64_t rc;
+    const char *text;                              // `fn@main.dif:12:5` or the name
+    bool (*eq)(const dif_env *, const dif_env *);  // NULL: nothing captured
+    uint64_t (*hash)(const dif_env *);             // NULL: nothing captured
+    void (*drop)(dif_env *);                       // releases the captured values
+};
+DIF_FN dif_env *dif_env_inc(dif_env *e) {
+    if (e && e->rc > 0) ++e->rc;
+    return e;
+}
+// not inlined or specialised: the compiler cannot see that a count of 0 (a named function)
+// never gets here (GCC would warn about `free` on a static)
+#if defined(__clang__)
+#define DIF_NOIPA __attribute__((noinline, unused))
+#else
+#define DIF_NOIPA __attribute__((noipa, unused))
+#endif
+static DIF_NOIPA void dif_env_free(dif_env *e) {
+    if (e->drop) e->drop(e);
+    free(e);
+}
+DIF_FN void dif_env_dec(dif_env *e) {
+    if (e && e->rc > 0 && --e->rc == 0) dif_env_free(e);
+}
+DIF_FN bool dif_env_eq(const dif_env *a, const dif_env *b) {
+    return a == b || (a->eq && a->eq(a, b));
+}
+DIF_FN uint64_t dif_env_hash(const dif_env *e) {
+    uint64_t h = dif_hash_bytes(e->text, (int64_t)strlen(e->text));
+    return e->hash ? dif_hash_mix(h, e->hash(e)) : h;
+}
+
 // Numbers, bool and str. `dif_ty_int` is int (int64_t), then i8 ... u64, bool; f64 and
 // rune follow in their sections.
 #define DIF_NUM_TY(N, T, SIGNED, PUTFN)                                                             \

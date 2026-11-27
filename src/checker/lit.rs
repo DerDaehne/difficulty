@@ -31,8 +31,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// A function name used in another way than a call or an argument (R26).
-    pub(super) fn only_called(&mut self, name: &str, pos: Pos) {
+    /// A method used in another way than a call: methods are not values (R26).
+    pub(super) fn method_not_value(&mut self, name: &str, pos: Pos) {
         let msg = format!("`{name}` is a function and can only be called or passed as an argument");
         self.err("R26.function_not_value", pos, msg, None);
     }
@@ -109,7 +109,7 @@ impl<'a> Checker<'a> {
         r
     }
 
-    /// `f(x)` for a function-typed parameter `f`.
+    /// `f(x)` for a function value `f`: a parameter, a variable, a field or an element (R26).
     pub(super) fn call_param(
         &mut self,
         e: &'a Expr,
@@ -118,7 +118,12 @@ impl<'a> Checker<'a> {
         fi: u32,
         args: &'a [Expr],
     ) -> (Ty, Val) {
-        self.capture(name, Ty::Func(fi));
+        // a parameter: its caller decides what it does; any other stored value has an effect
+        let stored = !matches!(&f.kind, ExprKind::Ident(n)
+            if self.local(n).is_some_and(|l| l.slot.is_some()));
+        if matches!(f.kind, ExprKind::Ident(_)) {
+            self.capture(name, Ty::Func(fi));
+        }
         self.exprs.insert((f.pos.offset, f.end), Ty::Func(fi));
         let (ret, ps) = self.ftys[fi as usize].clone();
         let params = (ps.iter().enumerate())
@@ -126,12 +131,42 @@ impl<'a> Checker<'a> {
             .collect();
         let ok = self.args_to(e, name, params, None, args, Vec::new());
         self.last_callee = None;
-        self.last_effect = Some(ret == Ty::Void); // the caller decides what it does
+        self.last_effect = Some(ret == Ty::Void);
+        if stored {
+            if let Some(id) = self.cur {
+                self.facts[id].prints = true;
+            }
+        }
         if ok {
             (ret, Val::Runtime)
         } else {
             (Ty::Err, Val::Runtime)
         }
+    }
+
+    /// The function value that the name of a function stands for (R26).
+    pub(super) fn named_fn_value(&mut self, name: &str) -> Option<Ty> {
+        let &id = self.funcs.get(name)?;
+        if let Some(cur) = self.cur {
+            self.facts[cur].calls.push(id);
+        }
+        let ps = (self.fns[id].params.iter())
+            .map(|p| (p.ty, p.is_mut))
+            .collect();
+        let r = self.fns[id].ret;
+        Some(self.func_ty(r, ps))
+    }
+
+    /// A variant constructor `E.V(…)` as a function value (R26).
+    pub(super) fn ctor_value(&mut self, base: &Expr, m: &str) -> Option<Ty> {
+        let eid = self.enum_of(base)?;
+        let fields = match &self.types[eid as usize].kind {
+            Kind::Enum(vs) => vs.iter().find(|v| v.name == m).map(|v| v.fields.clone()),
+            Kind::Struct(_) => None,
+        };
+        let ps = fields.filter(|f| !f.is_empty())?;
+        let ps = ps.iter().map(|f| (f.0, false)).collect();
+        Some(self.func_ty(Ty::Named(eid), ps))
     }
 
     fn is_type_name(&self, n: &str) -> bool {
@@ -140,7 +175,8 @@ impl<'a> Checker<'a> {
             || Num::from_name(n).is_some()
     }
 
-    /// A literal where no argument is: an error, except `Name() { … }` of a function (R26).
+    /// A literal that is not an argument: a value of its function type; `Name() { … }` of a
+    /// function is a call with a block (R26).
     pub(super) fn func_lit_value(&mut self, e: &'a Expr, l: &'a FuncLit) -> (Ty, Val) {
         if let Some(alt) = &l.alt {
             if !self.is_type_name(&l.ret.name) {
@@ -148,10 +184,8 @@ impl<'a> Checker<'a> {
                 return self.expr(alt);
             }
         }
-        let msg = "a function literal can only be an argument of a call";
-        let hint = "pass it directly as an argument of a call".to_string();
-        self.err("R26.literal_outside_call", e.pos, msg, Some(hint));
-        (Ty::Err, Val::Runtime)
+        let t = self.lit_body(e, l, None);
+        (t, Val::Runtime)
     }
 
     /// An argument for a parameter of type `pt`: a literal, a block, the name of a function,
@@ -196,16 +230,7 @@ impl<'a> Checker<'a> {
                     matches!(t, Ty::Func(_)).then_some(t)
                 } else if let Some(&id) = self.funcs.get(n.as_str()) {
                     effect = self.derived.as_ref().is_some_and(|d| d[id].effect);
-                    if let Some(cur) = self.cur {
-                        self.facts[cur].calls.push(id);
-                    }
-                    let ps = self.fns[id]
-                        .params
-                        .iter()
-                        .map(|p| (p.ty, p.is_mut))
-                        .collect();
-                    let r = self.fns[id].ret;
-                    Some(self.func_ty(r, ps))
+                    self.named_fn_value(n)
                 } else {
                     None
                 };
@@ -219,27 +244,20 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            ExprKind::Field(base, m)
-                if matches!(pt, Ty::Func(_)) && self.enum_of(base).is_some() =>
-            {
-                let eid = self.enum_of(base).unwrap_or(0);
-                let fields = match &self.types[eid as usize].kind {
-                    Kind::Enum(vs) => vs.iter().find(|v| v.name == m).map(|v| v.fields.clone()),
-                    Kind::Struct(_) => None,
-                };
-                match fields.filter(|f| !f.is_empty()) {
-                    Some(fs) => {
-                        let ps = fs.iter().map(|f| (f.0, false)).collect();
-                        let t = self.func_ty(Ty::Named(eid), ps);
+            ExprKind::Field(base, m) if matches!(pt, Ty::Func(_)) => {
+                match self.ctor_value(base, m) {
+                    Some(t) => {
                         self.exprs.insert((a.pos.offset, a.end), t);
                         self.expect(pt, t, a);
                     }
                     None => {
                         self.at_place(pt, a, None);
+                        effect = true; // a stored value: the caller decides
                     }
                 }
             }
             _ => {
+                effect = matches!(pt, Ty::Func(_)); // a stored value: the caller decides
                 self.at_place(pt, a, None);
             }
         }

@@ -101,7 +101,7 @@ impl<'a> Emitter<'a> {
             p.extend(self.fn_params(ps));
             let _ = writeln!(
                 c,
-                "typedef struct {{ {} (*fn)({}); void *env; }} dfn_{i};",
+                "typedef struct {{ {} (*fn)({}); dif_env *env; }} dfn_{i};",
                 self.c_ty(*r),
                 p.join(", ")
             );
@@ -109,8 +109,19 @@ impl<'a> Emitter<'a> {
         c
     }
 
-    /// A literal or a block as a value `{fn, env}`: the captured values go into the
-    /// environment temporary here, in the order of the arguments (R26).
+    /// The environment of a function without captured values: shared, never freed.
+    fn static_env(&mut self, name: &str, text: &str) -> String {
+        let env = format!("dsenv_{name}");
+        let _ = writeln!(
+            self.lit_protos,
+            "static dif_env {env} = {{0, {}, NULL, NULL, NULL}};",
+            super::c_string(text.as_bytes())
+        );
+        format!("&{env}")
+    }
+
+    /// A literal or a block as a value `{fn, env}`: the captured values are copied into a
+    /// counted environment here, in the order of the captures (R26).
     pub(super) fn func_lit(&mut self, e: &'a Expr, l: &'a FuncLit) -> String {
         let span = (e.pos.offset, e.end);
         if let (Some(alt), true) = (&l.alt, self.info.lit_calls.contains(&span)) {
@@ -121,30 +132,49 @@ impl<'a> Emitter<'a> {
         let id = self.uid;
         self.uid += 1;
         let name = format!("dl{id}");
-        let mut fill = String::new();
-        let mut env = "NULL".to_string();
-        if !caps.is_empty() {
-            let t = self.temp(format!("struct {name}_env"), "e");
-            for (n, ty) in &caps {
-                let src = self.name_ref(n);
-                let v = if self.managed(*ty) {
-                    let m = self.mtemp(*ty);
-                    let _ = write!(
-                        fill,
-                        "{}, {m} = {}, ",
-                        self.drop_e(*ty, &m),
-                        self.copy(*ty, &src)
-                    );
-                    m
-                } else {
-                    src
-                };
-                let _ = write!(fill, "{t}.f_{n} = {v}, ");
-            }
-            env = format!("&{t}");
-        }
+        let text = format!("fn@{}:{}:{}", self.file_raw, e.pos.line, e.pos.col);
         self.lit_fn(&name, l, fty, &caps);
-        format!("({fill}({}){{{name}, {env}}})", self.c_ty(fty))
+        let ct = self.c_ty(fty);
+        if caps.is_empty() {
+            let env = self.static_env(&name, &text);
+            return format!("(({ct}){{{name}, {env}}})");
+        }
+        self.env_helpers(&name, &text, &caps);
+        let mut fill = String::new();
+        for (n, ty) in &caps {
+            let src = self.name_ref(n);
+            let v = self.copy(*ty, &src);
+            let _ = write!(fill, "en{id}->f_{n} = {v}; ");
+        }
+        format!(
+            "({{ struct {name}_env *en{id} = dif_alloc(sizeof *en{id}); en{id}->h = (dif_env){{1, {}, {name}_eq, {name}_hash, {name}_drop}}; {fill}({ct}){{{name}, &en{id}->h}}; }})",
+            super::c_string(text.as_bytes())
+        )
+    }
+
+    /// Release, equality and hash of the captured values of a literal (R28).
+    fn env_helpers(&mut self, name: &str, _text: &str, caps: &[(String, Ty)]) {
+        let st = format!("struct {name}_env");
+        let mut drop = String::new();
+        let mut eq = Vec::new();
+        let mut hash = String::new();
+        for (n, ty) in caps {
+            if self.managed(*ty) {
+                let _ = write!(drop, " {};", self.drop_e(*ty, &format!("s->f_{n}")));
+            }
+            eq.push(self.eq(*ty, &format!("x->f_{n}"), &format!("y->f_{n}")));
+            let d = self.dty(*ty);
+            let _ = write!(hash, " h = dif_hash_mix(h, {d}.hash(&{d}, &x->f_{n}));");
+        }
+        let protos = format!(
+            "static void {name}_drop(dif_env *e_);\nstatic bool {name}_eq(const dif_env *a, const dif_env *b);\nstatic uint64_t {name}_hash(const dif_env *e_);\n"
+        );
+        self.lit_protos.push_str(&protos);
+        let _ = writeln!(
+            self.lit_defs,
+            "static void {name}_drop(dif_env *e_) {{ {st} *s = ({st} *)e_; (void)s;{drop} }}\nstatic bool {name}_eq(const dif_env *a, const dif_env *b) {{ const {st} *x = (const {st} *)a; const {st} *y = (const {st} *)b; (void)x; (void)y; return {}; }}\nstatic uint64_t {name}_hash(const dif_env *e_) {{ const {st} *x = (const {st} *)e_; uint64_t h = 5; (void)x;{hash} return h; }}",
+            eq.join(" && ")
+        );
     }
 
     /// The C function of a literal, and the struct of its environment.
@@ -156,7 +186,10 @@ impl<'a> Emitter<'a> {
                 .iter()
                 .map(|(n, t)| format!(" {} f_{n};", self.c_ty(*t)))
                 .collect();
-            let _ = writeln!(self.lit_protos, "struct {name}_env {{{fields} }};");
+            let _ = writeln!(
+                self.lit_protos,
+                "struct {name}_env {{ dif_env h;{fields} }};"
+            );
         }
         let in_test = self.in_test;
         let saved = self.save_fn();
@@ -220,8 +253,10 @@ impl<'a> Emitter<'a> {
             );
             let _ = writeln!(self.lit_protos, "{header};");
             let _ = writeln!(self.lit_defs, "{header} {{ (void)e_; {body} }}");
+            self.static_env(&name, &f.name);
         }
-        format!("(({}){{{name}, NULL}})", self.c_ty(fty))
+        let env = format!("&dsenv_{name}");
+        format!("(({}){{{name}, {env}}})", self.c_ty(fty))
     }
 
     /// A variant constructor `E.V` as a value.
@@ -240,20 +275,25 @@ impl<'a> Emitter<'a> {
                 .collect();
             let ct = self.c_ty(Ty::Named(eid));
             let header = format!("static {ct} {name}(void *e_{params})");
+            let shown = self.tname(eid).rsplit('.').next().unwrap_or_default();
+            self.static_env(&name, &format!("{shown}.{variant}"));
             let _ = writeln!(self.lit_protos, "{header};");
             let _ = writeln!(
                 self.lit_defs,
                 "{header} {{ (void)e_; {ct} r = {{0}}; r.tag = {k};{sets} return r; }}"
             );
         }
-        format!("(({}){{{name}, NULL}})", self.c_ty(fty))
+        let env = format!("&dsenv_{name}");
+        format!("(({}){{{name}, {env}}})", self.c_ty(fty))
     }
 
-    /// `f(args)` for a function-typed parameter or captured value `f`.
+    /// `f(args)` for a function value `f`: a parameter or captured value, a field, an
+    /// element. Anything but a name is copied into a temporary first, so that the call
+    /// keeps the code alive however its arguments change the place.
     pub(super) fn call_value(
         &mut self,
         e: &'a Expr,
-        name: &str,
+        f: &'a Expr,
         fi: u32,
         args: &'a [Expr],
     ) -> String {
@@ -266,13 +306,23 @@ impl<'a> Emitter<'a> {
                 _ => Arg::Val(a, *t),
             })
             .collect();
-        let f = self.name_ref(name);
-        self.apply_with(
-            &format!("{f}.fn"),
-            Some(format!("{f}.env")),
+        let (pre, fv) = match &f.kind {
+            ExprKind::Ident(n) => (String::new(), self.name_ref(n)),
+            _ => {
+                let t = self.ty(f);
+                let v = self.bor(f);
+                let m = self.mtemp(t);
+                let pre = format!("{}, {m} = {}, ", self.drop_e(t, &m), self.copy(t, &v));
+                (pre, m)
+            }
+        };
+        let call = self.apply_with(
+            &format!("{fv}.fn"),
+            Some(format!("{fv}.env")),
             &items,
             (e.pos.line as usize, e.pos.col as usize),
-        )
+        );
+        Self::with_pre(pre, call)
     }
 
     /// The finished program: the declarations of literals and wrappers where the marker

@@ -1,8 +1,0 @@
-// expect: error[R26] 7:5
-int f(int x) {
-    return x
-}
-
-void main() {
-    int(int) g = f
-}

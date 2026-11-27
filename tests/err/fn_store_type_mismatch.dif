@@ -1,0 +1,5 @@
+// expect: error[R8] 3:21
+void main() {
+    bool(int) big = int(int x) { return x }
+    print(big(1))
+}

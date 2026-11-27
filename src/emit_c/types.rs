@@ -54,6 +54,7 @@ impl<'a> Emitter<'a> {
             Ty::List(i) => format!("__l{i}"),
             Ty::Arr(i) => format!("__a{i}"),
             Ty::Map(i) => format!("__m{i}"),
+            Ty::Func(i) => format!("__f{i}"),
             _ => String::new(),
         }
     }
@@ -81,13 +82,13 @@ impl<'a> Emitter<'a> {
 
     /// Does the type have helpers generated for it (struct, enum, `?T`, `T!E`)?
     pub(super) fn composite(t: Ty) -> bool {
-        matches!(t, Ty::Named(_) | Ty::Opt(_) | Ty::Res(_))
+        matches!(t, Ty::Named(_) | Ty::Opt(_) | Ty::Res(_) | Ty::Func(_))
     }
 
     /// Does a value of the type hold counted memory (text, list, map)?
     pub(super) fn managed(&self, t: Ty) -> bool {
         match t {
-            Ty::Str | Ty::List(_) | Ty::Map(_) => true,
+            Ty::Str | Ty::List(_) | Ty::Map(_) | Ty::Func(_) => true,
             Ty::Opt(i) => self.managed(self.info.opts[i as usize]),
             Ty::Res(i) => {
                 let (v, e) = self.info.ress[i as usize];
@@ -150,6 +151,10 @@ impl<'a> Emitter<'a> {
             Ty::Str => format!("dif_str_inc({v})"),
             Ty::List(_) => format!("dif_list_inc((dif_list *)({v}))"),
             Ty::Map(_) => format!("dif_map_inc((dif_map *)({v}))"),
+            Ty::Func(_) => format!(
+                "({{ {} c_ = ({v}); (void)dif_env_inc(c_.env); c_; }})",
+                self.c_ty(t)
+            ),
             t if self.managed(t) => format!(
                 "({{ {} c_ = ({v}); dif_inc(&{}, &c_); c_; }})",
                 self.c_ty(t),
@@ -171,6 +176,7 @@ impl<'a> Emitter<'a> {
                 let (k, v) = self.info.maps[i as usize];
                 format!("dif_map_dec(&{}, &{}, {p})", self.dty(k), self.dty(v))
             }
+            Ty::Func(_) => format!("dif_env_dec(({p}).env)"),
             t => format!("dif_dec(&{}, &({p}))", self.dty(t)),
         }
     }
@@ -207,10 +213,10 @@ impl<'a> Emitter<'a> {
                 let _ = writeln!(c, "typedef struct {n} {n};");
             }
         }
+        c.push_str(&self.fn_type_defs());
         for t in self.universe() {
             self.type_def(t, &mut done, &mut c);
         }
-        c.push_str(&self.fn_type_defs());
         c
     }
 
@@ -224,6 +230,7 @@ impl<'a> Emitter<'a> {
             .chain((0..n.lists.len() as u32).map(Ty::List))
             .chain((0..n.arrs.len() as u32).map(Ty::Arr))
             .chain((0..n.maps.len() as u32).map(Ty::Map))
+            .chain((0..n.ftys.len() as u32).map(Ty::Func))
             .collect()
     }
 
@@ -434,6 +441,8 @@ impl<'a> Emitter<'a> {
                     let _ = write!(c, "    if ({p}->ok) {{\n{vs}    }} else {{\n{es}    }}\n");
                 }
             }
+            Ty::Func(_) if release => c.push_str(&format!("    dif_env_dec({p}->env);\n")),
+            Ty::Func(_) => c.push_str(&format!("    (void)dif_env_inc({p}->env);\n")),
             Ty::Named(id) => match &self.info.types[id as usize].body {
                 TypeBody::Struct(fs) => {
                     for (f, ft) in fs {
@@ -469,7 +478,7 @@ impl<'a> Emitter<'a> {
     /// `copy` of a value in a place: raises the count, discards the copy.
     fn copy_in_place(&self, t: Ty, place: &str) -> String {
         match t {
-            Ty::Str | Ty::List(_) | Ty::Map(_) => self.copy(t, place),
+            Ty::Str | Ty::List(_) | Ty::Map(_) | Ty::Func(_) => self.copy(t, place),
             t => format!("dif_inc(&{}, &({place}))", self.dty(t)),
         }
     }
@@ -504,6 +513,7 @@ impl<'a> Emitter<'a> {
                     h(e, "v->e")
                 );
             }
+            Ty::Func(_) => c.push_str("    h = dif_hash_mix(h, dif_env_hash(v->env));\n"),
             Ty::Named(id) => match &self.info.types[id as usize].body {
                 TypeBody::Struct(fs) => {
                     for (f, ft) in fs {
@@ -577,6 +587,13 @@ impl<'a> Emitter<'a> {
                     let _ = writeln!(text, "    {}", Self::lit("b", "err("));
                     let _ = writeln!(text, "    {}", self.put(e, "b", "v.e", true));
                     let _ = writeln!(text, "    {}", Self::lit("b", ")"));
+                }
+                Ty::Func(_) => {
+                    let _ = writeln!(
+                        c,
+                        "    return a.fn == b.fn && dif_env_eq(a.env, b.env);\n}}"
+                    );
+                    let _ = writeln!(text, "    dif_put_c(b, v.env->text);");
                 }
                 Ty::Named(id) => {
                     let d = &self.info.types[id as usize];

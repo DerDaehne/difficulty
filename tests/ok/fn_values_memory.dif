@@ -1,0 +1,113 @@
+struct Person {
+    str name
+    []str tags
+}
+
+enum Msg {
+    Text(str body)
+    Pair(str a, []int b)
+}
+
+struct Box {
+    int(int) f
+    ?(str(int)) g
+}
+
+str name_of(Person p) {
+    return p.name
+}
+
+int(int) scaled(int k) {
+    return int(int x) { return x * k }
+}
+
+int(int) chain(int(int) a, int(int) b) {
+    return int(int x) { return b(a(x)) }
+}
+
+
+void times(int n, void() body) {
+    for int i in range(n) {
+        body()
+    }
+}
+
+void bump(mut int x) {
+    x += 1
+}
+
+void main() {
+    // captured struct and enum with counted members
+    Person p = Person{name: "ann", tags: ["x", "y"]}
+    Msg m = Msg.Pair("a", [1, 2])
+    str() show = str() {
+        switch m {
+            case Msg.Text(str b):
+                return b
+            case Msg.Pair(str a, []int b):
+                return "{a}{b.len()}"
+        }
+    }
+    str() who = str() { return name_of(p) + p.tags.join(",") }
+    print(show())
+    print(who())
+
+    // many literals made and dropped in a loop
+    int total = 0
+    for int i in range(100) {
+        int(int) f = scaled(i)
+        total += f(2)
+    }
+    print(total)
+
+    // closures over closures
+    int(int) c = chain(scaled(2), chain(scaled(3), scaled(5)))
+    print(c(1))
+    int(int) c2 = c
+    int(int) c3 = chain(c, c2)
+    print(c3(1))
+    print(c == c2)
+
+    // lists and maps of closures, overwritten and removed
+    [](int(int)) none_list = []
+    [](int(int)) fs = []
+    for int i in range(5) {
+        fs.push(scaled(i))
+    }
+    fs[2] = scaled(50)
+    fs.remove(0)
+    print(fs[1](1))
+    [](int(int)) copy = fs
+    fs.push(scaled(9))
+    print(copy.len())
+    print(fs.len())
+    map[str](int(int)) table = {"a": scaled(1)}
+    table["b"] = scaled(2)
+    table.remove("a")
+    print((table["b"] ?? scaled(0))(21))
+    print(none_list.len())
+
+    // optional, result, struct field
+    Box bx = Box{f: scaled(4), g: none}
+    print(bx.f(2))
+    print(bx.g == none)
+    ?(str(int)) maybe = str(int n) { return "n{p.name}{n}" }
+    str(int) got = maybe ?? str(int n) { return "none" }
+    print(got(7))
+
+    // blocks, mut parameters, sort_by with a stored function
+    times(2) {
+        print(p.tags.len())
+    }
+    int n = 0
+    void(mut int) inc = bump
+    inc(mut n)
+    inc(mut n)
+    print(n)
+    []int xs = [3, 1, 2]
+    bool(int, int) less = bool(int a, int b) { return a < b }
+    xs.sort_by(less)
+    print(xs)
+    bool(int) big = bool(int x) { return x > p.tags.len() }
+    print(xs.filter(big))
+}

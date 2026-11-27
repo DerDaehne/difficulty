@@ -1,0 +1,5 @@
+// expect: error[R8] 4:11
+void main() {
+    int(int) f = int(int x) { return x }
+    print(f(1, 2))
+}

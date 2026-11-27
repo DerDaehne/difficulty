@@ -387,7 +387,7 @@ impl<'a> Emitter<'a> {
             }
             "contains" | "index_of" | "count" => items.push(Arg::Ref(&args[0])),
             "filter" | "map" | "sort_by" | "any" | "all" => {
-                items.push(Arg::Val(&args[0], self.ty(&args[0])));
+                items.push(Arg::Ref(&args[0]));
             }
             _ => items.extend(args.iter().map(|a| Arg::Val(a, Ty::Int))),
         }

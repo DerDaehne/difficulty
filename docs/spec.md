@@ -345,8 +345,6 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `R25.positional_default` | ja | `…` has a default and is passed by name |
 | `R26.block_not_accepted` |  | `…` cannot take a block: its last parameter has type … |
 | `R26.function_not_value` |  | `…` is a function and can only be called or passed as an argument |
-| `R26.function_type_place` |  | a function type is only allowed for a parameter |
-| `R26.literal_outside_call` |  | a function literal can only be an argument of a call |
 | `R28.sort_unordered` |  | `sort` needs an ordered element type, found … |
 | `R30.duplicate_key` |  | duplicate key … |
 | `R30.map_entry_change` |  | a map entry is changed by assigning it |
@@ -2629,32 +2627,31 @@ void main() {
 
 ### R26 — Funktionswerte und Blöcke
 
-**Regel.** Ein Funktionswert hat den Typ `R(T1, T2)` und wird geschrieben wie eine Funktion ohne Namen: `R(T1 a, T2 b) { … }`. Ein Literal steht nur direkt als Argument eines Aufrufs (nie in einer Variable, einem struct, einer Liste, in `spawn` oder als Typargument) und lebt nur während dieses Aufrufs. Beim Auswerten nimmt es eine Momentaufnahme (eine Kopie) jedes Namens ringsum, den es benutzt, und ändert nie etwas ringsum. Ein Literal ohne Parameter darf als Block `{ … }` direkt hinter der schließenden Klammer stehen; `return` und `try` darin beenden den Block. Benannte Funktionen und Varianten-Konstruktoren haben keine Umgebung; ab M3 sind sie gewöhnliche Werte, die man speichern darf, in M2 gehen sie nur als Argument an einen Funktionstyp; Literale kommen danach auch als Werte (unten, „Ab M3“). Ändert ein Funktionswert einen Parameter, steht `mut` in seinem Typ.
+**Regel.** Ein Funktionswert hat den Typ `R(T1, T2)` und wird geschrieben wie eine Funktion ohne Namen: `R(T1 a, T2 b) { … }`. Ein Literal ist ein Wert wie jeder andere: es steht als Argument, in einer Variable, einem Feld, einem Element einer Liste, eines Arrays oder einer Map und als Rückgabewert, und lebt, solange ein Wert es hält. Beim Auswerten nimmt es eine Momentaufnahme (eine Kopie) jedes Namens ringsum, den es benutzt, und ändert nie etwas ringsum. Ein Literal ohne Parameter darf als Block `{ … }` direkt hinter der schließenden Klammer stehen; `return` und `try` darin beenden den Block. Benannte Funktionen und Varianten-Konstruktoren haben keine Umgebung und sind ebenso gewöhnliche Werte (unten, „Funktionswerte speichern“). Ändert ein Funktionswert einen Parameter, steht `mut` in seinem Typ.
 
 ```ebnf
-func_type   = type "(" [ ftype_param { "," ftype_param } [ "," ] ] ")" ;   (* nur als Typ eines Parameters, R2 *)
+func_type   = type "(" [ ftype_param { "," ftype_param } [ "," ] ] ")" ;   (* überall, wo ein Typ steht, R2 *)
 ftype_param = [ "mut" ] type ;
-func_lit    = type "(" [ lit_param { "," lit_param } [ "," ] ] ")" block ;   (* nur als arg, §2 *)
+func_lit    = type "(" [ lit_param { "," lit_param } [ "," ] ] ")" block ;   (* überall, wo ein Ausdruck steht, §2 *)
 lit_param   = [ "mut" ] type IDENT ;
 ```
 
 **Grammatik:** `func_type`, `func_lit` hier; `param` (R2), `arg` und das Block-Argument am Ende von `postfix` (§2), `block` (R3).
 
-Teil 2d legt fest, was zu M2 gehört: Literale und Blöcke an Aufrufen, Funktionstypen als Typ eines Parameters, die Methoden aus §4.7. Speichern von Funktionen in Variablen, Feldern und Listen und eigene Generics (R27) folgen mit M3; Funktionstypen in `extern`-Deklarationen und C-Callbacks (R24) mit einer späteren Scheibe. Bis dahin passt an einen Funktionstyp ein Literal, eine benannte Funktion oder ein Varianten-Konstruktor.
+Teil 2d legt fest, was zu M2 gehört: Literale und Blöcke an Aufrufen, Funktionstypen als Typ eines Parameters, die Methoden aus §4.7. Teil 3 hebt die Einschränkung auf: Funktionen in Variablen, Feldern und Listen (unten, „Funktionswerte speichern“); eigene Generics (R27) sind eine eigene Regel; Funktionstypen in `extern`-Deklarationen und C-Callbacks (R24) folgen mit einer späteren Scheibe. An einen Funktionstyp passt ein Literal, eine benannte Funktion, ein Varianten-Konstruktor oder jeder Wert dieses Typs.
 
 **Literal.**
 
-- Ein Literal hat den Rückgabetyp vorn (R2), dann Parameter wie eine Funktion (ohne Funktionstypen unter ihnen) und einen Rumpf: `bool(Person p) { return p.age >= 18 }`. Es ist kein Wert, den man ablegen kann: es steht nur als Argument. **Erkennung.** Ein Argument ist ein Literal, wenn es mit `X (` beginnt, direkt danach `mut` oder ein `type` mit Namen (`int x`, `mut int x`) steht oder die Klammer leer ist, und hinter der `)` ein `{` folgt. „Dieselbe Zeile“ heißt dabei die Zeile im Quelltext: in Klammern erzeugt der Lexer kein Zeilenende (§1.3), die Regel prüft die physische Zeile. Die Form entscheidet so: `mut` oder `type Name` nach der `(` ist nur bei einem Literal möglich (ein Argument ist ein Ausdruck, `int x` ist keiner); beginnt `X` mit `?`, `[` oder `map[` oder ist ein eingebauter Typname, ist es immer ein Literal. Nur `Name() { … }` mit einem Namen und leerer Klammer kann beides sein, ein Literal ohne Parameter mit dem Rückgabetyp `Name` oder ein Aufruf von `Name` mit Block-Argument. Das entscheidet der Checker über den Namen: benennt er einen Typ (`struct`, `enum`), ist es ein Literal, benennt er eine Funktion oder Methode, ein Aufruf mit Block. Ein Name ist nie beides (R4). `Name(x) { … }` mit Ausdrücken ist immer ein Aufruf mit Block, `T(x)` ohne `{` die Umwandlung (R31).
+- Ein Literal hat den Rückgabetyp vorn (R2), dann Parameter wie eine Funktion (ohne Funktionstypen unter ihnen) und einen Rumpf: `bool(Person p) { return p.age >= 18 }`. **Erkennung.** Ein Ausdruck ist ein Literal, wenn es mit `X (` beginnt, direkt danach `mut` oder ein `type` mit Namen (`int x`, `mut int x`) steht oder die Klammer leer ist, und hinter der `)` ein `{` folgt. „Dieselbe Zeile“ heißt dabei die Zeile im Quelltext: in Klammern erzeugt der Lexer kein Zeilenende (§1.3), die Regel prüft die physische Zeile. Die Form entscheidet so: `mut` oder `type Name` nach der `(` ist nur bei einem Literal möglich (ein Ausdruck, `int x` ist keiner); beginnt `X` mit `?`, `[` oder `map[` oder ist ein eingebauter Typname, ist es immer ein Literal. Nur `Name() { … }` mit einem Namen und leerer Klammer kann beides sein, ein Literal ohne Parameter mit dem Rückgabetyp `Name` oder ein Aufruf von `Name` mit Block-Argument. Das entscheidet der Checker über den Namen: benennt er einen Typ (`struct`, `enum`), ist es ein Literal, benennt er eine Funktion oder Methode, ein Aufruf mit Block. Ein Name ist nie beides (R4). `Name(x) { … }` mit Ausdrücken ist immer ein Aufruf mit Block, `T(x)` ohne `{` die Umwandlung (R31).
 - Sein Typ ist `R(T1, T2)`; er muss dem Funktionstyp des Parameters genau gleichen: Rückgabetyp, Parametertypen und `mut` (Namen zählen nicht). Sonst `R8` am Literal, Meldung `` expected bool(int), found int(int) ``, ohne Hinweis. In Meldungen stehen Funktionstypen so: `bool(int)`, `void(mut App, Msg)`, `int!ParseErr(int)`.
-- **Außerhalb eines Arguments** ist ein Literal `R26` an seinem ersten Zeichen, Meldung `` a function literal can only be an argument of a call ``, Hinweis `pass it directly as an argument of a call`; sein Rumpf wird dann nicht weiter geprüft. Das gilt für jede Stelle: Initialwert, Zuweisung, `return`, Operand, Listen- oder Struct-Literal, `_ =`.
 - Der Rumpf ist ein eigener Funktionsrumpf (R3, R8): `return` verlässt nur das Literal und liefert einen `R`; ein Literal mit Rückgabetyp endet auf jedem Weg mit `return` und Wert, sonst `R8` am ersten Zeichen des Literals, Meldung `` the literal does not return a value on every path ``, Hinweis `end it with return, e.g. return false` (wie bei Funktionen mit `0`, `false`, `""` oder `…`). `try` gilt für das Literal wie für eine Funktion (R12): es ist `R12`, wenn der Rückgabetyp `R` kein `T!E` oder `?T` ist; ein Fehler beendet nur das Literal, nicht die Funktion ringsum. `break` und `continue` sehen keine Schleife außerhalb des Literals: sie sind dort `R11` (`` `break` outside a loop ``), auch wenn das Literal in einer Schleife steht.
 - **Namen.** Parameter und Variablen des Literals folgen R4 ohne Ausnahme: ein Name, der an dieser Stelle schon gilt (auch ein Parameter der umgebenden Funktion oder eines äußeren Literals), wird nicht noch einmal deklariert. Literale dürfen in Literalen stehen; ein inneres sieht die Namen aller äußeren.
 
 **Funktionstypen als Parameter.**
 
-- Ein Funktionstyp `R(T1, mut T2)` steht nur als Typ eines Parameters einer Funktion oder Methode: `void times(int n, void() body)`. Überall sonst (Variable, Feld, Rückgabetyp, Elementtyp, Typ eines Literal-Parameters) ist er `R26` am Typ, Meldung `` a function type is only allowed for a parameter ``, ohne Hinweis. Ein `?` oder `!E` vor der Klammer gehört zum Rückgabetyp `R`; `void` darf der Rückgabetyp sein.
-- Im Rumpf ist ein solcher Parameter ein Name, der nur aufgerufen oder als Argument weitergereicht wird: `body()`, `f(x)`, `each(xs, f)`. Aufruf und Argumente folgen den Regeln für Funktionen (R6, R8): `` `f` takes 1 argument, found 2 ``, `mut` am Argument genau dort, wo der Typ es verlangt; ein `mut` im Funktionstyp zählt für R6 als Änderung des Orts, auch wenn kein Rumpf zu sehen ist. Jede andere Benutzung (zuweisen, vergleichen, zurückgeben, in ein struct legen) ist `R26` am Namen, Meldung `` `f` is a function and can only be called or passed as an argument ``, ohne Hinweis. Darum kann in M2 nichts über das Ende des Aufrufs hinaus leben: ein Literal wird nie gespeichert oder zurückgegeben.
-- **Benannte Funktionen und Konstruktoren.** An der Stelle eines Funktionstyps darf statt eines Literals der Name einer Funktion oder ein Varianten-Konstruktor stehen (`xs.filter(is_even)`, `xs.map(Shape.Box)`); sein Typ ist der der Deklaration (`bool(int)`, `Shape(int)`, mit `mut` wie dort) und muss genau passen (`R8` wie beim Literal). Für die Wirkung (R13) zählt die übergebene Funktion wie ein Literal. Eine Funktion ist sonst kein Wert: jede andere Benutzung ihres Namens als der Aufruf (`_ = is_even`, Zuweisung, `return`, Feld) ist `R26` am Namen, mit derselben Meldung wie bei einem Funktionsparameter, `` `is_even` is a function and can only be called or passed as an argument ``, ohne Hinweis. Speichern in Variablen, Feldern und Listen kommt mit M3 (unten, „Ab M3“).
+- Ein Funktionstyp `R(T1, mut T2)` steht, wo ein Typ steht: Parameter (`void times(int n, void() body)`), Variable, Feld, Rückgabetyp, Elementtyp (Teil 3, unten). Ein `?` oder `!E` vor der Klammer gehört zum Rückgabetyp `R`; `void` darf der Rückgabetyp sein.
+- Im Rumpf ruft man einen solchen Parameter auf oder gibt ihn weiter: `body()`, `f(x)`, `each(xs, f)`. Aufruf und Argumente folgen den Regeln für Funktionen (R6, R8): `` `f` takes 1 argument, found 2 ``, `mut` am Argument genau dort, wo der Typ es verlangt; ein `mut` im Funktionstyp zählt für R6 als Änderung des Orts, auch wenn kein Rumpf zu sehen ist. Sonst ist er ein Wert wie jeder andere (Teil 3, unten).
+- **Benannte Funktionen und Konstruktoren.** An der Stelle eines Funktionstyps darf statt eines Literals der Name einer Funktion oder ein Varianten-Konstruktor stehen (`xs.filter(is_even)`, `xs.map(Shape.Box)`); sein Typ ist der der Deklaration (`bool(int)`, `Shape(int)`, mit `mut` wie dort) und muss genau passen (`R8` wie beim Literal). Für die Wirkung (R13) zählt die übergebene Funktion wie ein Literal. Der Name einer Funktion ist auch sonst ein Wert dieses Typs (`_ = is_even`, Variable, Feld, `return`); eine Methode ist keiner (Teil 3, unten).
 - Ein Aufruf eines Funktionsparameters zählt als Wirkung (R13); ein Ergebnis, das nicht `void` ist, wird verwendet oder mit `_ =` verworfen.
 
 **Block-Argument.**
@@ -2675,13 +2672,13 @@ Teil 2d legt fest, was zu M2 gehört: Literale und Blöcke an Aufrufen, Funktion
 - **Lebendigkeit** (R6): was das Literal liest, gilt am Aufruf als gelesen (die Kopie entsteht dort).
 - Aliasregel: entfällt für Literale (R6, Teil 2d).
 
-**Ab M3: Funktionswerte speichern.** Festgelegt, in M2 noch nicht benutzbar. Benannte Funktionen und Varianten-Konstruktoren kommen zuerst als gespeicherte Werte (Variable, Feld, Liste, `return`), Literale danach; ein Literal wird dann ein Wert aus Funktion und eingefangenen Kopien (in C ein Paar `{fn, env}`, `env` fehlt bei benannten Funktionen).
+**Funktionswerte speichern.** Ein Literal ist ein Wert aus Funktion und eingefangenen Kopien (in C ein Paar aus Code-Zeiger und gezählter Umgebung; eine benannte Funktion hat eine Umgebung ohne Werte). Eine Kopie des Werts zählt den Zähler der Umgebung hoch, die Freigabe zählt herunter und gibt die eingefangenen Werte beim letzten Besitzer frei.
 
 - **Gleichheit** (R28): zwei Funktionswerte sind gleich, wenn sie von derselben Quelltextstelle stammen (Datei, Zeile und Spalte des Literals; bei einer benannten Funktion dieselbe Funktion) und alle eingefangenen Werte gleich sind. Ein Literal ist nie gleich einer benannten Funktion.
 - **Textform** (R28): ein Literal `fn@main.dif:12:5` (Pfad wie in Meldungen, Zeile und Spalte seiner Stelle, also genau die Stelle, die auch die Gleichheit meint); eine benannte Funktion oder ein Varianten-Konstruktor ihr Name (`add`, `Shape.Box`).
 - **Keine Zyklen:** ein Literal fängt Werte ein, die beim Auswerten schon existieren, und kann sich nie selbst enthalten; ein Wert verweist nie auf einen späteren. Darum kommen Funktionswerte ohne GC aus.
 
-**Teil 3 ergänzt** (Funktionswerte speichern). Hebt die Einschränkungen von M2 auf: Funktionstypen und Literale stehen überall, wo ein Wert stehen darf; die Meldungen `R26.function_type_place`, `R26.function_not_value` und `R26.literal_outside_call` entfallen dann für Funktionen und Literale (für Methoden und `R26.block_not_accepted` ändert sich nichts).
+**Teil 3 ergänzt** (Funktionswerte speichern). Hebt die Einschränkungen von M2 auf: Funktionstypen und Literale stehen überall, wo ein Wert stehen darf; die Meldungen `R26.function_type_place` und `R26.literal_outside_call` gibt es nicht mehr, `R26.function_not_value` nur noch für Methoden (`R26.block_not_accepted` ändert sich nicht).
 
 ```ebnf
 base_type = prim_type | list_type | array_type | map_type | named_type | func_type ;   (* ergänzt R2 *)
@@ -2689,16 +2686,16 @@ func_type = type "(" [ ftype_param { "," ftype_param } [ "," ] ] ")" ;
 elem_type = [ "?" ] base_type | "(" type ")" ;   (* Klammern auch, wenn der Elementtyp ein `func_type` ist: [](int(int)) *)
 ```
 
-- **Wo.** Ein Funktionswert darf in einer Variable, einem Feld, einem Element einer Liste, eines Arrays oder einer Map, als Wert von `?T` und `T!E`, als Rückgabewert und als Argument stehen. `int(int)` ohne Klammern in einem Elementtyp wäre die Funktion mit dem Rückgabetyp `[]int`; darum steht eine Liste von Funktionen als `[](int(int))` (dieselbe Klammerregel wie bei `!E`, R2). Ein Funktionstyp ist `R(T1, mut T2)` wie in Teil 2d, ohne Namen und ohne Defaults (R25).
-- **Wert.** Ein Literal wird ausgewertet, wo es steht, und ist dann ein Wert aus Funktion und den eingefangenen Kopien (Teil 2d, „Umgebung“). Wer es ablegt, legt diese Kopien ab; später geänderte Variablen ringsum ändern den gespeicherten Wert nie. Eine Kopie eines Griffs ist derselbe Griff (R5): eine Wirkung auf einen Griff sieht, wer den Griff hält. Der Wert eines Funktionstyps wird kopiert wie jeder Wert (Zähler, Copy-on-Write); es gibt keinen Wert „keine Funktion“ ohne `?` (`?void() cb = none`).
+- **Wo.** Ein Funktionswert darf in einer Variable, einem Feld, einem Element einer Liste, eines Arrays oder einer Map (auch als Schlüssel), als Wert von `?T` und `T!E`, als Rückgabewert und als Argument stehen. `int(int)` ohne Klammern in einem Elementtyp wäre die Funktion mit dem Rückgabetyp `[]int`; darum steht eine Liste von Funktionen als `[](int(int))` und eine Map als `map[str](int(int))` (dieselbe Klammerregel wie bei `!E`, R2). Ein `?` vor `R(…)` gehört zum Rückgabetyp; ein optionaler Funktionswert steht darum als `?(void())`, und `?void()` ist die Funktion mit dem Rückgabetyp `?void` (`R12`). Ein Funktionstyp ist `R(T1, mut T2)` wie in Teil 2d, ohne Namen und ohne Defaults (R25).
+- **Wert.** Ein Literal wird ausgewertet, wo es steht, und ist dann ein Wert aus Funktion und den eingefangenen Kopien (Teil 2d, „Umgebung“). Wer es ablegt, legt diese Kopien ab; später geänderte Variablen ringsum ändern den gespeicherten Wert nie. Eine Kopie eines Griffs ist derselbe Griff (R5): eine Wirkung auf einen Griff sieht, wer den Griff hält. Der Wert eines Funktionstyps wird kopiert wie jeder Wert (Zähler, Copy-on-Write); es gibt keinen Wert „keine Funktion“ ohne `?` (`?(void()) cb = none`).
 - **Aufruf.** `f(x)` ruft den Wert, den `f` benennt; ebenso `h.on_press(x)` (Feld) und `ops[0](3)` (Element). Ein Feld und eine Methode eines Typs heißen nie gleich (R4). `mut` am Argument genau dort, wo der Funktionstyp es verlangt. Zuweisen, Vergleichen und Ausgeben folgen R28, Teil 2d.
-- **Methoden** sind keine Werte: `Point.moved` ohne Aufruf bleibt `R26`, Meldung wie bei Funktionen in M2 (Vorschlag, offen: wer eine Methode ablegen will, schreibt ein Literal `Point(int dx) { … }`).
+- **Methoden** sind keine Werte: `Point.moved` oder `p.moved` ohne Aufruf ist `R26` am Ausdruck, Meldung `` `Point.moved` is a function and can only be called or passed as an argument `` (bei `p.moved` nur mit dem Namen der Methode), ohne Hinweis (Vorschlag, offen: wer eine Methode ablegen will, schreibt ein Literal `Point(int dx) { … }`).
 - **Rekursion.** Ein Name gilt erst hinter seiner Deklaration (R4); ein Literal, das seine eigene Variable aufruft, sieht sie nicht: `R4`, Meldung `` unknown name `fact` ``, Hinweis `a function literal cannot call itself; use a named function`. Rekursion geht über eine benannte Funktion (auch gespeichert) oder über einen Funktionsparameter, der den Wert hält.
 - **R13.** Der Aufruf eines gespeicherten Funktionswerts als Anweisung hat eine Wirkung, wie der eines Funktionsparameters, und gibt der aufrufenden Funktion ebenfalls eine, weil Feld, Liste und Variable nicht sagen, was der Wert tut. Ein Ergebnis, das nicht `void` ist, wird verwendet oder mit `_ =` verworfen. (Vorschlag, offen: Funktionstypen tragen keine Wirkung; sonst bräuchte jeder Funktionstyp eine Markierung `pure`/`effect`.)
 - **R6.** Das Speichern ändert nichts an „ein Literal ändert nie etwas ringsum“; ein `mut`-Parameter im Typ bleibt Pflicht für jede Änderung eines Arguments. Ein Aufruf über ein Feld mit `mut` im Typ braucht einen Ort für das Argument wie bei einer Funktion.
 - **Keine Zyklen** gilt unverändert: ein Wert verweist nur auf frühere. Auch eine Liste von Funktionen, die sich gegenseitig aufrufen, geht nur über benannte Funktionen.
 
-```text
+```dif
 struct Button {
     str label
     void() on_press
@@ -2712,13 +2709,16 @@ void main() {
     Button b = Button{label: "ok", on_press: void() { print(n) }}
     n = 4
     b.on_press()                      // gibt 3 aus: die Kopie von n entstand bei der Auswertung
+    print(n)                          // 4
     [](int(int)) ops = [double, triple]
     print(ops[1](5))                  // 15
     print(ops[0] == double)           // true
 }
 ```
 
-```text
+Ausgabe: `3`, `4`, `15`, `true`.
+
+```dif error R4
 void main() {
     int(int) fact = int(int n) {
         if n <= 1 {
@@ -2730,7 +2730,7 @@ void main() {
 }
 ```
 
-```text
+```
 main.dif:6:20: error[R4]: unknown name `fact`
   hint: a function literal cannot call itself; use a named function
 ```
@@ -2805,16 +2805,16 @@ print(xs)
 
 Ausgabe: `[1, 2, 3]`.
 
-```dif error R26
+Ein Literal steht auch ohne Aufruf, etwa in einer Variable:
+
+```dif
 void main() {
-    _ = bool(int x) { return x > 1 }
+    bool(int) big = bool(int x) { return x > 1 }
+    print(big(2))
 }
 ```
 
-```
-main.dif:2:9: error[R26]: a function literal can only be an argument of a call
-  hint: pass it directly as an argument of a call
-```
+Ausgabe: `true`.
 
 ```dif
 enum Shape {
@@ -2835,18 +2835,37 @@ void main() {
 
 Ausgabe: `[2, 4]`, `[Shape.Box(1), Shape.Box(2), Shape.Box(3), Shape.Box(4)]`.
 
-```dif error R26
+Der Name einer Funktion ist ein Wert; eine Methode nicht:
+
+```dif
 bool is_even(int n) {
     return n % 2 == 0
 }
 
 void main() {
-    _ = is_even
+    bool(int) f = is_even
+    print(f(4))
+}
+```
+
+Ausgabe: `true`.
+
+```dif error R26
+struct Point {
+    int x
+}
+
+int Point.get() {
+    return self.x
+}
+
+void main() {
+    _ = Point.get
 }
 ```
 
 ```
-main.dif:6:9: error[R26]: `is_even` is a function and can only be called or passed as an argument
+main.dif:10:9: error[R26]: `Point.get` is a function and can only be called or passed as an argument
 ```
 
 Beide Formen von `Name() { … }` (Literal mit dem Typ `Shape`, Aufruf der Funktion `one` mit Block):
@@ -3139,9 +3158,9 @@ Teil 2c ergänzt Zahlen, `rune`, Listen, Arrays und Maps:
 - **Gleichheit.** `==` an `f64` ist IEEE (`NaN != NaN`, `0.0 == -0.0`). Listen und Arrays sind gleich bei gleicher Länge und gleichen Elementen in Reihenfolge, Maps bei gleichen Schlüsseln mit gleichen Werten, gleich in welcher Reihenfolge. Ein `[]T` und ein `[N]T` vergleicht man nicht (`R8`). Weil `NaN != NaN`, ist eine Liste mit `NaN` nie gleich zu sich selbst.
 - **Text.** `int` und die anderen Ganzzahltypen dezimal. `f64`: R29. `rune` allein ausgegeben (`print(r)`, `"{r}"`) ist das Zeichen unverändert, in einer Textform (Liste, Struct, `some(…)`) steht es in `'`: `['a', 'b']`. Listen und Arrays `[1, 2, 3]` (leer `[]`), Maps `{"a": 1, "b": 2}` in der Reihenfolge der Einfügung (leer `{}`), die Elemente jeweils in ihrer Textform. Ein `str` in einer Textform steht in `"`; maskiert werden `"`, `\`, Zeilenumbruch, Tabulator, Wagenrücklauf (`\"`, `\\`, `\n`, `\t`, `\r`), NUL (`\0`) und die übrigen Steuerzeichen unter 0x20 als `\u{…}`; Klammern bleiben unmaskiert. Ein `rune` in einer Textform maskiert dasselbe, statt `"` aber `'`.
 - **Schlüssel.** Zwei Schlüssel einer Map sind gleich, wenn `==` sie gleich nennt; `NaN` ist kein Schlüssel (R14).
-- **Sortieren.** `sort` braucht `ordered`; andere Typen sind `R28`, Meldung `` `sort` needs an ordered element type, found P ``, Hinweis `only numbers, rune and str can be sorted`. `contains`, `index_of` und `count` verlangen `equal`; das ist in Teil 2c jeder Typ; Funktionswerte (R26) sind es ab M3 nach Teil 2d. Beispiel in §4.4.
+- **Sortieren.** `sort` braucht `ordered`; andere Typen sind `R28`, Meldung `` `sort` needs an ordered element type, found P ``, Hinweis `only numbers, rune and str can be sorted`. `contains`, `index_of` und `count` verlangen `equal`; das ist in Teil 2c jeder Typ; Funktionswerte (R26) sind es nach Teil 2d. Beispiel in §4.4.
 
-Teil 2d ergänzt Funktionswerte (R26), ab M3, wenn sie gespeichert werden dürfen (in M2 kommen sie nur als Argument vor und werden weder verglichen noch ausgegeben):
+Teil 2d ergänzt Funktionswerte (R26), seit sie gespeichert werden dürfen (Teil 3):
 
 - **Fähigkeiten.** Ein Funktionswert ist `equal`, `text` und `hashable` (wenn alle eingefangenen Werte es sind), nie `ordered`.
 - **Gleichheit.** Gleiche Quelltextstelle des Literals (Datei, Zeile, Spalte; bei einer benannten Funktion dieselbe Funktion) und gleiche eingefangene Werte (nach diesem Abschnitt); ein Literal ist nie gleich einer benannten Funktion.

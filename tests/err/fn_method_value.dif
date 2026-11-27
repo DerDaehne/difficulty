@@ -1,0 +1,10 @@
+// expect: error[R26] 9:9
+struct Point {
+    int x
+}
+int Point.get() {
+    return self.x
+}
+void main() {
+    _ = Point.get
+}

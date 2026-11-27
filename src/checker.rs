@@ -499,8 +499,8 @@ struct Checker<'a> {
     /// Names of the tests seen so far, for duplicates.
     tests: Vec<(&'a str, Pos)>,
     ftys: Vec<(Ty, Vec<(Ty, bool)>)>,
-    /// A function type is allowed where a parameter type is read.
-    fn_ok: bool,
+    /// The variable whose value is being checked: a literal in it cannot call it (R26).
+    declaring: Option<String>,
     /// The function literals being checked, innermost last.
     frames: Vec<LitFrame>,
     lits: HashMap<(u32, u32), LitInfo>,
@@ -571,7 +571,7 @@ impl<'a> Checker<'a> {
             uses_2b: false,
             tests: Vec::new(),
             ftys: Vec::new(),
-            fn_ok: false,
+            declaring: None,
             frames: Vec::new(),
             lits: HashMap::new(),
             lit_calls: HashSet::new(),
@@ -1494,7 +1494,11 @@ impl<'a> Checker<'a> {
             return;
         }
         self.unknown.push(name.to_string());
-        let hint = closest(name, self.visible().into_iter()).map(|c| format!("did you mean {c}?"));
+        let hint = if self.declaring.as_deref() == Some(name) && !self.frames.is_empty() {
+            Some("a function literal cannot call itself; use a named function".to_string())
+        } else {
+            closest(name, self.visible().into_iter()).map(|c| format!("did you mean {c}?"))
+        };
         self.err(
             "R4.unknown_name",
             pos,
@@ -1507,10 +1511,6 @@ impl<'a> Checker<'a> {
         if let Some(l) = self.local(name) {
             let (ty, val) = (l.ty, l.val);
             self.capture(name, ty);
-            if let Ty::Func(_) = ty {
-                self.only_called(name, pos);
-                return (Ty::Err, Val::Runtime);
-            }
             return (ty, val);
         }
         if self.consts.contains_key(name) {
@@ -1519,11 +1519,10 @@ impl<'a> Checker<'a> {
                 (Ty::Err, Val::Runtime)
             });
         }
-        if self.funcs.contains_key(name) || BUILTINS.contains(&name) {
-            if self.funcs.contains_key(name) {
-                self.only_called(name, pos);
-                return (Ty::Err, Val::Runtime);
-            }
+        if let Some(t) = self.named_fn_value(name) {
+            return (t, Val::Runtime);
+        }
+        if BUILTINS.contains(&name) {
             let msg = format!("`{name}` is a function; call it: {name}(…)");
             self.err("R8.fn_as_value", pos, msg, None);
             return (Ty::Err, Val::Runtime);
@@ -1607,7 +1606,9 @@ impl<'a> Checker<'a> {
                 let before = self.diags.len();
                 let ty = self.ty(&v.ty, false);
                 let typed = self.diags.len();
+                self.declaring = Some(v.name.clone());
                 let (_, val) = self.at_place(ty, &v.value, Some(&v.name));
+                self.declaring = None;
                 if typed > before {
                     // the type was reported: no second message for the value
                     self.diags.truncate(typed);
@@ -2374,7 +2375,15 @@ impl<'a> Checker<'a> {
             ExprKind::Unary(op, x) => self.unary(op, x, e.pos),
             ExprKind::Binary(op, l, r, opos) => self.binary(op, l, r, *opos),
             ExprKind::Call(f, args) => self.call(e, f, args, place),
-            ExprKind::Field(base, name) => self.field(e, base, name),
+            ExprKind::Field(base, name) => {
+                let ctor = matches!(place, Ty::Func(_))
+                    .then(|| self.ctor_value(base, name))
+                    .flatten();
+                match ctor {
+                    Some(t) => (t, Val::Runtime),
+                    None => self.field(e, base, name),
+                }
+            }
             ExprKind::StructLit(name, inits) => self.struct_lit(e, name, inits),
             ExprKind::IfExpr(branches, last) => self.if_expr(e, branches, last),
             ExprKind::Named(n, x) => {
@@ -2680,6 +2689,16 @@ impl<'a> Checker<'a> {
         if let Some(eid) = self.enum_of(base) {
             return self.variant(e, eid, name, None);
         }
+        if let ExprKind::Ident(tn) = &base.kind {
+            let has = self
+                .type_ids
+                .get(tn.as_str())
+                .is_some_and(|&t| self.types[t as usize].methods.contains_key(name));
+            if has && self.local(tn).is_none() {
+                self.method_not_value(&format!("{tn}.{name}"), e.pos);
+                return (Ty::Err, Val::Runtime);
+            }
+        }
         let (bt, _) = self.rvalue(base);
         if self.assigning && matches!(bt, Ty::Opt(_)) && self.map_entry(base) {
             self.map_place_error(e);
@@ -2691,6 +2710,10 @@ impl<'a> Checker<'a> {
                 Kind::Struct(fs) => match fs.iter().find(|f| f.name == name) {
                     Some(f) => (f.ty, Val::Runtime),
                     None => {
+                        if self.types[id as usize].methods.contains_key(name) {
+                            self.method_not_value(name, e.pos);
+                            return (Ty::Err, Val::Runtime);
+                        }
                         let tname = self.types[id as usize].name;
                         let names: Vec<&str> = fs.iter().map(|f| f.name).collect();
                         let hint =
@@ -2936,7 +2959,7 @@ impl<'a> Checker<'a> {
                     self.last_effect = Some(false);
                     return r;
                 }
-                self.method_call(e, base, m, args)
+                self.method_call(e, f, base, m, args)
             }
             ExprKind::Ident(name) => {
                 let r = self.fn_call(e, f, name, args, place);
@@ -2946,6 +2969,21 @@ impl<'a> Checker<'a> {
                     self.last_effect = None;
                 }
                 r
+            }
+            ExprKind::Index(..) | ExprKind::Call(..) | ExprKind::Paren(_) => {
+                let (t, _) = self.rvalue(f);
+                match t {
+                    Ty::Func(fi) => {
+                        let name = self.text(f).to_string();
+                        self.call_param(e, f, &name, fi, args)
+                    }
+                    Ty::Err => (Ty::Err, Val::Runtime),
+                    t => {
+                        let msg = format!("`{}` is {}, not a function", self.text(f), self.tn(t));
+                        self.err("R8.not_callable", f.pos, msg, None);
+                        (Ty::Err, Val::Runtime)
+                    }
+                }
             }
             _ => {
                 let msg = format!("`{}` cannot be called", self.text(f));
@@ -3092,11 +3130,20 @@ impl<'a> Checker<'a> {
     fn method_call(
         &mut self,
         e: &'a Expr,
+        f: &'a Expr,
         base: &'a Expr,
         m: &'a str,
         args: &'a [Expr],
     ) -> (Ty, Val) {
         let (bt, _) = self.rvalue(base);
+        if let Ty::Named(id) = bt {
+            if let Kind::Struct(fs) = &self.types[id as usize].kind {
+                if let Some(Ty::Func(fi)) = fs.iter().find(|x| x.name == m).map(|x| x.ty) {
+                    let name = self.text(f).to_string();
+                    return self.call_param(e, f, &name, fi, args);
+                }
+            }
+        }
         if let (Ty::Opt(i), true) = (bt, self.map_entry(base)) {
             // `m[k].push(x)`: an entry is changed by assigning it (R30)
             let inner = self.opts[i as usize];

@@ -1,0 +1,128 @@
+struct Button {
+    str label
+    str(int) on_click
+}
+
+enum Shape {
+    Dot
+    Box(int size)
+}
+
+struct Handlers {
+    [](void()) each
+    map[str](int(int)) by_name
+}
+
+int double(int n) {
+    return n * 2
+}
+
+int triple(int n) {
+    return n * 3
+}
+
+int apply(int(int) f, int x) {
+    return f(x)
+}
+
+int(int) adder(int k) {
+    return int(int x) { return x + k }
+}
+
+str() greeter(str who, []str more) {
+    return str() { return "hi {who} {more.len()}" }
+}
+
+void() twice(void() f) {
+    return void() {
+        f()
+        f()
+    }
+}
+
+void main() {
+    int base = 10
+    Button b = Button{label: "ok", on_click: str(int n) { return "clicked {n + base}" }}
+    base = 11
+    print(base)
+    print(b.on_click(1))
+    print(b.label)
+
+    // lists of functions: named, literal, constructor
+    [](int(int)) fs = [int(int x) { return x * 2 }, double, triple]
+    print(fs[0](4))
+    print(fs[1](4))
+    print(fs[2](4))
+    fs.push(adder(100))
+    print(fs[3](1))
+    print(apply(fs[2], 7))
+    print(fs.len())
+
+    // equality and text
+    print(fs[1] == double)
+    print(fs[1] == triple)
+    print(fs[1] == fs[1])
+    print(double)
+    print(adder(1) == adder(1))
+    print(adder(1) == adder(2))
+    print(adder(1))
+    Shape(int) mk = Shape.Box
+    print(mk(3))
+    print(mk)
+    print(mk == mk)
+
+    // captured text, list and map; the stored function keeps its own copies
+    str who = "ann"
+    []str more = ["a", "b"]
+    str() g = greeter(who, more)
+    who = "bob"
+    more.push("c")
+    print(g())
+    print(who)
+    print(more.len())
+
+    []int xs = [1, 2, 3]
+    map[str]int m = {"k": 5}
+    int() total = int() {
+        int s = m["k"] ?? 0
+        for int x in xs {
+            s += x
+        }
+        return s
+    }
+    xs.push(4)
+    m.add("k", 100)
+    print(xs.len())
+    print(m["k"] ?? 0)
+    print(total())
+
+    // functions that capture functions
+    void() hi = void() { print("hi") }
+    void() four = twice(twice(hi))
+    four()
+    int(int) comp = int(int x) { return double(triple(x)) + fs[3](x) }
+    int(int) comp2 = comp
+    print(comp2(2))
+    print(comp == comp2)
+
+    // in maps, optional, and as keys
+    map[str](int(int)) ops = {"d": double, "t": triple}
+    print((ops["t"] ?? double)(5))
+    Handlers h = Handlers{each: [hi, hi], by_name: ops}
+    for void() f in h.each {
+        f()
+    }
+    print((h.by_name["d"] ?? triple)(21))
+    ?(void()) cb = none
+    print(cb == none)
+    cb = hi
+    print(cb == none)
+    map[(int(int))]str names = {double: "double", triple: "triple"}
+    print(names[triple])
+    print(names.has(adder(1)))
+
+    // replacing a stored value releases the old environment
+    int(int) cur = adder(1)
+    cur = adder(2)
+    print(cur(0))
+}

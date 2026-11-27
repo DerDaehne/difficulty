@@ -162,6 +162,7 @@ fn emitter<'a>(file: &str, src: &'a str, info: &'a Info) -> Emitter<'a> {
     line_starts.extend(src.match_indices('\n').map(|(i, _)| i as u32 + 1));
     Emitter {
         file: c_string(file.as_bytes()),
+        file_raw: file.to_string(),
         src,
         line_starts,
         ret: Ty::Void,
@@ -196,6 +197,8 @@ fn emitter<'a>(file: &str, src: &'a str, info: &'a Info) -> Emitter<'a> {
 
 struct Emitter<'a> {
     file: String,
+    /// The file name as messages show it (the text form of a function value, R28).
+    file_raw: String,
     src: &'a str,
     /// Byte offset of the start of every line, for the positions of aborts.
     line_starts: Vec<u32>,
@@ -410,7 +413,14 @@ impl<'a> Emitter<'a> {
         if opt {
             *s = &s[1..];
         }
-        let mut ty = self.parse_base(s);
+        let mut ty = if opt && s.starts_with('(') {
+            *s = &s[1..];
+            let t = self.parse_top(s);
+            *s = s.strip_prefix(')').unwrap_or(s);
+            t
+        } else {
+            self.parse_base(s)
+        };
         if opt {
             let i = self.info.opts.iter().position(|&x| x == ty);
             ty = i.map_or(Ty::Err, |i| Ty::Opt(i as u32));
@@ -1469,6 +1479,7 @@ impl<'a> Emitter<'a> {
     /// expression is not such a place.
     fn place_ref(&mut self, e: &'a Expr) -> Option<String> {
         match &e.kind {
+            ExprKind::Ident(n) if self.funcs.contains_key(n.as_str()) => None,
             ExprKind::Ident(n) if !self.consts.contains_key(n.as_str()) => Some(self.name_ref(n)),
             ExprKind::SelfRef => Some(self.name_ref("self")),
             ExprKind::Paren(x) => self.place_ref(x),
@@ -2176,6 +2187,9 @@ impl<'a> Emitter<'a> {
     }
 
     fn call(&mut self, e: &'a Expr, f: &'a Expr, args: &'a [Expr]) -> String {
+        if let Ty::Func(fi) = self.ty(f) {
+            return self.call_value(e, f, fi, args);
+        }
         match &f.kind {
             ExprKind::Field(base, m) => {
                 if let Some(eid) = self.enum_of(base) {
@@ -2198,12 +2212,6 @@ impl<'a> Emitter<'a> {
                     &items,
                     (e.pos.line as usize, e.pos.col as usize),
                 )
-            }
-            ExprKind::Ident(name) if matches!(self.ty(f), Ty::Func(_)) => {
-                let Ty::Func(fi) = self.ty(f) else {
-                    return String::new();
-                };
-                self.call_value(e, name, fi, args)
             }
             ExprKind::Ident(_) => self.convert(e, &args[0]),
             _ => unreachable!("call of something that is not a function"),

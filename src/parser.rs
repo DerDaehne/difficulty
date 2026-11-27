@@ -440,6 +440,12 @@ impl<'a> Parser<'a> {
     }
 
     fn type_end(&self, start: usize) -> Option<usize> {
+        self.type_end_in(start, false)
+    }
+
+    /// `inner`: the type stands inside `( … )` or a parameter list, so a function type there
+    /// is followed by `)` or `,` instead of a name.
+    fn type_end_in(&self, start: usize, inner: bool) -> Option<usize> {
         let mut k = start;
         while k < start + 2 && matches!(self.peek_n(k), Tok::Op("?" | "??")) {
             k += 1;
@@ -455,12 +461,12 @@ impl<'a> Parser<'a> {
                 None => break,
             }
         }
-        Some(self.fn_type_end(k).unwrap_or(k))
+        Some(self.fn_type_end(k, inner).unwrap_or(k))
     }
 
     /// The end of a function type `(T1, mut T2)` after its return type that is followed by a
     /// name, as in `int(int) f`; `k` is at the `(`.
-    fn fn_type_end(&self, k: usize) -> Option<usize> {
+    fn fn_type_end(&self, k: usize, inner: bool) -> Option<usize> {
         if *self.peek_n(k) != Tok::Op("(") {
             return None;
         }
@@ -469,14 +475,16 @@ impl<'a> Parser<'a> {
             if *self.peek_n(j) == Tok::Kw("mut") {
                 j += 1;
             }
-            j = self.type_end(j)?;
+            j = self.type_end_in(j, true)?;
             match self.peek_n(j) {
                 Tok::Op(",") => j += 1,
                 Tok::Op(")") => {}
                 _ => return None,
             }
         }
-        matches!(self.peek_n(j + 1), Tok::Ident(_)).then_some(j + 1)
+        let next = self.peek_n(j + 1);
+        (matches!(next, Tok::Ident(_)) || inner && matches!(next, Tok::Op(")" | ",")))
+            .then_some(j + 1)
     }
 
     fn base_end(&self, k: usize) -> Option<usize> {
@@ -510,7 +518,7 @@ impl<'a> Parser<'a> {
     fn elem_end(&self, k: usize) -> Option<usize> {
         let start_k = k;
         if *self.peek_n(k) == Tok::Op("(") {
-            let j = self.type_end(k + 1)?;
+            let j = self.type_end_in(k + 1, true)?;
             return (*self.peek_n(j) == Tok::Op(")")).then_some(j + 1);
         }
         let k = if matches!(self.peek_n(k), Tok::Op("?")) {
