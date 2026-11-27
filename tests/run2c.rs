@@ -709,3 +709,23 @@ error: line 6: cannot read `three` as int, bool or quoted text\n\
 error: line 7: expected key = value\nerror: line 8: the key is empty\n";
     assert_eq!((r.out.as_str(), r.err.as_str(), r.code), (want, "", 0));
 }
+
+#[test]
+fn kino_example_session_matches_golden_output() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let src = std::fs::read_to_string(format!("{root}/examples/kino.dif")).unwrap();
+    let input = b"b 3 5\nb 3 5\nb 6 1\nb 3\nb 3 x\ng 4\ng 9\ng 8\ns 3 5\ns 3 5\np\nhilfe\n\nt\nq\nb 1 1\n";
+    let r = run_with("kino", &src, input, &[], &[]);
+    let help = "Befehle: b <reihe> <platz> | g <n> | s <reihe> <platz> | p | t | q";
+    let want = format!(
+        "{help}\nReihe 3, Platz 5 gebucht.\nFehler: Reihe 3, Platz 5 ist schon besetzt.\n\
+Fehler: Reihe 6, Platz 1 gibt es nicht.\nFehler: `b` braucht mehr Zahlen.\n\
+Fehler: `x` ist keine Zahl.\nGruppe (4) gebucht: Reihe 1, Plätze 1 bis 4.\n\
+Fehler: Gruppengröße muss 1 bis 8 sein, nicht 9.\nGruppe (8) gebucht: Reihe 2, Plätze 1 bis 8.\n\
+Reihe 3, Platz 5 storniert.\nFehler: Reihe 3, Platz 5 ist gar nicht gebucht.\n\
+\x20        1 2 3 4 5 6 7 8   (. frei, X belegt)\nReihe 1: X X X X . . . .\nReihe 2: X X X X X X X X\n\
+Reihe 3: . . . . . . . .\nReihe 4: . . . . . . . .\nReihe 5: . . . . . . . .\n{help}\n{help}\n\
+Tickets verkauft: 12 von 40, Auslastung: 30.0 %\nTickets verkauft: 12 von 40, Auslastung: 30.0 %\n"
+    );
+    assert_eq!((r.out.as_str(), r.err.as_str(), r.code), (want.as_str(), "", 0));
+}

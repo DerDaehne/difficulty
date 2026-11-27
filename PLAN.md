@@ -998,7 +998,10 @@ JSON typisiert: `json.decode[User](text)` und `json.encode(u)`, die Umwandlung l
 Ein Programmkino mit einem Saal: 5 Reihen × 8 Plätze, Einzel- und Gruppenbuchung, Storno, Saalplan, Tagesabschluss.
 
 ```dif
-// kino.dif — Programmkino mit einem Saal
+// kino.dif — Programmkino mit einem Saal: 5 Reihen x 8 Plätze, Einzel- und Gruppenbuchung,
+// Storno, Saalplan, Tagesabschluss. Befehle von stdin, `q` beendet.
+//   dif run examples/kino.dif < sitzung.txt
+// `dif test examples/kino.dif` führt die Tests aus.
 use std.io
 
 const int ROWS = 5
@@ -1013,6 +1016,12 @@ enum BookErr {
     NotBooked(int row, int seat)
     BadGroup(int size)
     NoBlock(int size)
+}
+
+enum CmdErr {
+    Book(BookErr cause)
+    BadNumber(str text)
+    Missing(str cmd)
 }
 
 struct Block {
@@ -1034,33 +1043,26 @@ int!BookErr index(int row, int seat) {
 
 void!BookErr Hall.book(mut self, int row, int seat) {
     int i = try index(row, seat)
-    if self.seats[i] == Seat.Taken {
-        return err(BookErr.AlreadyTaken(row, seat))
-    }
+    if self.seats[i] == Seat.Taken { return err(BookErr.AlreadyTaken(row, seat)) }
     self.seats[i] = Seat.Taken
 }
 
 void!BookErr Hall.cancel(mut self, int row, int seat) {
     int i = try index(row, seat)
-    if self.seats[i] == Seat.Free {
-        return err(BookErr.NotBooked(row, seat))
-    }
+    if self.seats[i] == Seat.Free { return err(BookErr.NotBooked(row, seat)) }
     self.seats[i] = Seat.Free
 }
 
+// Books the first row with `n` free seats side by side.
 Block!BookErr Hall.book_group(mut self, int n) {
-    if n < 1 || n > SEATS {
-        return err(BookErr.BadGroup(n))
-    }
+    if n < 1 || n > SEATS { return err(BookErr.BadGroup(n)) }
     for int r in range(ROWS) {
         int free = 0
         for int p in range(SEATS) {
             free = if self.seats[r * SEATS + p] == Seat.Free { free + 1 } else { 0 }
             if free == n {
                 int first = r * SEATS + p - n + 1
-                for int i in range(first, first + n) {
-                    self.seats[i] = Seat.Taken
-                }
+                for int i in range(first, first + n) { self.seats[i] = Seat.Taken }
                 return Block{row: r + 1, first: p - n + 2, size: n}
             }
         }
@@ -1069,12 +1071,11 @@ Block!BookErr Hall.book_group(mut self, int n) {
 }
 
 str Hall.plan() {
-    str out = "          1 2 3 4 5 6 7 8   (. frei, X belegt)"
+    str out = "         1 2 3 4 5 6 7 8   (. frei, X belegt)"
     for int r in range(ROWS) {
-        out += "\nReihe {r + 1}: "
-        for int p in range(SEATS) {
-            out += if self.seats[r * SEATS + p] == Seat.Taken { " X" } else { " ." }
-        }
+        []Seat row = self.seats.slice(r * SEATS, (r + 1) * SEATS)
+        str cells = row.map(str(Seat s) { return if s == Seat.Taken { "X" } else { "." } }).join(" ")
+        out += "\nReihe {r + 1}: {cells}"
     }
     return out
 }
@@ -1085,8 +1086,8 @@ str Hall.summary() {
     return "Tickets verkauft: {sold} von {self.seats.len()}, Auslastung: {pct:.1f} %"
 }
 
-str message(BookErr e) {
-    switch e {
+str BookErr.message() {
+    switch self {
     case BookErr.NoSuchSeat(int r, int p):
         return "Fehler: Reihe {r}, Platz {p} gibt es nicht."
     case BookErr.AlreadyTaken(int r, int p):
@@ -1100,20 +1101,45 @@ str message(BookErr e) {
     }
 }
 
-str!BookErr exec(mut Hall hall, str line) {
+str CmdErr.message() {
+    switch self {
+    case CmdErr.Book(BookErr e):
+        return e.message()
+    case CmdErr.BadNumber(str text):
+        return "Fehler: `{text}` ist keine Zahl."
+    case CmdErr.Missing(str cmd):
+        return "Fehler: `{cmd}` braucht mehr Zahlen."
+    }
+}
+
+// The number at word `k` of a command.
+int!CmdErr number([]str words, int k) {
+    if k >= words.len() { return err(CmdErr.Missing(words[0])) }
+    switch words[k].parse_int() {
+    case some(int n):
+        return n
+    case none:
+        return err(CmdErr.BadNumber(words[k]))
+    }
+}
+
+str!CmdErr exec(mut Hall hall, str line) {
     []str w = line.split(" ")
-    int a = if w.len() > 1 { w[1].parse_int() ?? 0 } else { 0 }   // 0 = ungültig, meldet index()
-    int b = if w.len() > 2 { w[2].parse_int() ?? 0 } else { 0 }
     switch w[0] {
     case "b":
-        try hall.book(a, b)
-        return "Reihe {a}, Platz {b} gebucht."
+        int row = try number(w, 1)
+        int seat = try number(w, 2)
+        try hall.book(row, seat) or CmdErr.Book
+        return "Reihe {row}, Platz {seat} gebucht."
     case "g":
-        Block blk = try hall.book_group(a)
-        return "Gruppe ({a}) gebucht: Reihe {blk.row}, Plätze {blk.first} bis {blk.first + a - 1}."
+        int n = try number(w, 1)
+        Block blk = try hall.book_group(n) or CmdErr.Book
+        return "Gruppe ({n}) gebucht: Reihe {blk.row}, Plätze {blk.first} bis {blk.first + n - 1}."
     case "s":
-        try hall.cancel(a, b)
-        return "Reihe {a}, Platz {b} storniert."
+        int row = try number(w, 1)
+        int seat = try number(w, 2)
+        try hall.cancel(row, seat) or CmdErr.Book
+        return "Reihe {row}, Platz {seat} storniert."
     case "p":
         return hall.plan()
     case "t":
@@ -1123,19 +1149,17 @@ str!BookErr exec(mut Hall hall, str line) {
     }
 }
 
-void main() {
+void!io.IoErr main() {
     Hall hall = Hall{}
     print(HELP)
-    for str line in io.lines() {              // endet bei EOF, kein ""-Sonderfall
+    for str line in try io.lines() {          // endet bei EOF, kein ""-Sonderfall
         str cmd = line.trim()
-        if cmd == "q" {
-            break
-        }
+        if cmd == "q" { break }
         switch exec(mut hall, cmd) {
         case ok(str msg):
             print(msg)
-        case err(BookErr e):
-            print(message(e))
+        case err(CmdErr e):
+            print(e.message())
         }
     }
     print(hall.summary())
@@ -1149,6 +1173,7 @@ test "einzelplatz" {
     expect(h.book(6, 1) == err(BookErr.NoSuchSeat(6, 1)))
     try h.cancel(3, 5)
     expect(h.cancel(3, 5) == err(BookErr.NotBooked(3, 5)))
+    expect(h.seats.count(Seat.Taken) == 0)
 }
 
 test "gruppe" {
@@ -1158,11 +1183,13 @@ test "gruppe" {
     Block b = try h.book_group(4)
     expect(b.row == 2 && b.first == 4)
     expect(h.book_group(9) == err(BookErr.BadGroup(9)))
+    expect(h.seats.count(Seat.Taken) == 13)
 }
 
 test "voll" {
     Hall h = Hall{seats: repeat(Seat.Taken, ROWS * SEATS)}
     expect(h.book_group(1) == err(BookErr.NoBlock(1)))
+    expect(h.seats.count(Seat.Free) == 0)
 }
 
 test "abschluss und befehle" {
@@ -1171,12 +1198,15 @@ test "abschluss und befehle" {
     try h.book(3, 5)
     expect(h.summary() == "Tickets verkauft: 9 von 40, Auslastung: 22.5 %")
     expect(try exec(mut h, "g 2") == "Gruppe (2) gebucht: Reihe 2, Plätze 1 bis 2.")
-    expect(exec(mut h, "b 3") == err(BookErr.NoSuchSeat(3, 0)))
+    expect(exec(mut h, "b 3") == err(CmdErr.Missing("b")))
+    expect(exec(mut h, "b 3 x") == err(CmdErr.BadNumber("x")))
+    expect(exec(mut h, "b 3 5") == err(CmdErr.Book(BookErr.AlreadyTaken(3, 5))))
     expect(try exec(mut h, "hilfe") == HELP)
+    expect(h.seats.count(Seat.Taken) == 11)
 }
 ```
 
-**Was das Beispiel zeigt.** Plätze sind ein `enum`, Fehler sind Typen, die `switch` vollständig behandeln muss, eine Buchung ändert genau einen Platz, EOF beendet die Eingabeschleife, ein ignorierter Buchungsaufruf ist ein Compilerfehler, und das Binary soll ≤ 64 KB groß werden.
+**Was das Beispiel zeigt.** Plätze sind ein `enum`, Fehler sind Typen, die `switch` vollständig behandeln muss, `try … or CmdErr.Book` hebt einen Buchungsfehler in den Fehlertyp des Befehls, `mut self` kennzeichnet jede Methode, die den Saal ändert, EOF beendet die Eingabeschleife (`for str line in try io.lines()` mit `void!io.IoErr main`), ein ignorierter Buchungsaufruf ist ein Compilerfehler, und das Binary soll ≤ 64 KB groß werden (gemessen: 59 784 B, `docs/measurements.md`). Das Programm steht als `examples/kino.dif`.
 
 ---
 

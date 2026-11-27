@@ -15,12 +15,14 @@ Rechner: x86_64, AMD Ryzen 7 7800X3D, Linux, gcc 16.2.0, `dif` als Release-Build
 | `dif run hello.dif` (gcc) | < 300 ms | 46 ms | ja |
 | Compiler-Binary `dif` | ≤ 5 MB | 680 912 B (0,65 MB) | ja |
 | fib(38) gegen C `-O2` (ohne Prüfung) | ≤ 1,5× | gcc 16.2: 2 ms gegen 37 ms (Rekursionsumformung); clang 21: 140–154 ms gegen 84–93 ms = 1,6–1,8× | gcc ja, clang nein |
-| `kino`-Binary, `push`, Alltags-Benchmark, `llms.txt`, Agenten-pass@1 | siehe PLAN.md | noch nicht messbar | – |
+| `kino`-Binary (`examples/kino.dif`, x86_64, dynamisch gegen libc, gestrippt) | ≤ 64 KB | 59 784 B (58,4 KB) | ja |
+| `push`, Alltags-Benchmark, `llms.txt`, Agenten-pass@1 | siehe PLAN.md | noch nicht messbar | – |
 
 Befehle:
 
 ```sh
 dif build examples/hello.dif -o hello && stat -c %s hello
+dif build examples/kino.dif -o kino && strip -s kino && stat -c %s kino
 dif build fib.dif -o fib_dif                  # fib(38), rekursiv wie examples/fib.dif
 gcc -std=c11 -O2 -s -o fib_c fib.c            # dieselbe Funktion in C, int64_t
 time ./fib_dif; time ./fib_c
