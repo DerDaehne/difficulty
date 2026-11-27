@@ -1585,7 +1585,7 @@ impl<'a> Checker<'a> {
                     && !matches!(e.kind, ExprKind::Try(..))
                     && !self.in_cycle(self.last_callee)
                 {
-                    let text = self.text(e);
+                    let text = flat(self.text(e));
                     let msg = format!("call of `{text}` has no effect");
                     let hint = self.no_effect_hint();
                     self.err("R13.no_effect", e.pos, msg, Some(hint));
