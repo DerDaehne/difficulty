@@ -274,7 +274,7 @@ DIF_FN dif_buf dif_buf_new(void) { return (dif_buf){0, 0, 0}; }
 DIF_FN void dif_put(dif_buf *b, const char *p, int64_t n) {
     if (n <= 0) return;
     // invariant 0 <= n <= cap: without it gcc reads b->n as possibly negative (false stringop-overflow)
-    if (b->n < 0 || b->n > b->cap) __builtin_unreachable();
+    if (b->n < 0 || b->n > b->cap) abort();  // invariant of the buffer; tells gcc the range of n
     if (b->n + n > b->cap) {
         int64_t cap = (b->n + n) * 2 + 16;
         if (!b->p) {
