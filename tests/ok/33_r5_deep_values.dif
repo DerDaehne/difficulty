@@ -1,0 +1,47 @@
+struct Pair {
+    Wrap left
+    int n
+}
+
+enum Wrap {
+    End
+    More(Pair p)
+}
+
+Wrap wrap(int n) {
+    Wrap w = Wrap.End
+    for int i in range(0, n) {
+        w = Wrap.More(Pair{left: w, n: i % 10})
+    }
+    return w
+}
+
+enum Cons {
+    Nil
+    Link(int head, Cons tail)
+}
+
+Cons build(int n) {
+    Cons c = Cons.Nil
+    for int i in range(0, n) {
+        c = Cons.Link(i % 10, c)
+    }
+    return c
+}
+
+void main() {
+    Cons v = build(1000000)
+    Cons w = build(1000000)
+    print(v == w)
+    print(v == build(999999))
+    map[Cons]int m = {}
+    m[v] = 1
+    print(m[w] ?? -1)
+    print("{v}".len())
+    Cons x = Cons.Link(1, Cons.Link(2, Cons.Nil))
+    print(x)
+    Wrap a = wrap(300000)
+    Wrap b = wrap(300000)
+    print(a == b)
+    print("{a}".len())
+}

@@ -663,3 +663,17 @@ void!io.IoErr main() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A program that recurses too deep ends with a message and exit code 2, not silently.
+/// (Under a sanitizer the sanitizer reports it instead.)
+#[test]
+fn stack_overflow_has_a_message() {
+    if std::env::var_os("DIF_SAN").is_some() {
+        return;
+    }
+    let src = "int down(int n) {\n    if n == 0 {\n        return 0\n    }\n    return 1 + down(n - 1)\n}\n\nvoid main() {\n    print(\"start\")\n    print(down(100000000))\n}\n";
+    let r = run("stack", src);
+    assert_eq!(r.out, "start\n");
+    assert_eq!(r.err, "panic: stack overflow\n");
+    assert_eq!(r.code, 2);
+}

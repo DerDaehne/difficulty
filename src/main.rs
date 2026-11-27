@@ -122,8 +122,12 @@ fn run(args: &[String]) -> Result<ExitCode, ExitCode> {
         })
     });
     let _ = std::fs::remove_dir_all(&dir);
+    let status = status?;
     // a program ended by a signal has no exit code; 2 like a panic
-    Ok(ExitCode::from(status?.code().unwrap_or(2) as u8))
+    if let Some(sig) = std::os::unix::process::ExitStatusExt::signal(&status) {
+        eprintln!("dif: program ended by signal {sig}");
+    }
+    Ok(ExitCode::from(status.code().unwrap_or(2) as u8))
 }
 
 fn work_dir() -> Result<PathBuf, ExitCode> {

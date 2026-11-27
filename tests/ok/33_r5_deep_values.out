@@ -1,0 +1,7 @@
+true
+false
+1
+14000008
+Cons.Link(1, Cons.Link(2, Cons.Nil))
+true
+8700008

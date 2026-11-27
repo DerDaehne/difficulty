@@ -705,7 +705,7 @@ impl<'a> Emitter<'a> {
         let mut c = format!("static const char *const dif_file = {};\n", self.file);
         // aborts flush both streams themselves; `_Exit` also keeps the leak check of a sanitizer quiet
         // Helpers are `static inline`; clang warns about unused ones in the main file.
-        c.push_str("#pragma GCC diagnostic ignored \"-Wunused-function\"\n#include <stdlib.h>\n#define DIF_EXIT _Exit\n");
+        c.push_str("#define _XOPEN_SOURCE 700\n#pragma GCC diagnostic ignored \"-Wunused-function\"\n#include <stdlib.h>\n#define DIF_EXIT _Exit\n");
         c.push_str(&RT.replace(RT_INCLUDE, UNICODE));
         c.push_str(PRELUDE);
         for d in &m.decls {

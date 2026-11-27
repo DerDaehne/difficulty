@@ -174,11 +174,12 @@ Output: `Point{x: 1, y: 2} Point{x: 12, y: 4} Point{x: 13, y: 4} 9 Shape.Rect(3,
 - **`struct` (R5).** One field per line, optional default (`int y = 0`, constants and
   effect-free calls only, evaluated at every literal that omits the field). A literal
   names every field without default, in any order, evaluated left to right:
-  `Point{x: 1}`. Assignment, parameters and return copy the value. A type cannot
-  contain itself.
+  `Point{x: 1}`. Assignment, parameters and return copy the value. A struct cannot
+  contain itself except through a list or map.
 - **`enum` (R5).** `enum Seat { Free, Taken }`; variants may carry values
   (`NoSuchSeat(int row, int seat)`). Always written with the type: `Seat.Free`,
-  `BookErr.NoSuchSeat(3, 5)`. Values are read only through `switch`.
+  `BookErr.NoSuchSeat(3, 5)`. Values are read only through `switch`. An enum may
+  contain itself in a variant (`Add(Expr a, Expr b)`): the compiler boxes it, no cycles.
 - **`mut` (R6).** A function that changes an argument takes `mut T p`, the caller writes
   `mut`: `shift(mut b, 5)`; places are variables, fields, elements. R6: a `mut` parameter
   never changed, a change never read afterwards (also to a copy), one place passed

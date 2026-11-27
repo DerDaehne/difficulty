@@ -54,7 +54,14 @@ fn run_all(tag: &str, cc: &str, flags: &[&str], perf: bool) {
         let name = src.file_stem().unwrap().to_str().unwrap().to_string();
         let exe = tmp.join(&name);
         let cr = Command::new(cc)
-            .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-g"])
+            .args([
+                "-std=c11",
+                "-D_XOPEN_SOURCE=700",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-g",
+            ])
             .args(flags)
             .arg("-I")
             .arg(root().join("rt"))

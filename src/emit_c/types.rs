@@ -515,7 +515,15 @@ impl<'a> Emitter<'a> {
                     for (k, v) in vs.iter().enumerate().filter(|(_, v)| !v.1.is_empty()) {
                         let mut body = String::new();
                         for (j, f) in v.1.iter().enumerate() {
-                            body.push_str(&h(f.0, &self.fld(id, k, j, format!("v->u.v{k}.f{j}"))));
+                            if self.boxed(id, f.0) {
+                                let d = self.dty(f.0);
+                                let _ = writeln!(
+                                    body,
+                                    "    h = dif_hash_mix(h, dif_box_hash(&{d}, v->u.v{k}.f{j}));"
+                                );
+                            } else {
+                                body.push_str(&h(f.0, &format!("v->u.v{k}.f{j}")));
+                            }
                         }
                         let _ = write!(c, "    if (v->tag == {k}) {{\n{body}    }}\n");
                     }
@@ -603,15 +611,20 @@ impl<'a> Emitter<'a> {
                         TypeBody::Enum(vs) => {
                             let _ = writeln!(c, "    if (a.tag != b.tag) return false;");
                             for (k, v) in vs.iter().enumerate().filter(|(_, v)| !v.1.is_empty()) {
-                                let all: Vec<String> =
-                                    v.1.iter()
-                                        .enumerate()
-                                        .map(|(j, f)| {
-                                            let x = self.fld(id, k, j, format!("a.u.v{k}.f{j}"));
-                                            let y = self.fld(id, k, j, format!("b.u.v{k}.f{j}"));
+                                let all: Vec<String> = v
+                                    .1
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(j, f)| {
+                                        let (x, y) =
+                                            (format!("a.u.v{k}.f{j}"), format!("b.u.v{k}.f{j}"));
+                                        if self.boxed(id, f.0) {
+                                            format!("dif_box_eq(&{}, {x}, {y})", self.dty(f.0))
+                                        } else {
                                             self.eq(f.0, &x, &y)
-                                        })
-                                        .collect();
+                                        }
+                                    })
+                                    .collect();
                                 let _ = writeln!(
                                     c,
                                     "    if (a.tag == {k}) return {};",
@@ -634,9 +647,13 @@ impl<'a> Emitter<'a> {
                                 for (j, f) in v.1.iter().enumerate() {
                                     let sep = if j == 0 { "" } else { ", " };
                                     let _ = writeln!(text, "        {}", Self::lit("b", sep));
-                                    let x = self.fld(id, k, j, format!("v.u.v{k}.f{j}"));
-                                    let _ =
-                                        writeln!(text, "        {}", self.put(f.0, "b", &x, true));
+                                    let x = format!("v.u.v{k}.f{j}");
+                                    let put = if self.boxed(id, f.0) {
+                                        format!("dif_box_put(&{}, b, {x});", self.dty(f.0))
+                                    } else {
+                                        self.put(f.0, "b", &x, true)
+                                    };
+                                    let _ = writeln!(text, "        {put}");
                                 }
                                 if !v.1.is_empty() {
                                     let _ = writeln!(text, "        {}", Self::lit("b", ")"));

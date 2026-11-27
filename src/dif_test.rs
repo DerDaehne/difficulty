@@ -364,6 +364,9 @@ fn run_test(exe: &Path, k: usize, u: &Unit, t: &TestMeta) -> Outcome {
                     output,
                 }),
             },
+            None if line("panic: ") == Some("stack overflow") => {
+                Err(crash("stack overflow".into(), &output))
+            }
             None => Err(crash(
                 "exited with code 2 without a panic message".into(),
                 &output,

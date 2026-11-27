@@ -152,7 +152,7 @@ test \"overflow\" panics \"integer overflow\" {
     let (out, _, code) = d.dif(&["test", "c.dif"]);
     let want = "ok   c.dif:10 test \"fine\"
 FAIL c.dif:14 test \"stack\"
-    killed by signal 11
+    stack overflow
     output:
         before
 FAIL c.dif:19 test \"spins\"
@@ -163,7 +163,7 @@ test result: 2 passed, 2 failed
     assert_eq!((out.as_str(), code), (want, 1));
     let (json, _, _) = d.dif(&["test", "c.dif", "stack", "--json"]);
     assert!(
-        json.contains("\"failure\":{\"kind\":\"crash\",\"line\":null,\"column\":null,\"offset\":null,\"message\":\"killed by signal 11\",\"values\":[],\"output\":\"before\\n\"}"),
+        json.contains("\"failure\":{\"kind\":\"crash\",\"line\":null,\"column\":null,\"offset\":null,\"message\":\"stack overflow\",\"values\":[],\"output\":\"before\\n\"}"),
         "{json}"
     );
 }
