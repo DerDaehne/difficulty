@@ -167,3 +167,5 @@ Beobachtungen:
   (4/5 gegen 5/5). Bei fünf Aufgaben ist ein Lauf der ganze Unterschied.
 - Kosten: Ein difficulty-Aufruf trägt `llms.txt` mit (etwa 10 500 Eingabetokens gegen 1 200 bei Python).
   Haiku schreibt in difficulty deutlich mehr Ausgabe als Sonnet.
+- Opus: nach ADR 011 erst bei stabilen Ergebnissen. Ein Lauf mit fünf Aufgaben ist das noch nicht;
+  zuerst kommt ein zweiter Lauf mit Haiku und Sonnet auf dem geklärten Aufgabentext.
