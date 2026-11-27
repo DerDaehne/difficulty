@@ -318,3 +318,17 @@ fn names_are_escaped_blank_output_lines_are_bare_and_build_cleans_up() {
         assert_eq!(std::fs::read_dir(&tmp).unwrap().count(), 0, "CC={cc}");
     }
 }
+
+#[test]
+fn wordcount_and_textparser_examples_test() {
+    let d = Dir::new("examples-test");
+    for (name, n) in [("wordcount", 2), ("textparser", 3)] {
+        let path = format!("{}/examples/{name}.dif", env!("CARGO_MANIFEST_DIR"));
+        let (out, _, code) = d.dif(&["test", &path]);
+        assert!(
+            out.ends_with(&format!("test result: {n} passed, 0 failed\n")),
+            "{out}"
+        );
+        assert_eq!(code, 0);
+    }
+}

@@ -1,0 +1,72 @@
+// Word count: reads stdin, prints the 10 most frequent words and a summary line.
+// A word is a run of ASCII letters; everything else separates words.
+//   dif run examples/wordcount.dif < text.txt
+// `dif test examples/wordcount.dif` runs the tests.
+use std.io
+
+bool is_ascii_letter(rune r) {
+    return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+}
+
+// The lower-case words of a line.
+[]str words_of(str line) {
+    []str words = []
+    str word = ""
+    for rune r in line.runes() {
+        if is_ascii_letter(r) {
+            word += str(r)
+        } else if word != "" {
+            words.push(word.lower())
+            word = ""
+        }
+    }
+    if word != "" {
+        words.push(word.lower())
+    }
+    return words
+}
+
+int count_of(map[str]int counts, str word) {
+    return counts[word] ?? 0
+}
+
+// The top `limit` lines `word count`: count descending, then word ascending.
+[]str top(map[str]int counts, int limit) {
+    []str words = counts.keys()
+    words.sort_by(bool(str a, str b) {
+        int ca = count_of(counts, a)
+        int cb = count_of(counts, b)
+        return ca > cb || (ca == cb && a < b)
+    })
+    []str lines = []
+    for str w in words.slice(0, limit.min(words.len())) {
+        lines.push("{w} {count_of(counts, w)}")
+    }
+    return lines
+}
+
+void!io.IoErr main() {
+    map[str]int counts = {}
+    int total = 0
+    for str line in try io.lines() {
+        for str w in words_of(line) {
+            counts[w] = count_of(counts, w) + 1
+            total += 1
+        }
+    }
+    for str l in top(counts, 10) {
+        print(l)
+    }
+    print("total {total} distinct {counts.len()}")
+}
+
+test "words are ASCII letters in lower case" {
+    expect(words_of("The cat, THE hat! 42 Ünï") == ["the", "cat", "the", "hat", "n"])
+    expect(words_of("").is_empty())
+}
+
+test "top orders by count, then by word" {
+    map[str]int counts = {"b": 2, "a": 2, "c": 5, "d": 1}
+    expect(top(counts, 3) == ["c 5", "a 2", "b 2"])
+    expect(top(counts, 10).len() == 4)
+}

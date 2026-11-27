@@ -1,0 +1,132 @@
+// Text parser: reads `key = value` lines from stdin and prints the entries sorted by key.
+// Blank lines and lines starting with # are skipped; a line that does not parse gives an
+// error with its line number, and the rest is still read. A value is an int (42), a bool
+// (true, false) or a quoted text ("hi").
+//   dif run examples/textparser.dif < settings.txt
+// `dif test examples/textparser.dif` runs the tests.
+use std.io
+
+enum Value {
+    Int(int n)
+    Flag(bool on)
+    Text(str s)
+}
+
+enum ParseErr {
+    NoEquals(int line)
+    EmptyKey(int line)
+    BadValue(int line, str text)
+}
+
+struct Entry {
+    str key
+    Value value
+}
+
+str Value.show() {
+    switch self {
+    case Value.Int(int n):
+        return "{n} (int)"
+    case Value.Flag(bool on):
+        return "{on} (bool)"
+    case Value.Text(str s):
+        return "\"{s}\" (str)"
+    }
+}
+
+str ParseErr.show() {
+    switch self {
+    case ParseErr.NoEquals(int line):
+        return "line {line}: expected key = value"
+    case ParseErr.EmptyKey(int line):
+        return "line {line}: the key is empty"
+    case ParseErr.BadValue(int line, str text):
+        return "line {line}: cannot read `{text}` as int, bool or quoted text"
+    }
+}
+
+Value!ParseErr parse_value(int line, str text) {
+    if text == "true" {
+        return Value.Flag(true)
+    }
+    if text == "false" {
+        return Value.Flag(false)
+    }
+    if text.len() >= 2 && text.starts_with("\"") && text.ends_with("\"") {
+        return Value.Text(text.slice(1, text.len() - 1))
+    }
+    ?int n = text.parse_int()
+    if n != none {
+        return Value.Int(n ?? 0)
+    }
+    return err(ParseErr.BadValue(line, text))
+}
+
+// `line` is not blank and not a comment.
+Entry!ParseErr parse_entry(int no, str line) {
+    ?int eq = line.find("=")
+    if eq == none {
+        return err(ParseErr.NoEquals(no))
+    }
+    int at = eq ?? 0
+    str key = line.slice(0, at).trim()
+    if key == "" {
+        return err(ParseErr.EmptyKey(no))
+    }
+    Value value = try parse_value(no, line.slice(at + 1, line.len()).trim())
+    return Entry{key: key, value: value}
+}
+
+void!io.IoErr main() {
+    []Entry entries = []
+    []str errors = []
+    int no = 0
+    for str raw in try io.lines() {
+        no += 1
+        str line = raw.trim()
+        if line == "" || line.starts_with("#") {
+            continue
+        }
+        switch parse_entry(no, line) {
+        case ok(Entry e):
+            entries.push(e)
+        case err(ParseErr e):
+            errors.push(e.show())
+        }
+    }
+    entries.sort_by(bool(Entry a, Entry b) { return a.key < b.key })
+    for Entry e in entries {
+        print("{e.key} = {e.value.show()}")
+    }
+    for str e in errors {
+        print("error: {e}")
+    }
+}
+
+// The value of a text that parses, else `false`.
+Value value_or_false(int line, str text) {
+    return parse_value(line, text) ?? Value.Flag(false)
+}
+
+test "values" {
+    expect(value_or_false(1, "42") == Value.Int(42))
+    expect(value_or_false(1, "true") == Value.Flag(true))
+    expect(value_or_false(1, "\"hi there\"") == Value.Text("hi there"))
+    expect(parse_value(3, "4x") == err(ParseErr.BadValue(3, "4x")))
+}
+
+test "entries" {
+    Entry!ParseErr want = Entry{key: "port", value: Value.Int(80)}
+    expect(parse_entry(1, "port = 80") == want)
+    expect(parse_entry(2, "port 80") == err(ParseErr.NoEquals(2)))
+    expect(parse_entry(4, " = 1") == err(ParseErr.EmptyKey(4)))
+}
+
+test "a bad value names its line" {
+    switch parse_entry(7, "debug = maybe") {
+    case ok:
+        expect(false)
+    case err(ParseErr e):
+        expect(e.show() == "line 7: cannot read `maybe` as int, bool or quoted text")
+    }
+}

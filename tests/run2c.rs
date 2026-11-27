@@ -677,3 +677,35 @@ fn stack_overflow_has_a_message() {
     assert_eq!(r.err, "panic: stack overflow\n");
     assert_eq!(r.code, 2);
 }
+
+/// The word count example passes the tests of the evaluation task `wordcount`.
+#[test]
+fn wordcount_example_passes_the_task_tests() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let src = std::fs::read_to_string(format!("{root}/examples/wordcount.dif")).unwrap();
+    let dir = format!("{root}/eval/tasks/wordcount/tests");
+    let mut n = 0;
+    for e in std::fs::read_dir(&dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x == "in") {
+            let stdin = std::fs::read(&p).unwrap();
+            let want = std::fs::read_to_string(p.with_extension("out")).unwrap();
+            let r = run_with("wordcount", &src, &stdin, &[], &[]);
+            assert_eq!((r.out, r.err, r.code), (want, String::new(), 0), "{p:?}");
+            n += 1;
+        }
+    }
+    assert!(n >= 8);
+}
+
+#[test]
+fn textparser_example_prints_sorted_entries_and_errors() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let src = std::fs::read_to_string(format!("{root}/examples/textparser.dif")).unwrap();
+    let input = b"# settings\nname = \"demo\"\n\nport = 8080\ndebug = true\nretries = three\nbroken line\n = 4\nalpha = -3\n";
+    let r = run_with("textparser", &src, input, &[], &[]);
+    let want = "alpha = -3 (int)\ndebug = true (bool)\nname = \"demo\" (str)\nport = 8080 (int)\n\
+error: line 6: cannot read `three` as int, bool or quoted text\n\
+error: line 7: expected key = value\nerror: line 8: the key is empty\n";
+    assert_eq!((r.out.as_str(), r.err.as_str(), r.code), (want, "", 0));
+}
