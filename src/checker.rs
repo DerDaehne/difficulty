@@ -1370,7 +1370,8 @@ impl<'a> Checker<'a> {
                 }
                 continue;
             };
-            self.err("R25.default_not_allowed", d.pos, why, None);
+            let hint = "remove the `= value`; pass it at the call".to_string();
+            self.err("R25.default_not_allowed", d.pos, why, Some(hint));
         }
     }
 
@@ -3266,11 +3267,20 @@ impl<'a> Checker<'a> {
                 bad = true;
                 continue;
             };
+            if ps[k].default.is_none() && k < npos {
+                // already given by position: dropping the name would move the value
+                let msg = format!("`{n}` is given twice, first at {}", self.at(args[k].pos));
+                self.err("R25.name_twice", a.pos, msg, None);
+                bad = true;
+                continue;
+            }
             if ps[k].default.is_none() {
                 let msg = format!("`{n}` has no default and is passed by position");
-                let d = Diag::new("R25.name_without_default", a.pos, msg)
-                    .hint(self.text(v))
-                    .fix(a.pos.offset, v.pos.offset, "");
+                let mut d = Diag::new("R25.name_without_default", a.pos, msg).hint(self.text(v));
+                // only the next positional slot is unambiguous
+                if k == npos && std::ptr::eq(a, &args[npos]) {
+                    d = d.fix(a.pos.offset, v.pos.offset, "");
+                }
                 self.diags.push(d);
                 bad = true;
                 continue;
@@ -3304,14 +3314,22 @@ impl<'a> Checker<'a> {
             let list: Vec<&str> = sorted.iter().map(|a| self.text(a)).collect();
             let list = list.join(", ");
             let mut d = Diag::new("R25.name_order", pos, msg).hint(list.clone());
-            if !bad {
-                let last = args.last().map_or(0, |a| a.end);
+            // rewriting the list would lose comments and line breaks between the arguments
+            let last = args.last().map_or(0, |a| a.end);
+            let between = self.span(args[0].pos.offset, last);
+            if !bad && !between.contains('\n') && !between.contains("//") {
                 d = d.fix(args[0].pos.offset, last, list);
             }
             self.diags.push(d);
             bad = true;
         }
         if bad {
+            return None;
+        }
+        if npos < req && args.len() > npos {
+            let msg = format!("`{name}` is missing argument `{}`", ps[npos].name);
+            let hint = "pass it by position, before the named arguments".to_string();
+            self.err("R8.arg_count", e.pos, msg, Some(hint));
             return None;
         }
         if npos > ps.len() || npos < req {

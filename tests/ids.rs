@@ -241,3 +241,24 @@ fn no_bare_codes_in_sources() {
     }
     assert!(bare.is_empty(), "diagnostics without an id: {bare:?}");
 }
+
+/// A fix never loses comments or changes what the program does (R25).
+#[test]
+fn named_argument_fixes_are_safe() {
+    let ids = |src: &str| {
+        let d = dif::check_source(src);
+        d.iter()
+            .map(|d| (d.id, d.fix.is_some()))
+            .collect::<Vec<_>>()
+    };
+    let head = "int f(int a, int b = 2, int d = 3) {\n    return a + b + d\n}\n";
+    let call = |c: &str| format!("{head}void main() {{\n    print({c})\n}}\n");
+    // comments and line breaks between the arguments: no fix
+    let multi = call("f(\n        1, // one\n        d: 7, // seven\n        b: 5 // five\n    )");
+    assert_eq!(ids(&multi), [("R25.name_order", false)]);
+    assert_eq!(ids(&call("f(1, d: 7, b: 5)")), [("R25.name_order", true)]);
+    // already given by position: no fix that would move the value
+    assert_eq!(ids(&call("f(1, a: 4)")), [("R25.name_twice", false)]);
+    assert_eq!(ids(&call("f(a: 4)")), [("R25.name_without_default", true)]);
+    assert_eq!(ids(&call("f(b: 4)")), [("R8.arg_count", false)]);
+}

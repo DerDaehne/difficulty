@@ -1,0 +1,11 @@
+// expect: error[R25] 9:9
+int f(int a, int b = 2, int d = 3) {
+    return a + b + d
+}
+void main() {
+    print(f(
+        1, // one
+        d: 7, // seven
+        b: 5 // five
+    ))
+}

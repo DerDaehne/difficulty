@@ -1,0 +1,7 @@
+// expect: error[R8] 6:11
+int f(int a, int b = 2) {
+    return a + b
+}
+void main() {
+    print(f(b: 4))
+}

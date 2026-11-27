@@ -2600,6 +2600,7 @@ void main() {
 
 ```
 main.dif:1:26: error[R25]: a `mut` parameter has no default
+  hint: remove the `= value`; pass it at the call
 ```
 
 ```dif
