@@ -103,7 +103,15 @@ impl Templates {
     /// types for their type parameters; their diagnostics are the ones of the generic text.
     pub fn seed(&self) -> Vec<Decl> {
         let mut out = Vec::new();
+        let mut named: Vec<&str> = Vec::new();
         for d in &self.decls {
+            // the first declaration of a name stands for it; the checker reports the others
+            if !matches!(d, Decl::Func(f) if f.recv.is_some()) {
+                if named.contains(&type_name(d)) {
+                    continue;
+                }
+                named.push(type_name(d));
+            }
             match d {
                 Decl::Func(f) if f.recv.is_none() => {
                     let env: Vec<(String, String)> = f
@@ -256,6 +264,13 @@ pub fn recv_params(recv: &str) -> Vec<String> {
 /// The empty struct that stands for each type parameter in the generic text.
 fn opaque_decls(owner: &str, tps: &[TParam], out: &mut Vec<Decl>) {
     for p in tps {
+        let key = opaque_key(owner, p);
+        if out
+            .iter()
+            .any(|d| matches!(d, Decl::Struct(s) if s.name == key))
+        {
+            continue;
+        }
         out.push(Decl::Struct(StructDecl {
             name: opaque_key(owner, p),
             pos: p.pos,

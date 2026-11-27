@@ -76,11 +76,7 @@ fn front(file: &str, src: &str) -> Result<(ast::Module, checker::Info), Vec<Diag
             .into_iter()
             .filter(|r| done.insert(r.key.clone()))
             .collect();
-        if fresh.is_empty()
-            || !cdiags.is_empty()
-                && serial > 0
-                && cdiags.iter().any(|d| d.id == "R27.instance_depth")
-        {
+        if fresh.is_empty() {
             let hints = std::mem::take(&mut info.hints);
             info.hints = generics::map_diags(hints, stride);
             let cdiags = generics::map_diags(cdiags, stride);
@@ -91,22 +87,27 @@ fn front(file: &str, src: &str) -> Result<(ast::Module, checker::Info), Vec<Diag
         }
         for r in fresh {
             serial += 1;
-            let Some(shift) = serial.checked_mul(stride) else {
-                let d = Diag::new(
-                    "R27.instance_depth",
-                    r.pos,
-                    format!(
-                        "the instances of `{}` nest deeper than {} levels",
-                        r.generic,
-                        generics::MAX_DEPTH
-                    ),
+            let shift = serial
+                .checked_mul(stride)
+                .filter(|_| serial <= MAX_INSTANCES);
+            let Some(shift) = shift else {
+                // instances that ask for more instances without end: wider than deep
+                let msg = format!(
+                    "the instances of `{}` nest deeper than {} levels",
+                    r.generic,
+                    generics::MAX_DEPTH
                 );
-                return Err(vec![d]);
+                let mut at = r.pos;
+                at.offset %= stride;
+                return Err(vec![Diag::new("R27.instance_depth", at, msg)]);
             };
             module.decls.extend(templates.instance(&r, shift));
         }
     }
 }
+
+/// Most instances of generic declarations in one program.
+const MAX_INSTANCES: u32 = 4000;
 
 /// Parser, checker and emitter recurse once per nesting level (bounded by the
 /// S1/R4 limits); their own thread gives that depth room in debug builds too.

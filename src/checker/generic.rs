@@ -604,6 +604,13 @@ impl<'a> Checker<'a> {
         let (t, _) = self.expr(inner);
         self.diags.truncate(d);
         self.hints.truncate(h);
+        // a literal of a generic struct has no place here: that is its own message
+        if t == Ty::Err
+            && matches!(&inner.kind, ExprKind::StructLit(n, _) if self.gen_types.contains_key(n.as_str()))
+        {
+            self.expr(inner);
+            self.peek_error = true;
+        }
         Some(t)
     }
 
@@ -731,6 +738,9 @@ impl<'a> Checker<'a> {
     ) -> bool {
         for (j, a) in pairs {
             let Some(t) = self.peek_ty(a) else { continue };
+            if std::mem::take(&mut self.peek_error) {
+                return false;
+            }
             if let Err((i, b, from)) = self.unify(&pats[*j], t, *j, binds) {
                 let msg = format!(
                     "`{}` is {} from `{}`, found {}",

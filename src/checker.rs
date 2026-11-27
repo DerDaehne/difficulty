@@ -557,6 +557,8 @@ struct Checker<'a> {
     requested: HashSet<String>,
     /// How deep instances nest in the declaration being checked.
     depth: u32,
+    /// An argument looked at for inference reported something that must stay.
+    peek_error: bool,
     callees: HashMap<(u32, u32), String>,
     enum_bases: HashMap<(u32, u32), u32>,
     aliases: HashMap<String, String>,
@@ -648,6 +650,7 @@ impl<'a> Checker<'a> {
             requests: Vec::new(),
             requested: HashSet::new(),
             depth: 0,
+            peek_error: false,
             callees: HashMap::new(),
             enum_bases: HashMap::new(),
             aliases: HashMap::new(),
