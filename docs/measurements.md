@@ -19,7 +19,7 @@ Rechner: x86_64, AMD Ryzen 7 7800X3D, Linux, gcc 16.2.0, `dif` als Release-Build
 | `llms.txt` | ≤ 24 KB | 21214 B | ja |
 | Agenten-pass@1 (Abschnitt „Agenten-Messung 1“) | ≥ Python | Haiku 4/5 gegen 4/5, Sonnet 4/5 gegen 5/5 | Haiku ja, Sonnet nein |
 | 1 000 000 × `push` auf `[]int` | < 50 ms | 7,2 ms (Abschnitt „M2-Zielwerte“) | ja |
-| Alltags-Benchmark: Wortzählung über 10 MB | ≤ 2× C, ≤ ½ Python | 4,3× C, 0,43× Python (105 ms gegen 25 ms und 244 ms) | ½ Python ja, 2× C nein |
+| Alltags-Benchmark: Wortzählung über 10 MB | ≤ 2× C, ≤ ½ Python | 2,3–2,7× C, 0,26× Python (60–69 ms gegen 25–29 ms) | ½ Python ja, 2× C knapp nein |
 
 Befehle:
 
