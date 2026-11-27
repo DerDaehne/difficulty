@@ -284,6 +284,7 @@ impl<'a> Lexer<'a> {
                 }
                 '/' if self.peek_at(1) == Some('*') => self.block_comment(),
                 '"' => self.string(),
+                '`' => self.raw_string(),
                 '\'' => self.rune(),
                 '0'..='9' => self.number(),
                 c if c.is_alphabetic() || c == '_' => self.ident(),
@@ -642,6 +643,121 @@ impl<'a> Lexer<'a> {
         self.push(Tok::Str(parts), p);
     }
 
+    /// A raw string `` `…` `` (§1.4): no escapes, no interpolation. A line break right
+    /// after the opening backtick makes it a block; its closing backtick stands alone
+    /// and its indentation is cut from every line.
+    fn raw_string(&mut self) {
+        let p = self.pos();
+        self.adv();
+        let mut text = String::new();
+        if self.peek() == Some('\n') {
+            self.adv();
+            let Some(v) = self.raw_block(p) else {
+                self.push(Tok::Str(vec![]), p);
+                return;
+            };
+            text = v;
+        } else {
+            let mut closed = false;
+            while let Some(c) = self.peek() {
+                if c == '\n' {
+                    break;
+                }
+                self.adv();
+                if c == '`' {
+                    closed = true;
+                    break;
+                }
+                text.push(c);
+            }
+            if !closed {
+                self.err(
+                    "L10.raw_unclosed",
+                    p,
+                    "raw string is not closed on this line",
+                    Some("add a backtick at the end of the string"),
+                );
+                while matches!(self.brackets.last(), Some('(' | '[')) {
+                    self.brackets.pop();
+                }
+            } else if !text.contains(['\\', '"', '{', '}']) {
+                let hint = format!(
+                    "write \"{text}\"; a raw string only pays off with \\ \" {{ }} or line breaks"
+                );
+                self.err(
+                    "L10.raw_needless",
+                    p,
+                    "this raw string needs no raw form",
+                    Some(&hint),
+                );
+                let end = self.byte();
+                self.fix_last(p.offset, end, format!("\"{text}\""));
+            }
+        }
+        let parts = if text.is_empty() {
+            vec![]
+        } else {
+            vec![StrPart::Lit(text)]
+        };
+        self.push(Tok::Str(parts), p);
+    }
+
+    /// The lines of a block raw string up to the closing backtick; `None` if it never closes.
+    fn raw_block(&mut self, p: Pos) -> Option<String> {
+        let mut lines: Vec<(Pos, String)> = Vec::new();
+        let indent = loop {
+            if self.peek().is_none() {
+                self.err(
+                    "L10.raw_unclosed",
+                    p,
+                    "raw string is not closed",
+                    Some("put a closing backtick alone on its own line"),
+                );
+                return None;
+            }
+            let at = self.pos();
+            let mut line = String::new();
+            while let Some(c) = self.peek().filter(|&c| c != '\n') {
+                self.adv();
+                line.push(c);
+            }
+            if let Some(ind) = line.strip_suffix('`') {
+                if ind.chars().all(|c| c == ' ' || c == '\t') {
+                    if ind.contains('\t') {
+                        self.err(
+                            "L10.raw_tab",
+                            at,
+                            "a tab in the indentation of a raw string",
+                            Some("indent with spaces"),
+                        );
+                    }
+                    // after a tab error the lines keep their indentation: one cause, one message
+                    break if ind.contains('\t') { 0 } else { ind.len() };
+                }
+            }
+            self.adv();
+            lines.push((at, line));
+        };
+        let pad = " ".repeat(indent);
+        let mut out = String::new();
+        let mut reported = false;
+        for (at, line) in lines {
+            if let Some(rest) = line.strip_prefix(pad.as_str()) {
+                out.push_str(rest);
+            } else if !line.chars().all(|c| c == ' ') && !reported {
+                reported = true;
+                self.err(
+                    "L10.raw_indent",
+                    at,
+                    format!("this line is indented less than the closing backtick ({indent} spaces)"),
+                    Some("indent every line as far as the closing backtick, or move the backtick left"),
+                );
+            }
+            out.push('\n');
+        }
+        Some(out)
+    }
+
     /// `'a'`, `'\n'`, `'\u{1F600}'`: one code point (§1.4, L9).
     fn rune(&mut self) {
         let p = self.pos();
@@ -972,6 +1088,18 @@ mod tests {
             .filter(|t| **t == Tok::Nl)
             .count();
         assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn raw_strings() {
+        let lit = |s: &str| vec![Tok::Str(vec![StrPart::Lit(s.into())])];
+        assert_eq!(kinds(r#"`a\"{b}`"#)[..1], lit(r#"a\"{b}"#)[..]);
+        assert_eq!(kinds("`\n  a\n\n    b\n  `")[..1], lit("a\n\n  b\n")[..]);
+        assert_eq!(codes("`abc`"), ["L10"]);
+        assert_eq!(codes("`ab"), ["L10"]);
+        assert_eq!(codes("`\n x\n   `"), ["L10"]);
+        assert_eq!(codes("`\n\tx\n\t`"), ["L10"]);
+        assert_eq!(codes("`\n  x"), ["L10"]);
     }
 
     #[test]

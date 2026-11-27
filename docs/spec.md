@@ -25,6 +25,7 @@ Ein Verstoß gegen eine Regel trägt deren Nummer: `error[R13]`. Schreibfehler, 
 | `L7` | `++` oder `--` |
 | `L8` | Zahl-Literal in falscher Form: führende Null (`010`), Präfix `0X`/`0B`, `_` direkt nach dem Präfix oder im Exponenten, fehlende oder falsche Ziffern (`0x`, `0b12`, `1e`), Buchstaben direkt nach der Zahl |
 | `L9` | rune-Literal in falscher Form: leer (`''`), mehr als ein Zeichen (`'ab'`) oder nicht geschlossen |
+| `L10` | Raw-String in Backticks in falscher Form: nicht geschlossen, zu geringe oder Tab-Einrückung, unnötig |
 | `S1` | unerwartetes Token |
 | `S2` | Vergleichskette `a < b < c` |
 | `S3` | `&&` und `\|\|` gemischt ohne Klammern |
@@ -109,6 +110,10 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `L1.invisible` | ja | invisible character U+… is only allowed in strings and comments |
 | `L1.non_ascii` |  | `…` is only allowed in strings and comments |
 | `L1.unexpected_char` |  | unexpected character `…` |
+| `L10.raw_indent` |  | this line is indented less than the closing backtick (… spaces) |
+| `L10.raw_needless` | ja | this raw string needs no raw form |
+| `L10.raw_tab` |  | a tab in the indentation of a raw string |
+| `L10.raw_unclosed` |  | raw string is not closed (on this line) |
 | `L2.block_comment` |  | block comments `/* … */` do not exist |
 | `L3.semicolon` | ja | `;` is not used in difficulty |
 | `L4.int_too_big` |  | integer literal is larger than 2^64 - 1 |
@@ -376,6 +381,8 @@ dec      = "0" | ( "1" … "9" ) { digit | "_" } ;
 FLOAT    = digit { digit | "_" } "." digit { digit | "_" } [ exponent ] | dec exponent ;
 exponent = ( "e" | "E" ) [ "+" | "-" ] digit { digit } ;
 STRING   = '"' { char | escape | interp } '"' ;
+RAW      = "`" { char2 } "`" | "`" NL { line NL } SPACES "`" ;
+char2    = (* jedes Zeichen außer "`" und dem Zeilenende *) ;
 char     = (* jedes Zeichen außer '"', "\", "{", "}" und dem Zeilenende *) ;
 escape   = "\" ( "n" | "t" | "r" | "\" | '"' | "'" | "{" | "}" | "0" ) | "\u{" hexdigit { hexdigit } "}" ;
 interp   = "{" expr [ ":" format ] "}" ;
@@ -390,8 +397,57 @@ rchar    = (* jedes Zeichen außer "'", "\" und dem Zeilenende *) ;
 - Jede andere Form außerhalb der Grammatik ist ebenfalls `L8` und bleibt ein Token: `0X10`, `0x_ff`, `0x`, `0b102`, `1e`, `1e1_0`, `12ab`.
 - Ein String reicht nicht über das Zeilenende hinaus (`L5`). Eine unbekannte Escape-Sequenz ist `L6`. `\{` und `\}` schreiben eine wörtliche Klammer; ein einzelnes `}` ohne `\` ist `L6`.
 - `{expr}` setzt den Wert von `expr` als Text ein; `expr` muss `text` sein (R28). Im Ausdruck einer Interpolation stehen keine Strings und keine geschweiften Klammern (`S1`).
+- **Raw-String.** `` `…` `` ist ein String ohne Escapes und ohne Interpolation, Typ `str`: `\`, `"`, `{` und `}` stehen so da, wie sie geschrieben sind. Einzeilig steht er ganz auf einer Zeile; endet die Zeile vor dem schließenden Backtick, ist das `L10`, Meldung `` raw string is not closed on this line ``. Mehrzeilig ist er, wenn unmittelbar nach dem öffnenden Backtick das Zeilenende folgt; der schließende Backtick steht allein auf seiner Zeile, davor nur Leerzeichen. Diese Einrückung wird von jeder Inhaltszeile abgezogen; eine nicht leere Zeile, die nicht damit beginnt, ist `L10` an dieser Zeile, Meldung `` this line is indented less than the closing backtick (4 spaces) ``; leere Zeilen dürfen kürzer sein. Ein Tab in der Einrückung des schließenden Backticks ist `L10`, Meldung `` a tab in the indentation of a raw string ``. Der Wert endet mit dem Zeilenende der letzten Inhaltszeile, ein `\n` am Ende ist also enthalten. Ein Backtick im Inhalt ist nicht möglich; dafür gilt der normale String. Ein einzeiliger Raw-String ist nur erlaubt, wenn sein Inhalt `\`, `"`, `{` oder `}` enthält; sonst ist er `L10` (kanonisch ist der normale String, §0), Meldung `` this raw string needs no raw form ``, Hinweis `write "abc"; a raw string only pays off with \ " { } or line breaks`, mit `fix`. Mehrzeilige Raw-Strings sind immer erlaubt.
 
-Teil 2c ergänzt:
+```dif snippet
+str body = `{"name": "x", "n": 3}`
+str page = `
+    <h1>Kino</h1>
+    <p>{kein Platzhalter}</p>
+    `
+assert(body == "\{\"name\": \"x\", \"n\": 3\}")
+assert(page == "<h1>Kino</h1>\n<p>\{kein Platzhalter\}</p>\n")
+print(`C:\temp`)
+```
+
+```dif error L10
+void main() {
+    str a = `abc`
+    print(a)
+}
+```
+
+```
+main.dif:2:13: error[L10]: this raw string needs no raw form
+  hint: write "abc"; a raw string only pays off with \ " { } or line breaks
+```
+
+```dif error L10
+void main() {
+    str a = `
+          one
+      two
+        `
+    print(a)
+}
+```
+
+```
+main.dif:4:1: error[L10]: this line is indented less than the closing backtick (8 spaces)
+  hint: indent every line as far as the closing backtick, or move the backtick left
+```
+
+```dif error L10
+void main() {
+    str a = `{"n": 1}
+    print(a)
+}
+```
+
+```
+main.dif:2:13: error[L10]: raw string is not closed on this line
+  hint: add a backtick at the end of the string
+```
 
 - **Zahl-Literale.** `INT` und `FLOAT` stehen ohne Typ da; welchen Typ sie haben und ob sie passen, legt R8 fest. Ein Literal mit Punkt oder Exponenten ist ein Float-Literal, eines ohne beides ein Ganzzahl-Literal. Eine Methode auf einem Zahl-Literal steht in Klammern, `(5).abs()`; `5.abs()` ist `L8`, Hinweis `put the number in parentheses: (5).abs()`.
 - **rune-Literal.** `'a'` ist ein einzelner Unicode-Codepoint vom Typ `rune`; `'\n'`, `'\''`, `'\u{1F600}'` und `'é'` sind es ebenso. Die Escapes sind dieselben wie im String; `'"'` und `'{'` brauchen keinen. Ein Literal, das leer ist (`''`), mehr als einen Codepoint enthält (`'ab'`, auch ein Buchstabe mit angehängtem Akzent) oder vor dem Zeilenende nicht schließt, ist `L9` an dem öffnenden `'`. Meldung bei leerem oder zu langem Inhalt: `` a rune literal holds exactly one character ``, Hinweis `use a string for more than one character: "ab"` (bei `''`: `write a character between the quotes: 'a'`); bei fehlendem Ende `` rune literal is not closed ``, Hinweis `add ' at the end`. `\u{…}` mit einem Wert über 10FFFF oder einem Surrogat (D800 … DFFF) ist `L6`, Meldung `` not a Unicode character ``, im String wie im rune-Literal.

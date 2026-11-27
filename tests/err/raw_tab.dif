@@ -1,0 +1,6 @@
+// expect: error[L10] 5:1
+void main() {
+    str a = `
+	x
+	`
+}

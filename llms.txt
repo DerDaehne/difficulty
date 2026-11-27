@@ -101,6 +101,8 @@ time; only the result must fit; a certain abort there (`1 / 0`) is R14.
 **Text.** `"…"` on one line. Escapes `\n \t \r \\ \" \{ \} \0 \u{1F600}`.
 `{expr}` inserts any int, bool or str; no strings or braces inside `{ }`;
 a literal brace is `\{` or `\}`. `print(x)` writes `x` and a newline.
+Raw string `` `{"n": 3}` ``: no escapes, no `{x}`; allowed only if it holds `\ " { }` or spans lines.
+Lines: a line break after the opening backtick, the closing backtick alone on its line; its indent is cut.
 
 **Abort.** A programming error stops the program with
 `panic: integer overflow in + (main.dif:3:15)` on stderr and exit code 2.

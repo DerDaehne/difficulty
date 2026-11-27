@@ -1,0 +1,4 @@
+// expect: error[L10] 3:13
+void main() {
+    str a = `abc`
+}

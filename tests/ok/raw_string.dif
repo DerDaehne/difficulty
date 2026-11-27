@@ -1,0 +1,11 @@
+void main() {
+    str a = `\n "q" {x} ??/ ??= é 😀 \\`
+    print(a)
+    print(a.len())
+    str b = `
+  ab
+
+    c\\
+  `
+    print(b)
+}

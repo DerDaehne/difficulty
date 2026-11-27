@@ -26,6 +26,7 @@ syn match difFloat "\<\d[0-9_]*[eE][+-]\=\d\+\>"
 syn match difEscape contained "\\[ntr\\\"{}0]\|\\u{\x\+}"
 syn region difInterp contained matchgroup=difInterpDelim start="{" end="}" contains=TOP,difInterp oneline
 syn region difString start=+"+ skip=+\\"+ end=+"+ oneline contains=difEscape,difInterp
+syn region difString start=+`+ end=+`+
 
 " Comments
 syn keyword difTodo contained TODO FIXME XXX
