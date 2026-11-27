@@ -1,0 +1,93 @@
+use std.io
+
+struct Record {
+    int id
+    int cents
+}
+
+bool all_digits(str s) {
+    for rune r in s.runes() {
+        if !r.is_digit() {
+            return false
+        }
+    }
+    return !s.is_empty()
+}
+
+// "12", "-3.5", "0.07" as cents, none if the text is no amount.
+?int cents_of(str s) {
+    bool negative = s.starts_with("-")
+    []str parts = (if negative { s.slice(1, s.len()) } else { s }).split(".")
+    if parts.len() > 2 || !all_digits(parts[0]) {
+        return none
+    }
+    int cents = (try parts[0].parse_int()) * 100
+    if parts.len() == 2 {
+        str frac = parts[1]
+        if !all_digits(frac) || frac.len() > 2 {
+            return none
+        }
+        cents += (try (frac + "0").slice(0, 2).parse_int())
+    }
+    return if negative { -cents } else { cents }
+}
+
+// The record in a line, or the first reason why it is broken.
+Record!str parse_record(str line) {
+    []str f = line.split(",").map(str(str x) { return x.trim() })
+    if f.len() != 3 {
+        return err("expected 3 fields")
+    }
+    int id = 0
+    if all_digits(f[0]) && f[0].len() <= 9 {
+        id = f[0].parse_int() ?? 0
+    }
+    if id < 1 {
+        return err("bad id")
+    }
+    if f[1].is_empty() {
+        return err("empty name")
+    }
+    switch cents_of(f[2]) {
+    case some(int cents):
+        return Record{id: id, cents: cents}
+    case none:
+        return err("bad amount")
+    }
+}
+
+str money(int cents) {
+    int frac = cents.abs() % 100
+    str sign = if cents < 0 { "-" } else { "" }
+    str pad = if frac < 10 { "0" } else { "" }
+    return "{sign}{cents.abs() / 100}.{pad}{frac}"
+}
+
+void!io.IoErr main() {
+    map[int]bool seen = {}
+    int good = 0
+    int bad = 0
+    int total = 0
+    int n = 0
+    for str line in try io.lines() {
+        n += 1
+        if line.trim().is_empty() || line.starts_with("#") {
+            continue
+        }
+        switch parse_record(line) {
+        case ok(Record r):
+            if seen[r.id] != none {  // seen.has(r.id) once #1929 is fixed
+                print("line {n}: duplicate id")
+                bad += 1
+            } else {
+                seen[r.id] = true
+                good += 1
+                total += r.cents
+            }
+        case err(str why):
+            print("line {n}: {why}")
+            bad += 1
+        }
+    }
+    print("ok {good}, bad {bad}, total {money(total)}")
+}

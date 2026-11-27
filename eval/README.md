@@ -11,7 +11,7 @@ eval/
     task.md           task text, language neutral (input, output, examples)
     tests/*.in, *.out hidden tests: stdin and expected stdout
     ref.py            Python reference, passes all tests
-    ref.dif           difficulty reference (not there yet, see below)
+    ref.dif           difficulty reference, passes all tests
   results/<time>/     one JSON per run and table.md
 ```
 
@@ -44,13 +44,13 @@ python3 eval/run.py --model haiku --model sonnet                # all tasks, bot
 
 Options: `--lang dif|python` (repeatable), `--model` (repeatable, default `haiku` and `sonnet`), `--task` (repeatable), `--rounds N`, `--dif PATH`, `--out DIR`.
 
-`--dry-run` lets the Python reference answer. For difficulty it answers with `ref.dif` if present, otherwise with the empty program `void main() {}`, which compiles and fails the tests, so `check`, `build`, the test loop and the 5 rounds are all exercised.
+`--dry-run` lets the Python reference answer. For difficulty it answers with `ref.dif` if present, otherwise (a new task) with the empty program `void main() {}`, which compiles and fails the tests, so `check`, `build`, the test loop and the 5 rounds are all exercised.
 
 Reference check: `for t in eval/tasks/*/; do for i in $t/tests/*.in; do python3 $t/ref.py < $i | cmp - ${i%.in}.out; done; done`
 
 ## difficulty references
 
-`ref.dif` per task is added once the standard library exists. Until then `--dry-run --lang dif` uses the placeholder. A `ref.dif` must pass all tests of its task and, in dry-run mode, shows that the harness and the language agree.
+Every task has a `ref.dif`: a model-free idiomatic solution that reads stdin and writes stdout and passes all tests of its task byte for byte. `cargo test --test eval_refs` builds each one and runs it against `tests/*.in`; `python3 eval/run.py --dry-run --lang dif` answers with them and must report pass@1 for all five tasks, which shows that harness and language agree.
 
 ## Cost estimate
 

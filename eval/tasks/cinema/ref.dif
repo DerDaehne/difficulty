@@ -1,0 +1,116 @@
+use std.io
+
+const int ROWS = 5
+const int SEATS = 8
+
+struct Hall {
+    []bool taken = repeat(false, ROWS * SEATS)
+}
+
+bool Hall.is_taken(int row, int seat) {
+    return self.taken[row * SEATS + seat]
+}
+
+void Hall.set(mut self, int row, int seat, bool value) {
+    self.taken[row * SEATS + seat] = value
+}
+
+int Hall.sold() {
+    return self.taken.count(true)
+}
+
+// The first position in `row` where `n` seats in a row are free.
+?int Hall.free_block(int row, int n) {
+    for int start in range(SEATS - n + 1) {
+        bool free = true
+        for int k in range(n) {
+            if self.is_taken(row, start + k) {
+                free = false
+            }
+        }
+        if free {
+            return start
+        }
+    }
+    return none
+}
+
+str Hall.plan() {
+    str text = "  12345678"
+    for int row in range(ROWS) {
+        text += "\n{row + 1} "
+        for int seat in range(SEATS) {
+            text += if self.is_taken(row, seat) { "X" } else { "." }
+        }
+    }
+    return text
+}
+
+// All words as numbers, or none if one of them is not a decimal integer.
+?[]int numbers([]str words) {
+    []int values = []
+    for str w in words {
+        values.push(try w.parse_int())
+    }
+    return values
+}
+
+void Hall.book_or_cancel(mut self, bool book, int row, int seat) {
+    if row < 1 || row > ROWS || seat < 1 || seat > SEATS {
+        print("error: no such seat {row} {seat}")
+    } else if book && self.is_taken(row - 1, seat - 1) {
+        print("error: seat {row} {seat} is taken")
+    } else if !book && !self.is_taken(row - 1, seat - 1) {
+        print("error: seat {row} {seat} is not booked")
+    } else {
+        self.set(row - 1, seat - 1, book)
+        print(if book { "booked {row} {seat}" } else { "cancelled {row} {seat}" })
+    }
+}
+
+void Hall.book_group(mut self, int n) {
+    if n < 1 || n > SEATS {
+        print("error: bad group size {n}")
+        return
+    }
+    for int row in range(ROWS) {
+        switch self.free_block(row, n) {
+        case some(int start):
+            for int k in range(n) {
+                self.set(row, start + k, true)
+            }
+            print("group {n} booked: row {row + 1}, seats {start + 1} to {start + n}")
+            return
+        case none:
+        }
+    }
+    print("error: no block of {n} free seats")
+}
+
+void!io.IoErr main() {
+    Hall hall = Hall{}
+    for str raw in try io.lines() {
+        str line = raw.trim()
+        if line.is_empty() {
+            continue
+        }
+        []str words = line.split(" ")
+        []int args = numbers(words.slice(1, words.len())) ?? []
+        bool numeric = args.len() == words.len() - 1
+        str cmd = words[0]
+        if cmd == "q" && words.len() == 1 {
+            break
+        } else if (cmd == "b" || cmd == "s") && numeric && args.len() == 2 {
+            hall.book_or_cancel(cmd == "b", args[0], args[1])
+        } else if cmd == "g" && numeric && args.len() == 1 {
+            hall.book_group(args[0])
+        } else if cmd == "p" && words.len() == 1 {
+            print(hall.plan())
+        } else if cmd == "t" && words.len() == 1 {
+            int sold = hall.sold()
+            print("sold {sold} of {ROWS * SEATS}, occupancy {f64(sold) * 100.0 / f64(ROWS * SEATS):.1f}%")
+        } else {
+            print("error: bad command")
+        }
+    }
+}

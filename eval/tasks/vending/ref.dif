@@ -1,0 +1,99 @@
+use std.io
+
+struct Machine {
+    int credit = 0
+    int strikes = 0
+    bool locked = false
+}
+
+// Price in cents, none for an unknown item.
+?int price(str item) {
+    switch item {
+    case "A":
+        return 60
+    case "B":
+        return 120
+    case "C":
+        return 150
+    default:
+        return none
+    }
+}
+
+bool is_coin(str value) {
+    return ["10", "20", "50", "100"].contains(value)
+}
+
+void Machine.coin(mut self, str value) {
+    if !is_coin(value) {
+        print("rejected")
+        self.strikes += 1
+        if self.strikes == 3 {
+            print("locked")
+            self.locked = true
+        }
+        return
+    }
+    self.credit += value.parse_int() ?? 0
+    print("credit {self.credit}")
+}
+
+void Machine.select(mut self, str item) {
+    int cost = price(item) ?? -1
+    if cost < 0 {
+        print("error: unknown item {item}")
+    } else if self.credit < cost {
+        print("error: need {cost - self.credit} more")
+    } else {
+        print("vend {item} change {self.credit - cost}")
+        self.credit = 0
+    }
+}
+
+void Machine.refund(mut self) {
+    print("refund {self.credit}")
+    self.credit = 0
+}
+
+void Machine.unlock(mut self) {
+    if self.locked {
+        self.locked = false
+        self.strikes = 0
+        print("unlocked")
+    } else {
+        print("error: not locked")
+    }
+}
+
+void Machine.status() {
+    str state = if self.locked { "locked" } else if self.credit > 0 { "active" } else { "idle" }
+    print("state {state} credit {self.credit}")
+}
+
+void!io.IoErr main() {
+    Machine m = Machine{}
+    for str raw in try io.lines() {
+        str line = raw.trim()
+        if line.is_empty() {
+            continue
+        }
+        []str w = line.split(" ")
+        bool one = w.len() == 1
+        bool two = w.len() == 2
+        if w[0] == "unlock" && one {
+            m.unlock()
+        } else if w[0] == "status" && one {
+            m.status()
+        } else if !(w[0] == "refund" && one) && !((w[0] == "coin" || w[0] == "select") && two) {
+            print("error: bad command")
+        } else if m.locked {
+            print("error: locked")
+        } else if w[0] == "coin" {
+            m.coin(w[1])
+        } else if w[0] == "select" {
+            m.select(w[1])
+        } else {
+            m.refund()
+        }
+    }
+}
