@@ -656,7 +656,7 @@ fn small_std_extensions_check() {
     );
     bad(
         "map[str]str m = {}\nm.add(\"a\", \"b\")\nprint(m)",
-        "3:5 R8 `add` needs number values, found str | use m[k] = x",
+        "3:5 R8 `add` needs number values, found str | use m[\"a\"] = \"b\"",
     );
     bad(
         "map[str]int m = {}\nm[\"a\"] -= 1",

@@ -12,8 +12,10 @@ fn work(name: &str) -> PathBuf {
 
 /// Compiles with all warnings as errors, runs, and returns (stdout, stderr, exit code).
 fn run(name: &str, src: &str) -> (String, String, i32) {
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let k = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let c = dif::compile("main.dif", src.as_bytes()).unwrap_or_else(|d| panic!("{d:#?}"));
-    let dir = work(name);
+    let dir = work(&format!("{name}-{k}"));
     let (c_file, exe) = (dir.join("main.c"), dir.join("main"));
     std::fs::write(&c_file, c).unwrap();
     let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());

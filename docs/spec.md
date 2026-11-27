@@ -2882,7 +2882,7 @@ Für `map[K]V`; Literal, `m[k]` und `m[k] = v` stehen in R30.
 | `[]K map.keys()` | die Schlüssel in Einfügereihenfolge | |
 | `[]V map.values()` | die Werte in derselben Reihenfolge | |
 
-`keys` und `values` sind Kopien (R5). Eine leere Map hat Länge 0 und Textform `{}`. `add` ersetzt `m[k] += x`, das `R8` bleibt (R30): Hinweis `m.add(k, x)`. Bei einem `V`, das keine Zahl ist, ist `add` `R8` am Namen, Meldung `` `add` needs number values, found str ``, Hinweis `use m[k] = x`.
+`keys` und `values` sind Kopien (R5). Eine leere Map hat Länge 0 und Textform `{}`. `add` ersetzt `m[k] += x`, das `R8` bleibt (R30): Hinweis `m.add(k, x)`. Bei einem `V`, das keine Zahl ist, ist `add` `R8` am Namen, Meldung `` `add` needs number values, found str ``, Hinweis `use m["a"] = "b"` (mit den Ausdrücken aus dem Quelltext).
 
 ```dif snippet
 map[str]int counts = {}
@@ -2919,7 +2919,7 @@ void main() {
 
 ```
 main.dif:3:5: error[R8]: `add` needs number values, found str
-  hint: use m[k] = x
+  hint: use m["a"] = "b"
 ```
 
 ### 4.6 `io` und `os`

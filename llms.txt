@@ -381,18 +381,18 @@ Output: `[1, 2, 3, 4] 1 {"to": 2, "be": 2, "or": 1} Task{title: "WRITE", tags: [
 - **Lists `[]T` and arrays `[N]T` (R5).** Values: `ys = xs` copies, a write to one never shows
   in the other (copy-on-write inside, `push` is O(1)). `xs[i]` is checked (abort, R14);
   `xs[i] = v`, `xs[i].f = v`, `normalize(mut xs[i])` write. Methods: `len is_empty push pop insert
-  remove first last contains index_of count sort reverse slice join`; `pop first last index_of`
-  give `?T`. `[]` and `{}` need a place that gives the type. `repeat(0, n)`. Arrays have no
+  remove first last contains index_of count sort reverse swap slice join`; `pop first last index_of`
+  give `?T`. `[]`/`{}` need a typed place. `repeat(0, n)`. Arrays have no
   `push pop insert remove`.
-- **Maps `map[K]V` (R30).** `m[k]` is `?V` (`m[k] ?? 0`), `m[k] = v` sets; `m[k] += 1` is R8.
-  `len has remove keys values`; entries keep insertion order. `m[k]` is not a place: no
+- **Maps `map[K]V` (R30).** `m[k]` is `?V`, `m[k] = v` sets; `m[k] += 1` is R8, use `m.add(k, 1)`.
+  `len has remove add keys values`; entries keep insertion order. `m[k]` is not a place: no
   `m[k].f = v`, no `mut m[k]` (R30).
 - **Loops (R11).** `for T x in xs`, `for int i, T x in xs`, `for K k, V v in m` run over the
   value at the start; writes to `xs` in the body do not show. `for T x in try rs` unpacks a
   list of `T!E` like `try`.
 - **`io`, `os` (R16).** `use std.io` / `use std.os` first in the file. `io.lines()` (only as
   `for str l in try io.lines()`), `io.read_line()`, `io.read_file(p)`, `io.write_file(p, s)`,
-  `io.eprint(x)`, `os.args()`, `os.env(name)`, `os.exit(code)`. Errors are `io.IoErr`:
+  `io.read_lines(p)`, `io.write_lines(p, ls)`, `io.eprint(x)`, `os.args()`, `os.env(name)`, `os.exit(code)`. Errors are `io.IoErr`:
   `NotFound(path)`, `NoPermission(path)`, `InvalidUtf8(path)`, `Other(path, reason)`. A line
   loses a trailing `\r`. A `str` is always valid UTF-8.
 - **Text (R28).** `[1, 2]`, `["a"]`, `{"k": 1}`, `['a']`: `str` and `rune` inside are quoted;

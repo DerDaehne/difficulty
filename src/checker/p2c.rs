@@ -982,7 +982,15 @@ impl<'a> Checker<'a> {
             let v = self.maps[i as usize].1;
             if !v.is_number() && v != Ty::Err {
                 let msg = format!("`add` needs number values, found {}", self.tn(v));
-                let hint = format!("use {}[k] = x", self.text(base));
+                let hint = match args {
+                    [k, x] => format!(
+                        "use {}[{}] = {}",
+                        self.text(base),
+                        self.text(k),
+                        self.text(x)
+                    ),
+                    _ => String::new(),
+                };
                 self.err("R8", e.pos, msg, Some(hint));
             }
         }
