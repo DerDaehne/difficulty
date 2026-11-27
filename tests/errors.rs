@@ -669,7 +669,7 @@ fn void_call_without_effect_r13() {
         "R13",
         "10:5",
         "call of `p.touch()` has no effect",
-        hint,
+        "take it as mut: void P.touch(mut self)",
     );
     // no effect through calls, also recursion
     let src = "void a(int n) {\n    int y = n\n}\nvoid r(int n) {\n    if n > 0 {\n        r(n - 1)\n    }\n}\nvoid main() {\n    a(1)\n    r(2)\n}\n";
@@ -680,7 +680,6 @@ fn void_call_without_effect_r13() {
     assert_eq!(
         got,
         [
-            "6 call of `r(n - 1)` has no effect",
             "10 call of `a(1)` has no effect",
             "11 call of `r(2)` has no effect"
         ]
@@ -691,4 +690,14 @@ fn void_call_without_effect_r13() {
 fn void_call_with_effect_is_fine() {
     let src = "use std.io\nstruct P {\n    int x\n}\nvoid P.inc(mut self) {\n    self.x += 1\n}\nvoid bump(mut int n) {\n    n += 1\n}\nvoid say(int n) {\n    print(n)\n}\nvoid via(int n) {\n    say(n)\n}\nvoid fail() {\n    assert(false)\n}\nvoid main() {\n    P p = P{x: 1}\n    int n = 1\n    p.inc()\n    bump(mut n)\n    via(n)\n    []int xs = []\n    xs.push(n)\n    print(xs)\n    io.eprint(\"x\")\n    print(p)\n}\n\ntest \"t\" {\n    expect(1 == 1)\n}\n";
     assert_eq!(check_source(src), vec![], "{src}");
+}
+
+#[test]
+fn mutual_recursion_without_effect_reports_once_r13() {
+    let src = "void a(int n) {\n    if n > 0 {\n        b(n - 1)\n    }\n}\nvoid b(int n) {\n    a(n)\n}\nvoid main() {\n    a(2)\n}\n";
+    let got: Vec<String> = check_source(src)
+        .iter()
+        .map(|d| format!("{} {}", d.pos.line, d.msg))
+        .collect();
+    assert_eq!(got, ["10 call of `a(2)` has no effect"]);
 }

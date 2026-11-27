@@ -349,6 +349,8 @@ struct Derived {
     changes: Vec<bool>,
     changes_self: bool,
     effect: bool,
+    /// Functions reachable through calls.
+    reaches: Vec<bool>,
 }
 
 fn derive(fns: &[FnInfo], facts: &[Facts]) -> Vec<Derived> {
@@ -358,8 +360,25 @@ fn derive(fns: &[FnInfo], facts: &[Facts]) -> Vec<Derived> {
             changes: f.changes.clone(),
             changes_self: f.changes_self,
             effect: false,
+            reaches: vec![false; facts.len()],
         })
         .collect();
+    for (i, f) in facts.iter().enumerate() {
+        for &c in &f.calls {
+            d[i].reaches[c] = true;
+        }
+    }
+    for k in 0..d.len() {
+        for i in 0..d.len() {
+            if d[i].reaches[k] {
+                for j in 0..d.len() {
+                    if d[k].reaches[j] {
+                        d[i].reaches[j] = true;
+                    }
+                }
+            }
+        }
+    }
     loop {
         let mut changed = false;
         for (i, f) in facts.iter().enumerate() {
@@ -1156,6 +1175,36 @@ impl<'a> Checker<'a> {
         format!("{} {recv}{}({})", f.ret.name, f.name, params.join(", "))
     }
 
+    /// The call is inside the recursion cycle of its callee: the outer call reports.
+    fn in_cycle(&self, callee: Option<usize>) -> bool {
+        match (&self.derived, self.cur, callee) {
+            (Some(d), Some(cur), Some(id)) => d[id].reaches[cur],
+            _ => false,
+        }
+    }
+
+    /// The hint of a void call without effect: if it only changes its own copy, take it as mut.
+    fn no_effect_hint(&self) -> String {
+        let fix = match (&self.derived, self.last_callee) {
+            (Some(d), Some(id)) => {
+                let f = &self.fns[id];
+                if d[id].changes_self && f.decl.mut_self.is_none() {
+                    Some(None)
+                } else {
+                    (0..f.params.len())
+                        .find(|&k| d[id].changes[k] && !f.params[k].is_mut)
+                        .map(Some)
+                }
+                .map(|k| self.signature(id, k))
+            }
+            _ => None,
+        };
+        match fix {
+            Some(s) => format!("take it as mut: {s}"),
+            None => "remove the call, or return a result and use it".to_string(),
+        }
+    }
+
     fn fn_name(&self, id: usize) -> String {
         let f = self.fns[id].decl;
         match &f.recv {
@@ -1534,10 +1583,11 @@ impl<'a> Checker<'a> {
                     && !effect
                     && self.diags.len() == before
                     && !matches!(e.kind, ExprKind::Try(..))
+                    && !self.in_cycle(self.last_callee)
                 {
                     let text = self.text(e);
                     let msg = format!("call of `{text}` has no effect");
-                    let hint = "remove the call, or return a result and use it".to_string();
+                    let hint = self.no_effect_hint();
                     self.err("R13.no_effect", e.pos, msg, Some(hint));
                 } else if t != Ty::Void && t != Ty::Err && !effect {
                     let text = flat(self.text(e));
