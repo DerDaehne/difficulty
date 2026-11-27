@@ -191,9 +191,8 @@ Output: `Point{x: 1, y: 2} Point{x: 12, y: 4} Point{x: 13, y: 4} 9 Shape.Rect(3,
   No fall-through; `continue` and `return` work inside, `break` not directly. Every variant
   is handled or there is a `default`; over other types `default` is required.
 - **`if` as a value (R15).** `str s = if n < 0 { "neg" } else { "pos" }`; `else` is
-  required, each branch ends with an expression (statements may come before it) or
-  with `return`, `break` or `continue` (it never arrives; one branch needs a value), only
-  the chosen branch runs, all branches have one type.
+  required, each branch ends with an expression, or with `return`/`break`/`continue` (one
+  branch needs a value); only the chosen branch runs, all values have one type.
 - **Equality and text (R28).** `==` compares field by field and by variant; text looks like
   the literal, `str` inside is quoted: `Person{name: "Ada", age: 36}`. `<` does not exist.
 

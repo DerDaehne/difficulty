@@ -1673,7 +1673,7 @@ void main() {
 }
 ```
 
-Ausgabe: `3`, `5`, `err(E.Neg)`. Der Zweig mit return kommt nie bei `x` an und gibt vorher frei, was gehalten wird.
+Ausgabe: `3`, `5`, `err(E.Neg)`. Der Zweig mit return kommt nie bei x an und gibt vorher frei, was gehalten wird.
 
 ```dif error R15
 void main() {
