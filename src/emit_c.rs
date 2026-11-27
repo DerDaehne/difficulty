@@ -2261,6 +2261,10 @@ impl<'a> Emitter<'a> {
 
 /// `c` as the parenthesized condition of `if`/`while`; clang warns about `((a == b))`.
 fn paren(c: &str) -> String {
+    // a statement expression `({ … })` needs its own parentheses inside those of `if`
+    if c.starts_with("({") {
+        return format!("({c})");
+    }
     let (mut depth, mut quoted, mut escaped) = (0, false, false);
     for (i, ch) in c.char_indices() {
         if quoted {

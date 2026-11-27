@@ -1,0 +1,16 @@
+// Built-in methods whose C is a statement expression work as conditions.
+void main() {
+    map[int]bool seen = {}
+    seen[3] = true
+    if seen.has(3) {
+        print("has 3")
+    }
+    if !seen.has(4) {
+        print("no 4")
+    }
+    int n = 0
+    while !seen.has(n) {
+        n += 1
+    }
+    print(n)
+}
