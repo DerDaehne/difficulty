@@ -610,7 +610,7 @@ impl<'a> Emitter<'a> {
                 let sum = self.op(
                     "+",
                     vt,
-                    "(p_ ? *p_ : 0)".into(),
+                    "*p_".into(),
                     "x_".into(),
                     Pos {
                         line: l as u32,
@@ -619,8 +619,8 @@ impl<'a> Emitter<'a> {
                     },
                 );
                 format!(
-                    "({{ {kc} k_ = {}; {vc} x_ = {}; const {vc} *p_ = (const {vc} *)dif_map_get(&{kd}, &{vd}, *{}, &k_, {l}, {c}); {vc} s_ = {sum}; dif_map_set(&{kd}, &{vd}, {}, &k_, &s_, {l}, {c}); }})",
-                    v[1], v[2], v[0], v[0]
+                    "({{ {kc} k_ = {}; {vc} x_ = {}; {vc} *p_ = ({vc} *)dif_map_slot(&{kd}, &{vd}, {}, &k_, {l}, {c}); *p_ = {sum}; }})",
+                    v[1], v[2], v[0]
                 )
             }
             "keys" => format!("dif_map_keys(&{kd}, &{vd}, {})", v[0]),

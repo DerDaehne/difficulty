@@ -232,3 +232,23 @@ machen einen Durchgang mit einer Allokation (sonst wie bisher, Unicode-Tabellen)
 | Wortzählung Python | dif ≤ ½ Python | 269,8 ms; dif = 0,45× | ja |
 
 Es bleiben Map-Zugriffe und Sortieren (rund 40 ms) sowie Allokation je Wort.
+
+### Wortzählung: Map-Zugriffe und Sortieren
+
+Die Schätzung „rund 85 ms“ für Map und Sortieren war zu hoch: die Variante ohne
+`counts.add` und Sortieren (Rest des Programms unverändert) braucht 208,5 ms, das volle
+Programm 231,4 ms, der Map-Anteil liegt also bei rund 23 ms (Median aus 7 Läufen, gcc
+der Nix-Umgebung, gleicher Text wie `bench/run.sh`). Kleinst-Programme, Wanduhr, Median aus 7 Läufen:
+
+| Programm | vorher | nachher |
+|---|---|---|
+| 1,3 Mio. `m.add(k, 1)` auf 5 000 Schlüsseln (Schlüssel aufbauen eingeschlossen) | 27,1 ms | 9,9 ms |
+| 20 × 5 000 Schlüssel `sort_by` mit je zwei Lookups (2,4 Mio. Lookups) | 75,3 ms | 57,7 ms |
+| `bench/wc.dif`, Map+Sort-Anteil (voll gegen Variante ohne Map-Teil) | 22,9 ms | 23,3 ms (Streuung ±5 ms) |
+
+Ursachen: `add` suchte den Schlüssel zweimal (`dif_map_get`, dann `dif_map_set` mit
+erneutem Hash) und räumte den doppelten Schlüssel danach weg; jetzt liefert
+`dif_map_slot` die Wertstelle mit einem Hash und einer Suche. Der Hash über Bytes lief
+byteweise (FNV); jetzt liest er 8 Byte je Schritt (kurze Schlüssel: zwei überlappende
+Lesezugriffe). Reihenfolge der Einträge (R28) bleibt die Einfügereihenfolge. Die
+Wortzählung blieb damit (vor dem Umbau der Strings gemessen) bei rund 9× C.

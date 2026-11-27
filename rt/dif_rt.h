@@ -603,9 +603,25 @@ DIF_FN uint64_t dif_hash_u64(uint64_t x) {
 }
 DIF_FN uint64_t dif_hash_mix(uint64_t h, uint64_t v) { return dif_hash_u64(h * 31 + v + 0x9e3779b97f4a7c15ULL); }
 DIF_FN uint64_t dif_hash_bytes(const char *p, int64_t n) {
-    uint64_t h = 0xcbf29ce484222325ULL;
-    for (int64_t i = 0; i < n; i++) h = (h ^ (unsigned char)p[i]) * 0x100000001b3ULL;
-    return dif_hash_u64(h);
+    uint64_t a, b, h = 0x9e3779b97f4a7c15ULL * (uint64_t)(n + 1);
+    if (n >= 8) {
+        for (; n > 16; n -= 8, p += 8) {
+            memcpy(&a, p, 8);
+            h = (h ^ a) * 0xff51afd7ed558ccdULL;
+            h ^= h >> 32;
+        }
+        memcpy(&a, p, 8);
+        memcpy(&b, p + n - 8, 8);
+    } else if (n >= 4) {
+        uint32_t x, y;
+        memcpy(&x, p, 4);
+        memcpy(&y, p + n - 4, 4);
+        a = x, b = y;
+    } else {
+        a = n ? (unsigned char)p[0] | (uint64_t)(unsigned char)p[n >> 1] << 8 | (uint64_t)(unsigned char)p[n - 1] << 16 : 0;
+        b = 0;
+    }
+    return dif_hash_u64(((h ^ a) * 0xff51afd7ed558ccdULL) ^ b);
 }
 
 // Numbers, bool and str. `dif_ty_int` is int (int64_t), then i8 ... u64, bool; f64 and
@@ -1140,6 +1156,25 @@ DIF_FN void dif_map_set(const dif_ty *kt, const dif_ty *vt, dif_map **mp, const 
     memcpy(p + dif_map_voff(kt), v, vt->size);
     dif_map_link(m, m->cnt++, h);
     m->len++;
+}
+// m[k] += x in one probe: pointer to the value slot of k, a new zeroed entry if k is missing.
+// Takes k like `set`. The caller stores into the slot at once (numeric values only).
+DIF_FN void *dif_map_slot(const dif_ty *kt, const dif_ty *vt, dif_map **mp, const void *k, int l, int c) {
+    uint64_t h = dif_map_hash_key(kt, k, l, c);
+    dif_map_own(kt, vt, mp, 1);
+    dif_map *m = *mp;
+    int64_t e = dif_map_find(kt, vt, m, k, h);
+    if (e >= 0) {
+        dif_dec(kt, (void *)k); // the stored key stays
+        return dif_map_ent(kt, vt, m, e) + dif_map_voff(kt);
+    }
+    char *p = dif_map_ent(kt, vt, m, m->cnt);
+    memcpy(p, &h, 8);
+    memcpy(p + 8, k, kt->size);
+    memset(p + dif_map_voff(kt), 0, vt->size);
+    dif_map_link(m, m->cnt++, h);
+    m->len++;
+    return p + dif_map_voff(kt);
 }
 // remove(k): true if the key was there
 DIF_FN bool dif_map_remove(const dif_ty *kt, const dif_ty *vt, dif_map **mp, const void *k, int l, int c) {
