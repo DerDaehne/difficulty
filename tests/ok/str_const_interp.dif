@@ -1,0 +1,16 @@
+const str HELP = "Befehle: b <reihe> <platz> | g <n> | s <reihe> <platz> | p | t | q"
+enum CmdErr {
+    Missing(str cmd)
+    Other
+}
+str CmdErr.message() {
+    switch self {
+    case CmdErr.Missing(str cmd):
+        return "Fehler: `{cmd}` braucht mehr Zahlen. {HELP}"
+    case CmdErr.Other:
+        return "x"
+    }
+}
+void main() {
+    print(CmdErr.Missing("b").message())
+}
