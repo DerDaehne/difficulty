@@ -1291,6 +1291,20 @@ impl<'a> Emitter<'a> {
         }
         let bin = &op[..op.len() - 1];
         if t == Ty::Str {
+            if let ExprKind::Call(f, args) = &value.kind {
+                if matches!(&f.kind, ExprKind::Ident(n) if n == "str")
+                    && args.len() == 1
+                    && self.ty(&args[0]) == Ty::Rune
+                {
+                    let r = self.expr(&args[0]);
+                    let lv = self.lvalue(place);
+                    self.line(
+                        d,
+                        &format!("{{ uint32_t r_ = {r}; dif_str_append_rune(&({lv}), r_); }}"),
+                    );
+                    return;
+                }
+            }
             let r = self.bor(value);
             let lv = self.lvalue(place);
             self.line(

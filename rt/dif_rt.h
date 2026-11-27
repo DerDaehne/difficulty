@@ -249,7 +249,7 @@ DIF_FN void dif_str_append(dif_str *s, dif_str t) {
     }
     int64_t cap = s->n + t.n;
     if (cap > INT64_MAX / 2) dif_oom();
-    int64_t *b = dif_blk_new(cap * 2);
+    int64_t *b = dif_blk_new(cap < 16 ? 32 : cap * 2); // small texts: one block for typical words
     memcpy(DIF_DATA(b), s->p, (size_t)s->n);
     memcpy(DIF_DATA(b) + s->n, t.p, (size_t)t.n);
     dif_str r = {DIF_DATA(b), cap, b};
@@ -1284,6 +1284,12 @@ DIF_FN dif_str dif_rune_str(uint32_t cp) { // str(r)
     char t[4];
     return dif_str_new(t, dif_utf8_encode(cp, t));
 }
+// `s += str(r)`: the UTF-8 bytes go straight on, no temporary text
+DIF_FN void dif_str_append_rune(dif_str *s, uint32_t cp) {
+    char t[4];
+    int k = dif_utf8_encode(cp, t);
+    dif_str_append(s, (dif_str){t, k, NULL});
+}
 DIF_FN void dif_rune_put_t(const dif_ty *t, dif_buf *b, const void *p) { (void)t; dif_put_rune_quoted(b, *(const uint32_t *)p); }
 DIF_NUM_TY(runeu, uint32_t, uint64_t, dif_put_u64) // eq, cmp, hash of rune; the text form is quoted
 DIF_CONST dif_ty dif_ty_rune = {4, NULL, NULL, 0, NULL, NULL, dif_teq_runeu, dif_rune_put_t, dif_tcmp_runeu, dif_thash_runeu};
@@ -1325,6 +1331,20 @@ DIF_FN uint32_t dif_rune_upper(uint32_t cp) { return dif_uc_map(dif_uc_upper, DI
 
 // lower()/upper(): every character separately (simple mapping, no multi-character forms)
 DIF_FN dif_str dif_str_case(dif_str s, bool up) {
+    // pure ASCII: one pass, one block of the final size, no table lookup
+    char lo = up ? 'a' : 'A', hi = up ? 'z' : 'Z';
+    int64_t first = -1, i = 0;
+    for (; i < s.n && (unsigned char)s.p[i] < 0x80; i++)
+        if (first < 0 && s.p[i] >= lo && s.p[i] <= hi) first = i;
+    if (i == s.n) {
+        if (first < 0) return dif_str_inc(s);
+        int64_t *k = dif_blk_new(s.n);
+        char *d = DIF_DATA(k);
+        memcpy(d, s.p, (size_t)s.n);
+        for (int64_t m = first; m < s.n; m++)
+            if (d[m] >= lo && d[m] <= hi) d[m] ^= 0x20;
+        return (dif_str){d, s.n, k};
+    }
     dif_buf b = dif_buf_new();
     bool changed = false;
     uint32_t cp;

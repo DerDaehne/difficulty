@@ -210,3 +210,25 @@ Die Zeit liegt vor allem im zeichenweisen Aufbau der Wörter (rund 80 ms), in de
 Allokationen von `lower()` (rund 40 ms) und in Map-Zugriffen und Sortieren (rund
 85 ms). `perf` war auf dem Rechner nicht erlaubt (`perf_event_paranoid`), die Anteile
 stammen aus den Programmvarianten. Beide Ziele sind verfehlt; Folgetickets liegen vor.
+
+### Nach dem Umbau der Strings in der Runtime
+
+Das Anhängen am Ort (`s += t` bei nicht geteiltem Text) gab es schon; 1 000 000 × `s += "a"`
+und × `s += str(r)` brauchen je 3 ms. Der Aufbau war langsam, weil jedes Wort bei Kapazität
+2, 4, 8 ... neu allokierte. Geändert: kleine Texte bekommen beim ersten Wachsen gleich 32 Byte,
+`s += str(r)` hängt die UTF-8-Bytes ohne Zwischentext an, `lower()`/`upper()` auf reinem ASCII
+machen einen Durchgang mit einer Allokation (sonst wie bisher, Unicode-Tabellen).
+
+| Stufe (Varianten wie oben, ms) | vorher | nachher |
+|---|---|---|
+| Wort zeichenweise aufbauen | 81 | 73 |
+| plus `word.lower()` je Wort | 131 | 82 |
+| vollständig `bench/wc.dif` | 273 | 121 |
+
+| Messung | Ziel | Gemessen | Erfüllt |
+|---|---|---|---|
+| Wortzählung dif | ≤ 2× C | 121,2 ms = 4,5× C | nein |
+| Wortzählung C | – | 27,0 ms | – |
+| Wortzählung Python | dif ≤ ½ Python | 269,8 ms; dif = 0,45× | ja |
+
+Es bleiben Map-Zugriffe und Sortieren (rund 40 ms) sowie Allokation je Wort.

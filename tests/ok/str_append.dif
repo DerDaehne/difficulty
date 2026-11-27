@@ -1,0 +1,30 @@
+// s += t grows in place when unshared; a shared text or a literal is copied first.
+void main() {
+    str s = ""
+    for int i in range(1000000) {
+        s += "a"
+    }
+    print(s.len())
+
+    str lit = "abc"
+    str t = lit
+    t += "d"
+    lit += "e"
+    print("{lit} {t}")
+
+    str base = "xy"
+    str copy = base
+    base += str('z')
+    copy += str('é')
+    print("{base} {copy}")
+
+    str w = ""
+    for rune r in "Hello Wörld".runes() {
+        w += str(r)
+    }
+    print("{w} {w.lower()} {w.upper()}")
+    print("ABC".lower() + "abc".upper() + "abc".lower() + "".upper())
+    str u = "Mixed"
+    str l = u.lower()
+    print("{u} {l} {u.upper()}")
+}
