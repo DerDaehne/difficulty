@@ -91,15 +91,15 @@ fn front(file: &str, src: &str) -> Result<(ast::Module, checker::Info), Vec<Diag
                 .checked_mul(stride)
                 .filter(|_| serial <= MAX_INSTANCES);
             let Some(shift) = shift else {
-                // instances that ask for more instances without end: wider than deep
-                let msg = format!(
-                    "the instances of `{}` nest deeper than {} levels",
-                    r.generic,
-                    generics::MAX_DEPTH
+                // instances that ask for more instances without end, wider than deep
+                let msg = format!("`{}` needs more than {MAX_INSTANCES} instances", r.generic);
+                let hint = format!(
+                    "the call at {file}:{}:{} asks for new types without end",
+                    r.pos.line, r.pos.col
                 );
                 let mut at = r.pos;
                 at.offset %= stride;
-                return Err(vec![Diag::new("R27.instance_depth", at, msg)]);
+                return Err(vec![Diag::new("R27.instance_count", at, msg).hint(hint)]);
             };
             module.decls.extend(templates.instance(&r, shift));
         }

@@ -345,7 +345,7 @@ pub fn subst_text(s: &str, env: &[(String, String)]) -> String {
                 Some((_, a)) if !after_dot => {
                     let prev = out.chars().last();
                     let wrap = (a.contains('!') || a.contains('('))
-                        && matches!(prev, Some(']') | Some('?'));
+                        && (matches!(prev, Some(']') | Some('?')) || out.ends_with("map["));
                     if wrap {
                         out.push('(');
                         out.push_str(a);
@@ -706,9 +706,15 @@ pub fn map_diags(diags: Vec<Diag>, stride: u32) -> Vec<Diag> {
             (own, d)
         })
         .collect();
-    // a copy only repeats what the generic text reports; it counts when that reports nothing
+    // a copy only repeats what the generic text reports; a message only a copy has is a fault
+    // of the compiler, never the program's
     if any_own {
         keep.retain(|(own, _)| *own);
+    } else if let Some((_, d)) = keep.iter().find(|(_, d)| d.id != "R27.instance_depth") {
+        panic!(
+            "internal error: an instance of generic text reports {}: {}",
+            d.id, d.msg
+        );
     }
     keep.sort_by_key(|(own, _)| !own);
     let mut out: Vec<Diag> = Vec::new();

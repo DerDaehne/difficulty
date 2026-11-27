@@ -229,3 +229,64 @@ fn c_code_is_stable() {
     let b = dif::compile("main.dif", src.as_bytes()).unwrap();
     assert_eq!(a, b);
 }
+
+/// A function type as type argument of a map key compiles and runs (R28: functions are hashable).
+#[test]
+fn function_type_as_map_key() {
+    let src = "int size[T](map[T]int m) {
+    return m.len()
+}
+
+void main() {
+    map[(int(int))]int m = {}
+    print(size(m))
+}
+";
+    assert_eq!(ids(src), [] as [String; 0]);
+    let (out, _) = build_run(src);
+    assert_eq!(out, "0\n");
+}
+
+/// An unused type parameter gives its own message and no follow-up.
+#[test]
+fn unused_parameter_has_no_follow_up() {
+    let src = "int unused[T, U](T x) {
+    return 1
+}
+
+void main() {
+    print(unused(1))
+}
+";
+    assert_eq!(ids(src), ["R27.type_param_unused 1:15"]);
+}
+
+/// Instantiation that grows without end in width has its own message.
+#[test]
+fn instance_cap_has_its_own_id() {
+    let src = "struct P[A] {
+    A x
+}
+
+P[T] wrap[T](T x) {
+    return P{x: x}
+}
+
+int f[T](T x) {
+    return f(wrap(x)) + f([x])
+}
+
+void main() {
+    print(f(1))
+}
+";
+    let d = dif::check_source(src);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].id, "R27.instance_count");
+    assert!(
+        d[0].msg.ends_with("needs more than 4000 instances"),
+        "{}",
+        d[0].msg
+    );
+    assert!(d[0].hint.as_deref().unwrap_or("").contains("main.dif:"));
+}

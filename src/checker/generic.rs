@@ -844,6 +844,10 @@ impl<'a> Checker<'a> {
             }
         }
         if let Some(i) = binds.iter().position(|b| b.is_none()) {
+            // a parameter that is never used has its own message already
+            if !generics::mentioned(&Decl::Func(g.clone())).contains(&names[i].to_string()) {
+                return (Ty::Err, Val::Runtime);
+            }
             // a place can tell the type; the message shows it
             let mut hint_binds: Binds = vec![None; n];
             if place != Ty::Err {

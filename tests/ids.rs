@@ -36,6 +36,7 @@ fn ids_in_sources() -> BTreeSet<String> {
         "checker/p2c",
         "checker/lit",
         "checker/generic",
+        "lib",
         "diag",
     ] {
         let text = read(&format!("src/{f}.rs"));
