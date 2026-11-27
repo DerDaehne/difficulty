@@ -267,9 +267,11 @@ Früh, aber benutzbar. Gebaut sind die Teile 1 bis 2d der [Spezifikation](docs/s
 `int`, `bool`, `str`, `struct`, `enum` (auch rekursiv), Methoden, `mut`, `switch`, `if` als
 Ausdruck, `?T`, `T!E`, `try`, `??`, Tests, dazu Listen, Arrays und Maps als Werte
 (Copy-on-Write), Zahlen von `i8` bis `u64` und `f64`, Text mit Unicode, Dateien und
-Standardeingabe, Funktionsliterale mit `filter`/`map`/`sort_by` und eigene Generics für
-Funktionen, `struct`, `enum` und Methoden (`T max[ordered T](T a, T b)`). Als Nächstes folgt
-das direkte Einbinden von C-Bibliotheken. Der Fahrplan steht in [PLAN.md](PLAN.md).
+Standardeingabe, Raw-Strings in Backticks, Formatangaben wie `{n:02}` und `{s:<10}`,
+Funktionswerte (als Argument und gespeichert in Variablen, Feldern, Listen), benannte
+Parameter mit Defaults und eigene Generics für Funktionen, `struct`, `enum` und Methoden
+(`T max[ordered T](T a, T b)`). Als Nächstes folgen die Standardbibliothek in difficulty selbst
+und danach das direkte Einbinden von C-Bibliotheken. Der Fahrplan steht in [PLAN.md](PLAN.md).
 
 ## Entwickeln
 
