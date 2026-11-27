@@ -1,0 +1,64 @@
+enum Shape {
+    Dot
+    Box(int side)
+}
+
+bool is_even(int x) {
+    return x % 2 == 0
+}
+
+str shout(str s) {
+    return s.upper() + "!"
+}
+
+void main() {
+    []int xs = [5, 2, 8, 1, 9, 4]
+    print(xs.filter(is_even))
+    print(xs.filter(bool(int x) { return x > 3 }))
+    print(xs.map(int(int x) { return x * x }))
+    print(xs.map(is_even))
+    print(xs.any(is_even))
+    print(xs.all(bool(int x) { return x > 1 }))
+
+    // managed elements and named functions
+    []str words = ["b", "a", "c"]
+    print(words.map(shout))
+    print(words.filter(bool(str w) { return w != "a" }))
+    []Shape boxes = xs.map(Shape.Box)
+    print(boxes.len())
+    []int none0 = []
+    print(none0.any(is_even))
+    print(none0.all(is_even))
+
+    // result types from the literal
+    print(words.map(?int(str w) { return w.parse_int() }))
+    print(words.map(int!str(str w) { return err(w) }).len())
+
+    // captures are copies
+    int limit = 4
+    print(xs.filter(bool(int x) { return x > limit }))
+    limit = 100
+    print(xs.filter(bool(int x) { return x > limit }))
+
+    // sort_by: stable, calls in a fixed order
+    []int ys = [3, 1, 2, 1]
+    ys.sort_by(bool(int a, int b) { return a < b })
+    print(ys)
+    []str names = ["bob", "al", "cy", "di", "ed"]
+    names.sort_by(bool(str a, str b) { return a.len() < b.len() })
+    print(names)
+    [4]int arr = [4, 3, 2, 1]
+    arr.sort_by(bool(int a, int b) { return a < b })
+    print(arr)
+    print(arr.filter(is_even))
+    print(arr.map(int(int x) { return x + 1 }))
+    print(arr.any(is_even))
+
+    // the list the call runs over, seen from the literal
+    []int zs = [3, 1, 2]
+    zs.sort_by(bool(int a, int b) { return a < b && zs.len() == 3 })
+    print(zs)
+    []int none_ = []
+    none_.sort_by(bool(int a, int b) { return a < b })
+    print(none_.map(is_even))
+}

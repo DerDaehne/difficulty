@@ -1,0 +1,14 @@
+void main() {
+    []int xs = [3, 1, 2, 5, 4]
+    xs.sort_by(bool(int a, int b) {
+        print("less({a}, {b})")
+        return a < b
+    })
+    print(xs)
+    [3]str ws = ["b", "c", "a"]
+    ws.sort_by(bool(str a, str b) {
+        print("{a}{b}")
+        return a < b
+    })
+    print(ws)
+}

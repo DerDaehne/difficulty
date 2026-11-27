@@ -250,7 +250,8 @@ impl<'a> Checker<'a> {
 
     /// The body of a literal (`block_ret` is the return type of a block): its function type.
     fn lit_body(&mut self, e: &'a Expr, l: &'a FuncLit, block_ret: Option<Ty>) -> Ty {
-        let ret = match block_ret {
+        let preset = self.preset_ret.take();
+        let ret = match block_ret.or(preset) {
             Some(r) => r,
             None => self.ty(&l.ret, true),
         };

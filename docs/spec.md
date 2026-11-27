@@ -209,7 +209,7 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `R6.dead_change` |  | `…` is changed but never read afterwards |
 | `R6.lost_copy` |  | the change to `…` is lost: `…` is a copy |
 | `R6.mut_extra` | ja | `…` takes `…` without mut |
-| `R6.mut_missing` | ja | `…` takes `…` as mut |
+| `R6.mut_missing` | ja | `…` changes its `…`; pass it as mut |
 | `R6.mut_not_arg` |  | only arguments of a call are passed with mut |
 | `R6.mut_not_place` |  | only a variable, field or element can be passed as mut |
 | `R6.mut_twice` |  | `…` goes into this call changeable twice |
@@ -243,6 +243,7 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | `R8.index_type` |  | cannot index … |
 | `R8.int_range` |  | integer constant out of range |
 | `R8.local_not_fn` |  | `…` is …, not a function |
+| `R8.map_needs_value` |  | `map` needs a literal that returns a value, found … |
 | `R8.missing_return` |  | `…` does not return a value on every path |
 | `R8.module_as_value` |  | `…` is a module, not a value |
 | `R8.no_field_type` |  | … has no field `…` |
@@ -934,7 +935,7 @@ Teil 2a legt fest:
 - **Orte und Wurzeln.** Ein Ort ist eine Variable, ein Parameter oder `self` (seine *Wurzel*), gefolgt von Feldern: `p`, `p.x`, `scene.player.pos`. Was einen Ort ändert, ändert seine Wurzel.
 - **Ändern und Lesen.** Ändern heißt: einem Ort zuweisen; mit `+=` usw. rechnen; ihn mit `mut` an einen Parameter übergeben, den die aufgerufene Funktion ändert; auf ihm eine Methode mit `mut self` aufrufen. Die letzten drei lesen den Ort zugleich. Lesen heißt jede andere Benutzung der Wurzel oder eines Teils davon.
 - **Signatur und Aufruf.** Ein Parameter `mut T p` ändert den Ort, den der Aufrufer mit `mut` übergibt: `shift(mut b, 5)`, `shift(mut scene.player, 5)`. Ein Ort mit `const`-Wurzel geht nie mit `mut` hinein (`R4`, `` cannot pass const `k` as mut ``). Meldungen, jeweils `R6` am Argument:
-  - `mut` fehlt: `` `shift` takes `p` as mut ``, Hinweis: der Aufruf samt `mut`;
+  - `mut` fehlt: `` `shift` changes its `p`; pass it as mut ``, Hinweis: der Aufruf samt `mut`;
   - `mut` zu viel: `` `show` takes `p` without mut ``, Hinweis: der Aufruf ohne `mut`;
   - kein Ort nach `mut` (`mut f()`, `mut 1`): `only a variable, field or element can be passed as mut`.
 - **Überflüssiges `mut`.** Ändert eine Funktion einen `mut`-Parameter nie (kein Ort mit dieser Wurzel wird geändert), ist das `R6` am `mut` des Parameters, Meldung `` `p` is never changed; remove mut ``, Hinweis: die Signatur ohne `mut`. Aufrufe, die dort `mut` übergeben, werden nicht zusätzlich gemeldet und zählen nicht als Änderung.
@@ -1003,7 +1004,7 @@ void main() {
 ```
 
 ```
-main.dif:12:11: error[R6]: `shift` takes `p` as mut
+main.dif:12:11: error[R6]: `shift` changes its `p`; pass it as mut
   hint: shift(mut b, 5)
 ```
 

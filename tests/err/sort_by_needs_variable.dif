@@ -1,0 +1,7 @@
+// expect: error[R7] 6:5
+[]int make() {
+    return [1]
+}
+void main() {
+    make().sort_by(bool(int a, int b) { return a < b })
+}

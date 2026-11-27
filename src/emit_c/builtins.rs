@@ -367,7 +367,7 @@ impl<'a> Emitter<'a> {
         let (l, c) = at;
         let changes = matches!(
             m,
-            "push" | "pop" | "insert" | "remove" | "sort" | "reverse" | "swap"
+            "push" | "pop" | "insert" | "remove" | "sort" | "reverse" | "swap" | "sort_by"
         );
         let mut items = vec![if changes {
             Arg::Addr(base)
@@ -381,6 +381,9 @@ impl<'a> Emitter<'a> {
                 items.push(Arg::Val(&args[1], el));
             }
             "contains" | "index_of" | "count" => items.push(Arg::Ref(&args[0])),
+            "filter" | "map" | "sort_by" | "any" | "all" => {
+                items.push(Arg::Val(&args[0], self.ty(&args[0])));
+            }
             _ => items.extend(args.iter().map(|a| Arg::Val(a, Ty::Int))),
         }
         let (pre, v) = self.ordered(&items);
@@ -473,12 +476,92 @@ impl<'a> Emitter<'a> {
                 ),
                 None => format!("dif_list_slice(&{d}, {}, {}, {}, {l}, {c})", v[0], v[1], v[2]),
             },
+            "filter" | "map" | "any" | "all" => {
+                // one loop over the elements; the function gets a copy of each (spec 4.7)
+                let fty = self.c_ty(self.ty(&args[0]));
+                let elem = match arr_n {
+                    Some(_) => format!("((const {ect} *)(s_.a))[i_]"),
+                    None => format!("((const {ect} *)dif_list_data(s_))[i_]"),
+                };
+                let n = match arr_n {
+                    Some(n) => format!("INT64_C({n})"),
+                    None => "dif_list_len(s_)".to_string(),
+                };
+                let call = format!("f_.fn(f_.env, {})", self.copy(el, "p_[0]"));
+                let head = format!(
+                    "{fty} f_ = {}; {} s_ = {}; (void)s_;",
+                    v[1],
+                    self.c_ty(bt),
+                    v[0]
+                );
+                let stop = match m {
+                    "any" => " && !r_",
+                    "all" => " && r_",
+                    _ => "",
+                };
+                let lp = format!(
+                    "for (int64_t i_ = 0, n_ = {n}; i_ < n_{stop}; i_++) {{ const {ect} *p_ = &{elem};"
+                );
+                match m {
+                    "filter" => format!(
+                        "({{ {head} dif_list *r_ = NULL; {lp} if ({call}) {{ {ect} x_ = {}; dif_list_push(&{d}, &r_, &x_); }} }} r_; }})",
+                        self.copy(el, "p_[0]")
+                    ),
+                    "map" => {
+                        let rt = self.elem_of(self.ty(e));
+                        format!(
+                            "({{ {head} dif_list *r_ = NULL; {lp} {} y_ = {call}; dif_list_push(&{}, &r_, &y_); }} r_; }})",
+                            self.c_ty(rt),
+                            self.dty(rt)
+                        )
+                    }
+                    "any" => format!("({{ {head} bool r_ = false; {lp} r_ = {call}; }} r_; }})"),
+                    _ => format!("({{ {head} bool r_ = true; {lp} r_ = {call}; }} r_; }})"),
+                }
+            }
+            "sort_by" => {
+                let Ty::Func(fi) = self.ty(&args[0]) else {
+                    return String::new();
+                };
+                let ad = self.less_adapter(fi, el);
+                let fty = self.c_ty(self.ty(&args[0]));
+                match arr_n {
+                    Some(n) => format!(
+                        "({{ {fty} f_ = {}; dif_arr_sort_by(&{d}, ({})->a, {n}, {ad}, &f_); }})",
+                        v[1], v[0]
+                    ),
+                    None => format!(
+                        "({{ {fty} f_ = {}; dif_list_sort_by(&{d}, {}, {ad}, &f_); }})",
+                        v[1], v[0]
+                    ),
+                }
+            }
             _ => match arr_n {
                 Some(n) => format!("dif_arr_join((const dif_str *)({}).a, {n}, {})", v[0], v[1]),
                 None => format!("dif_list_join({}, {})", v[0], v[1]),
             },
         };
         Self::with_pre(pre, body)
+    }
+
+    /// The C function that lets the runtime call `less` of function type `fi` on two elements.
+    fn less_adapter(&mut self, fi: u32, el: Ty) -> String {
+        let name = format!("dsb_{fi}");
+        if self.wrappers.insert(name.clone()) {
+            let (ect, fty) = (self.c_ty(el), self.c_ty(Ty::Func(fi)));
+            let (a, b) = (
+                self.copy(el, &format!("*(const {ect} *)a")),
+                self.copy(el, &format!("*(const {ect} *)b")),
+            );
+            let call = format!("f->fn(f->env, {a}, {b})");
+            let header = format!("static bool {name}(void *ctx, const void *a, const void *b)");
+            let _ = writeln!(self.lit_protos, "{header};");
+            let _ = writeln!(
+                self.lit_defs,
+                "{header} {{ {fty} *f = ctx; return {call}; }}"
+            );
+        }
+        name
     }
 
     fn map_method(

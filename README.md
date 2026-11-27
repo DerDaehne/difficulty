@@ -91,7 +91,7 @@ void main() {
 ```
 
 ```
-main.dif:11:11: error[R6]: `shift` takes `p` as mut
+main.dif:11:11: error[R6]: `shift` changes its `p`; pass it as mut
   hint: shift(mut b, 5)
 ```
 

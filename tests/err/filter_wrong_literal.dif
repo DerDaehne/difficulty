@@ -1,0 +1,6 @@
+// expect: error[R8] 4:26
+void main() {
+    []int xs = [1, 2]
+    []int ys = xs.filter(bool(str x) { return true })
+    print(ys)
+}

@@ -159,14 +159,6 @@ fn readme_examples() {
 /// a section is listed here only while its backend is missing.
 const CHECK_ONLY: &[&str] = &[];
 
-/// Sections of part 2d whose examples all call the list methods with a function argument
-/// (`filter`, `map`, `sort_by`, `any`, `all`); they are skipped until those methods exist.
-const PENDING_2D: &[&str] = &["### 4.7 "];
-
-/// The list methods with a function argument (`filter`, `map`, `sort_by`, `any`, `all`) come with
-/// their own change; examples of part 2d that call one are skipped until then.
-const PENDING_LIST_METHODS: &[&str] = &[".filter(", ".map(", ".sort_by(", ".any(", ".all("];
-
 /// Every ```dif block of a document, by kind: valid module, snippet (inside
 /// `void main()`), `error Rn` (exactly that diagnostic), `panic "message"`.
 /// Returns the number of examples checked.
@@ -208,15 +200,6 @@ fn doc_examples(doc: &str, tag: &str, san: bool) -> usize {
             }
             lines[from..to].join("\n")
         });
-        if PENDING_2D.iter().any(|p| section.starts_with(p)) {
-            continue;
-        }
-        if PENDING_LIST_METHODS
-            .iter()
-            .any(|m| body.iter().any(|l| l.contains(m)))
-        {
-            continue;
-        }
         let check_only = CHECK_ONLY.iter().any(|p| section.starts_with(p));
         n += 1;
         let kind = kind.trim();

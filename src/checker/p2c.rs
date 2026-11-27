@@ -54,11 +54,11 @@ const F64_METHODS: &[&str] = &[
 ];
 const LIST_METHODS: &[&str] = &[
     "len", "is_empty", "push", "pop", "insert", "remove", "first", "last", "contains", "index_of",
-    "count", "sort", "reverse", "swap", "slice", "join",
+    "count", "sort", "reverse", "swap", "slice", "join", "filter", "map", "sort_by", "any", "all",
 ];
 const ARRAY_METHODS: &[&str] = &[
     "len", "is_empty", "first", "last", "contains", "index_of", "count", "sort", "reverse", "swap",
-    "slice", "join",
+    "slice", "join", "filter", "map", "sort_by", "any", "all",
 ];
 const MAP_METHODS: &[&str] = &["len", "has", "remove", "add", "keys", "values"];
 /// Functions of `io` and `os`.
@@ -958,6 +958,21 @@ impl<'a> Checker<'a> {
                     "swap" => sig(&[int, int], Ty::Void, true),
                     "slice" => sig(&[int, int], self.list(el), false),
                     "join" if el == st => sig(&[st], st, false),
+                    "filter" | "any" | "all" => {
+                        let f = self.func_ty(boolean, vec![(el, false)]);
+                        let r = if m == "filter" {
+                            self.list(el)
+                        } else {
+                            boolean
+                        };
+                        sig(&[f], r, false)
+                    }
+                    "sort_by" => {
+                        let f = self.func_ty(boolean, vec![(el, false), (el, false)]);
+                        sig(&[f], Ty::Void, true)
+                    }
+                    // the result type comes from the literal: see `builtin_method`
+                    "map" => sig(&[], Ty::Err, false),
                     _ => return None,
                 })
             }
@@ -987,7 +1002,7 @@ impl<'a> Checker<'a> {
         args: &'a [Expr],
     ) -> (Ty, Val) {
         self.uses_2c = true;
-        let Some(s) = self.builtin_sig(bt, m) else {
+        let Some(mut s) = self.builtin_sig(bt, m) else {
             for a in args {
                 self.rvalue(a);
             }
@@ -1006,6 +1021,39 @@ impl<'a> Checker<'a> {
             self.err("R4.no_method", e.pos, msg, hint);
             return (Ty::Err, Val::Runtime);
         };
+        if m == "map" && matches!(bt, Ty::List(_) | Ty::Arr(_)) {
+            // no generics: the result type is the return type of the literal (§4.7)
+            let el = match bt {
+                Ty::List(i) => self.lists[i as usize],
+                Ty::Arr(i) => self.arrs[i as usize].0,
+                _ => Ty::Err,
+            };
+            let r = if args.len() == 1 {
+                self.literal_ret(&args[0])
+            } else {
+                None
+            };
+            let f = match r {
+                Some(r) => self.func_ty(r, vec![(el, false)]),
+                None => Ty::Err,
+            };
+            s.params = vec![f];
+            let at = base.end + self.src[base.end as usize..].find(m).unwrap_or(0) as u32;
+            let pos = self.pos_at(at);
+            self.name_pos.insert((e.pos.offset, e.end), pos);
+            s.ret = match r {
+                Some(r) if r != Ty::Void && r != Ty::Err => self.list(r),
+                _ => Ty::Err,
+            };
+            if r == Some(Ty::Void) && f != Ty::Err {
+                let msg = format!(
+                    "`map` needs a literal that returns a value, found {}",
+                    self.tn(f)
+                );
+                let hint = "use a for loop to do something for each element".to_string();
+                self.err("R8.map_needs_value", args[0].pos, msg, Some(hint));
+            }
+        }
         let mut changeable = false;
         if s.changes {
             let tname = format!("{}.{m}", self.tn(bt));
@@ -1060,8 +1108,13 @@ impl<'a> Checker<'a> {
             return (Ty::Err, Val::Runtime);
         }
         for (a, p) in args.iter().zip(&s.params) {
-            self.at_place(*p, a, None);
+            if matches!(p, Ty::Func(_)) {
+                self.arg_value(e, m, *p, a);
+            } else {
+                self.at_place(*p, a, None);
+            }
         }
+        self.preset_ret = None;
         if let (Ty::Map(i), "add") = (bt, m) {
             let v = self.maps[i as usize].1;
             if !v.is_number() && v != Ty::Err {
@@ -1099,6 +1152,25 @@ impl<'a> Checker<'a> {
         self.last_callee = None;
         self.last_effect = Some(changeable);
         (s.ret, Val::Runtime)
+    }
+
+    /// The return type of the function value `a` passed to `map`, before it is checked: that of
+    /// a literal, a named function, a function parameter or a variant constructor.
+    fn literal_ret(&mut self, a: &'a Expr) -> Option<Ty> {
+        match &a.kind {
+            ExprKind::FuncLit(l) if !l.block && l.alt.is_none() => {
+                let r = self.ty(&l.ret, true);
+                self.preset_ret = Some(r);
+                Some(r)
+            }
+            ExprKind::Ident(n) => match self.local(n).map(|l| l.ty) {
+                Some(Ty::Func(i)) => Some(self.ftys[i as usize].0),
+                Some(_) => None,
+                None => self.funcs.get(n.as_str()).map(|&id| self.fns[id].ret),
+            },
+            ExprKind::Field(base, _) => self.enum_of(base).map(Ty::Named),
+            _ => None,
+        }
     }
 
     /// Line and column of a byte offset (for diagnostics only).

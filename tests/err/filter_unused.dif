@@ -1,0 +1,5 @@
+// expect: error[R13] 4:5
+void main() {
+    []int xs = [1, 2]
+    xs.filter(bool(int x) { return x > 1 })
+}

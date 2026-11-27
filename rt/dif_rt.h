@@ -747,6 +747,29 @@ DIF_FN void dif_arr_sort(const dif_ty *et, void *d, int64_t n) {
     free(tmp);
 }
 
+// sort_by(less): stable top-down merge sort with a fixed order of `less` calls (spec 4.7).
+// The halves are `[0, n/2)` and `[n/2, n)`; merging calls `less(right front, left front)`.
+typedef bool (*dif_less_fn)(void *ctx, const void *a, const void *b);
+DIF_FN void dif_msort(size_t sz, char *d, char *tmp, int64_t n, dif_less_fn less, void *ctx) {
+    if (n < 2) return;
+    int64_t mid = n / 2;
+    dif_msort(sz, d, tmp, mid, less, ctx);
+    dif_msort(sz, d + (size_t)mid * sz, tmp, n - mid, less, ctx);
+    memcpy(tmp, d, (size_t)mid * sz);
+    int64_t a = 0, b = mid, k = 0;
+    while (a < mid && b < n) {
+        bool right = less(ctx, d + (size_t)b * sz, tmp + (size_t)a * sz);
+        memcpy(d + (size_t)k++ * sz, right ? d + (size_t)b++ * sz : tmp + (size_t)a++ * sz, sz);
+    }
+    if (a < mid) memcpy(d + (size_t)k * sz, tmp + (size_t)a * sz, (size_t)(mid - a) * sz);
+}
+DIF_FN void dif_arr_sort_by(const dif_ty *et, void *d, int64_t n, dif_less_fn less, void *ctx) {
+    if (n < 2) return;
+    char *tmp = dif_alloc(dif_bytes(n / 2, et->size, 0));
+    dif_msort(et->size, d, tmp, n, less, ctx);
+    free(tmp);
+}
+
 // ---------------------------------------------------------------------------------------
 // 6. Lists `[]T`: `dif_list *`, NULL is the empty list (no allocation). Block: header,
 //    then the elements. Every mutator takes the address of the variable and first makes the
@@ -866,6 +889,11 @@ DIF_FN void dif_list_sort(const dif_ty *et, dif_list **lp) {
     if (dif_list_len(*lp) < 2) return;
     dif_list_own(et, lp, 0);
     dif_arr_sort(et, DIF_LDATA(*lp), (*lp)->len);
+}
+DIF_FN void dif_list_sort_by(const dif_ty *et, dif_list **lp, dif_less_fn less, void *ctx) {
+    if (dif_list_len(*lp) < 2) return;
+    dif_list_own(et, lp, 0);
+    dif_arr_sort_by(et, DIF_LDATA(*lp), (*lp)->len, less, ctx);
 }
 DIF_FN void dif_list_swap(const dif_ty *et, dif_list **lp, int64_t i, int64_t j, int l, int c) {
     dif_idx(i, dif_list_len(*lp), l, c);

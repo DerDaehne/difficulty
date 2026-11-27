@@ -500,6 +500,10 @@ struct Checker<'a> {
     call_lit: HashSet<(u32, u32)>,
     /// Effect of the literal checked last.
     last_lit_effect: bool,
+    /// The return type of the literal that `map` is about to check (its result type, §4.7).
+    preset_ret: Option<Ty>,
+    /// Calls whose type mismatch is reported at the method name (`map`, §4.7).
+    name_pos: HashMap<(u32, u32), Pos>,
 }
 
 /// A function literal being checked: names declared outside it are captured (R26).
@@ -562,6 +566,8 @@ impl<'a> Checker<'a> {
             lit_calls: HashSet::new(),
             call_lit: HashSet::new(),
             last_lit_effect: false,
+            preset_ret: None,
+            name_pos: HashMap::new(),
         }
     }
 
@@ -1499,8 +1505,14 @@ impl<'a> Checker<'a> {
     fn stmt(&mut self, s: &'a Stmt) {
         match s {
             Stmt::Var(v) => {
+                let before = self.diags.len();
                 let ty = self.ty(&v.ty, false);
+                let typed = self.diags.len();
                 let (_, val) = self.at_place(ty, &v.value, Some(&v.name));
+                if typed > before {
+                    // the type was reported: no second message for the value
+                    self.diags.truncate(typed);
+                }
                 let val = self.mask(ty, val);
                 self.declare(&v.name, v.pos, ty, v.is_const, val, None);
             }
@@ -2086,7 +2098,10 @@ impl<'a> Checker<'a> {
         if !self.fits_place(want, got) && want != Ty::Err && got != Ty::Err {
             let msg = format!("expected {}, found {}", self.tn(want), self.tn(got));
             let hint = self.conv_hint(want, got, e);
-            self.err("R8.type_mismatch", e.pos, msg, hint);
+            let pos = (self.name_pos.get(&(e.pos.offset, e.end)))
+                .copied()
+                .unwrap_or(e.pos);
+            self.err("R8.type_mismatch", pos, msg, hint);
         }
     }
 
@@ -3178,7 +3193,12 @@ impl<'a> Checker<'a> {
                     }
                 }
                 (_, true) => {
-                    let msg = format!("`{name}` takes `{pname}` as mut");
+                    let what = if pname.starts_with("argument ") {
+                        pname.to_string()
+                    } else {
+                        format!("`{pname}`")
+                    };
+                    let msg = format!("`{name}` changes its {what}; pass it as mut");
                     let hint = format!(
                         "{}mut {}",
                         self.span(e.pos.offset, a.pos.offset),
