@@ -667,7 +667,7 @@ Teil 2a legt fest:
   - an einem Parameter ohne `mut`: `` the change to `p.x` is lost: `p` is a copy `` (bei einer ganzen Änderung `` the change to `p` is lost … ``), Hinweis `take it as mut: ` und die Signatur samt `mut`;
   - sonst: `` `x.y` is changed but never read afterwards ``, Hinweis `use the value, or remove the change`.
   
-  Gemeldet wird pro Wurzel die erste verlorene Änderung. Der Anfangswert einer Deklaration ist keine Änderung: `int x = 0` gefolgt von `x = 1; x = 2; print(x)` meldet `x = 1`.
+  Gemeldet wird je Ort (Wurzel mit Feldpfad) die erste verlorene Änderung. Der Anfangswert einer Deklaration ist keine Änderung: `int x = 0` gefolgt von `x = 1; x = 2; print(x)` meldet `x = 1`.
 - **Keine Aliase.** In einem Aufruf geht ein Ort höchstens einmal veränderbar hinein: als `self` einer Methode, die `self` ändert, als `mut`-Argument oder über ein Funktionsliteral, das ihn ändert (R26). Zwei solche Orte dürfen sich nicht überlappen (`a` und `a.x`, oder zweimal `a.x`), sonst `R6` am zweiten, Meldung `` `p` goes into this call changeable twice ``, Hinweis `pass it changeable only once`. Liest der Aufruf denselben Ort zusätzlich als Argument ohne `mut`, bekommt dieses Argument den Wert von vor dem Aufruf. Ein Aufruf im Argument eines anderen ist ein eigener Aufruf: `f(mut a, g(mut a))` ist erlaubt, `g` ist fertig, bevor `f` beginnt.
 
 Teil 2c ergänzt Elemente:
