@@ -1,0 +1,95 @@
+struct Bag {
+    []int items
+    str label
+}
+
+enum E {
+    A(int n)
+    B(str s)
+}
+
+int!E mk(int n) {
+    if n > 2 {
+        return err(E.A(n))
+    }
+    return n
+}
+
+[]int add([]int xs, int n) {
+    xs.push(n)
+    return xs
+}
+
+[]int!E seq(int n) {
+    []int xs = []
+    for int i in range(n) {
+        xs = add(xs, try mk(i))
+    }
+    return xs
+}
+
+[]int!E seq2([]int xs, int n) {
+    xs = add(xs, try mk(n))
+    return xs
+}
+
+str join(str a, str b) {
+    return a + b
+}
+
+int sw(E e) {
+    switch e {
+        case E.A(int n):
+            return n
+        case E.B(str s):
+            return s.len()
+    }
+}
+
+int use_sw() {
+    E e = E.B("abc")
+    return sw(e)
+}
+
+void main() {
+    str s = ""
+    for int i in range(4) {
+        s = join(s, "x")
+        if i == 1 {
+            continue
+        }
+        s = s + "-"
+    }
+    print(s)
+    print(seq(2) ?? [])
+    print(seq(5) ?? [-1])
+    print(seq2([1], 1) ?? [])
+    print(seq2([1], 9) ?? [])
+    print(use_sw())
+    Bag b = Bag{items: [1, 2], label: "q"}
+    Bag c = b
+    c.items = add(c.items, 3)
+    b.items.push(7)
+    print(b)
+    print(c)
+    []int xs = [1]
+    []int ys = add(xs, 2)
+    print(xs)
+    print(ys)
+    []int zs = xs
+    while zs.len() < 4 {
+        zs = add(zs, zs.len())
+    }
+    print(zs)
+    print(xs)
+    map[str][]int m = {}
+    []int cur = [9]
+    m["a"] = cur
+    cur = add(cur, 8)
+    print(m)
+    print(cur)
+    [][]int nest = [cur, cur]
+    cur = add(cur, 1)
+    print(nest)
+    print(cur)
+}

@@ -17,7 +17,7 @@ fn well_formed(id: &str) -> bool {
         return false;
     };
     let mut c = code.chars();
-    matches!(c.next(), Some('L' | 'R' | 'S'))
+    matches!(c.next(), Some('H' | 'L' | 'R' | 'S'))
         && code.len() > 1
         && c.all(|x| x.is_ascii_digit())
         && name.starts_with(|x: char| x.is_ascii_lowercase())

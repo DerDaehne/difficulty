@@ -9,6 +9,7 @@
 
 ```
 dif check [--json] main.dif    # syntax, names, types; one JSON object per line with --json
+dif check --hints main.dif     # also notes (note[H1]): parameters copied on every call
 dif run main.dif               # compile via C11 and run
 dif build main.dif -o prog     # native program (needs cc, gcc or clang; or set CC)
 dif test [path] [filter] [--json]   # run the `test` blocks, see part 2b

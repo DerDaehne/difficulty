@@ -700,13 +700,26 @@ impl<'a> Emitter<'a> {
                 _ => {}
             }
         }
+        // `xs.slice(a, b)`: an index loop over `xs` itself, no copy of the part
+        let part = match &src.kind {
+            ExprKind::Call(f, args) if tried.is_none() => match (&f.kind, args.as_slice()) {
+                (ExprKind::Field(b, m), [lo, hi])
+                    if m == "slice" && matches!(self.ty(b), Ty::List(_)) =>
+                {
+                    Some((&**b, lo, hi))
+                }
+                _ => None,
+            },
+            _ => None,
+        };
         let st = self.ty(src);
         let s = format!("s{}", self.uid);
         let i = format!("i{}", self.uid);
         self.uid += 1;
         self.line(d, "{");
         self.push_scope();
-        let v = self.bor(src);
+        let v = self.bor(part.map_or(src, |p| p.0));
+        let (lo, hi) = (format!("lo{}", &s[1..]), format!("hi{}", &s[1..]));
         match st {
             Ty::List(_) => self.line(d + 1, &format!("dif_list *{s} = dif_list_inc({v});")),
             Ty::Map(_) => self.line(d + 1, &format!("dif_map *{s} = dif_map_inc({v});")),
@@ -716,10 +729,25 @@ impl<'a> Emitter<'a> {
             ),
         }
         self.own_local(st, s.clone());
+        if let Some((base, a, b)) = part {
+            let (ca, cb) = (self.at(Ty::Int, a), self.at(Ty::Int, b));
+            let (l, c) = self.name_pos(base);
+            self.line(d + 1, &format!("int64_t {lo} = {ca}, {hi} = {cb};"));
+            self.line(
+                d + 1,
+                &format!(
+                    "if ({lo} < 0 || {lo} > {hi} || {hi} > dif_list_len({s})) dif_panicf({l}, {c}, \"slice %\" PRId64 \"..%\" PRId64 \" out of bounds for length %\" PRId64, {lo}, {hi}, dif_list_len({s}));"
+                ),
+            );
+        }
         let (n, kd, vd);
         match st {
             Ty::List(_) => {
-                n = format!("dif_list_len({s})");
+                n = if part.is_some() {
+                    hi.clone()
+                } else {
+                    format!("dif_list_len({s})")
+                };
                 (kd, vd) = (String::new(), String::new());
             }
             Ty::Arr(a) => {
@@ -733,9 +761,10 @@ impl<'a> Emitter<'a> {
             }
             _ => unreachable!("a loop over something that is no collection"),
         }
+        let start = if part.is_some() { lo.as_str() } else { "0" };
         self.line(
             d + 1,
-            &format!("for (int64_t {i} = 0, n_ = {n}; {i} < n_; {i}++) {{"),
+            &format!("for (int64_t {i} = {start}, n_ = {n}; {i} < n_; {i}++) {{"),
         );
         // the elements of the iteration: (variable, type, expression of the element)
         let mut vals: Vec<(&Param, Ty, String)> = Vec::new();
@@ -768,7 +797,7 @@ impl<'a> Emitter<'a> {
                     tried_elem = Some((el, x));
                 } else {
                     if vars.len() == 2 {
-                        vals.push((&vars[0], Ty::Int, i.clone()));
+                        vals.push((&vars[0], Ty::Int, format!("({i} - {start})")));
                     }
                     let last = vars.len() - 1;
                     vals.push((&vars[last], el, x));

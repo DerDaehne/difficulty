@@ -29,6 +29,9 @@ Ein Verstoß gegen eine Regel trägt deren Nummer: `error[R13]`. Schreibfehler, 
 | `S2` | Vergleichskette `a < b < c` |
 | `S3` | `&&` und `\|\|` gemischt ohne Klammern |
 | `S4` | Ausdruck als Anweisung, der weder Aufruf noch Zuweisung ist |
+| `H1` | Hinweis (kein Fehler, §0.1 „Hinweise“): `H1.param_copy`; nur mit `dif check --hints`, Severity `note`, Exit-Code bleibt 0 |
+
+**Hinweise.** Ein Hinweis ist eine Meldung, die kein Fehler ist: `dif check --hints` liefert sie zusätzlich, wenn die Datei fehlerfrei ist (ohne `--hints` gibt es keine). Ihr Code beginnt mit `H` (`H1`, `H2`, … je Art), sie hat dieselbe ID-Form wie ein Fehler, und die Zeile heißt `main.dif:1:18: note[H1]: …` statt `error[…]`; in `--json` ist `"severity"` `"note"`. Hinweise ändern den Exit-Code nicht (0, §0.4). Die Regeln des Programms ändern sie nie: ein Hinweis nennt nur, was das erzeugte Programm teurer macht als nötig.
 
 Jede Meldung nennt Datei, Zeile und Spalte (beide ab 1; Spalten zählen Zeichen, also Unicode-Codepoints), eine Ursache und, wo möglich, einen Hinweis, der den Fehler behebt. `--json` liefert zusätzlich den Byte-Offset. Bei Operatoren zeigt die Position auf den Operator. Meldungen sind englisch (`--lang de` für Deutsch).
 
@@ -101,6 +104,7 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 
 | ID | Fix | Meldung |
 |---|---|---|
+| `H1.param_copy` |  | `…` is changed here but taken without mut: every call copies it unless the caller passes its last use |
 | `L1.invalid_utf8` |  | invalid UTF-8 in source file |
 | `L1.invisible` | ja | invisible character U+… is only allowed in strings and comments |
 | `L1.non_ascii` |  | `…` is only allowed in strings and comments |
@@ -768,6 +772,8 @@ list_lit = "[" [ expr { "," expr } [ "," ] ] "]" ;
 - **Arrays `[N]T`** haben genau `N` Elemente und liegen inline; `N` ist ein Ganzzahl-Literal oder eine `const int` mit Wert ab 1, sonst `R5`, Meldung `` the length of an array is a constant of at least 1 ``. Das Literal `[a, b, c]` an der Stelle eines `[3]int` muss genau `N` Elemente haben, sonst `R8`, Meldung `` [3]int needs 3 elements, found 2 ``, Hinweis `use []int for a list that can have any length`, am `[`. Eine Liste wird nie von selbst zum Array (R31); `xs.slice(0, 3)` ist wieder eine Liste. Arrays verschachteln (`[3][3]int`).
 - **Index.** `x[i]` liest ein Element einer Liste oder eines Arrays; `i` ist ein `int`, sonst `R8`, Meldung `` expected int, found u8 ``, Hinweis `int(i)`. Das Ergebnis ist eine Kopie. `x[i] = v`, `x[i] += v` und `x[i].f = v` schreiben in das Element (Ort, R6); das Element muss existieren, `xs[xs.len()] = v` hängt nicht an (`push`). Der Index ist immer geprüft: außerhalb von `0 … len-1` bricht das Programm ab (R14) an der `[`. Bei einem Array mit konstantem Index steht der Abbruch schon beim Kompilieren fest und ist `error[R14]`. Ein `str` hat keinen Index: `s[0]` ist `R8`, Meldung `` cannot index str ``, Hinweis `use s.slice(a, b) or s.runes()`.
 - **Schleife über einen Schnappschuss.** `for T x in xs` läuft über den Wert, den `xs` beim Eintritt hatte (R11); Änderungen an `xs` im Rumpf sind sicher, wirken aber nicht auf diese Schleife. Das kostet nichts, bis der Rumpf `xs` schreibt: dann kopiert dieses erste Schreiben einmal.
+- **Letzte Benutzung.** Liest eine Variable zum letzten Mal (kein Weg liest ihre Wurzel danach, bevor sie neu zugewiesen wird oder die Funktion endet: dieselbe Lebendigkeit wie bei den verlorenen Änderungen, R6), gibt der Compiler den Wert weiter, statt ihn zu kopieren: `xs = bump(xs, k)`, `ys = xs` als letzte Benutzung von `xs`, `return` und Übergaben ohne `mut` kosten dann keinen Zählerschritt und keine Kopie beim ersten Schreiben. Für das Programm ändert sich nichts. Ausgenommen sind `mut`-Parameter, `mut self` und Ausdrücke, in denen derselbe Name zweimal vorkommt oder die ein Funktionsliteral oder ein `if` als Wert enthalten. Ein Parameter ohne `mut`, den der Rumpf ändert, kopiert weiter, wenn der Aufrufer die Variable danach braucht; `dif check --hints` nennt ihn (`H1.param_copy`, §0.1).
+- **Teilliste in der Schleife.** `for T x in xs.slice(a, b)` läuft als Indexschleife über `xs` (Schnappschuss wie oben), ohne die Teilliste zu kopieren; Grenzprüfung, Abbruch und Index `i` ab 0 sind die von `xs.slice(a, b)`.
 - **Selbstbezug.** Über `[]T` und `map` darf ein Typ sich selbst enthalten (ein `struct Tree` mit dem Feld `[]Tree kids`, Beispiel unten): die Liste ist ein eigener Speicher. Über ein Array nicht, wenn der Kreis nur über `struct`-Felder läuft (R5, Teil 2a).
 
 ```dif snippet

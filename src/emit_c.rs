@@ -1564,6 +1564,19 @@ impl<'a> Emitter<'a> {
         }
     }
 
+    /// A read of a local that nothing reads afterwards (`live::moves`): its value moves out and
+    /// leaves the variable empty, so releasing it at the end of the block does nothing.
+    fn last_use(&self, e: &Expr, t: Ty) -> Option<String> {
+        let ExprKind::Ident(n) = &e.kind else {
+            return None;
+        };
+        let name = format!("d_{n}");
+        let owned = self.scopes.iter().flatten().any(|(_, x)| *x == name);
+        let ok = self.managed(t) && owned && !self.derefs.contains(n.as_str());
+        (ok && self.info.moves.contains(&(e.pos.offset, e.end)))
+            .then(|| format!("DIF_MOVE({name})"))
+    }
+
     /// An owned value of the expression.
     fn expr(&mut self, e: &'a Expr) -> String {
         if let Some(v) = self.info.folded.get(&(e.pos.offset, e.end)) {
@@ -1583,6 +1596,9 @@ impl<'a> Emitter<'a> {
         }
         if let Some(r) = self.place_ref(e) {
             let t = self.ty(e);
+            if let Some(m) = self.last_use(e, t) {
+                return m;
+            }
             return if self.managed(t) { self.copy(t, &r) } else { r };
         }
         match &e.kind {

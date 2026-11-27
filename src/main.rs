@@ -3,7 +3,7 @@ use std::process::{Command, ExitCode};
 
 mod dif_test;
 
-const USAGE: &str = "usage: dif check [--json] <file.dif>
+const USAGE: &str = "usage: dif check [--json] [--hints] <file.dif>
        dif run <file.dif>
        dif build <file.dif> [-o <output>]
        dif test [path] [filter] [--json]
@@ -37,6 +37,7 @@ fn usage(msg: &str) -> ExitCode {
 struct Opts {
     file: String,
     json: bool,
+    hints: bool,
     out: Option<String>,
 }
 
@@ -44,6 +45,7 @@ fn opts(args: &[String], json_ok: bool, out_ok: bool) -> Result<Opts, ExitCode> 
     let mut o = Opts {
         file: String::new(),
         json: false,
+        hints: false,
         out: None,
     };
     let mut files = Vec::new();
@@ -51,6 +53,7 @@ fn opts(args: &[String], json_ok: bool, out_ok: bool) -> Result<Opts, ExitCode> 
     while let Some(a) = it.next() {
         match a.as_str() {
             "--json" if json_ok => o.json = true,
+            "--hints" if json_ok => o.hints = true,
             "-o" if out_ok => {
                 o.out = Some(
                     it.next()
@@ -88,9 +91,15 @@ fn report(file: &str, diags: &[dif::diag::Diag], json: bool) {
 
 fn check(args: &[String]) -> Result<ExitCode, ExitCode> {
     let o = opts(args, true, false)?;
-    let diags = dif::check_bytes(&o.file, &read(&o.file)?);
+    let bytes = read(&o.file)?;
+    let diags = if o.hints {
+        dif::check_hints(&o.file, &bytes)
+    } else {
+        dif::check_bytes(&o.file, &bytes)
+    };
     report(&o.file, &diags, o.json);
-    Ok(if diags.is_empty() {
+    // hints are notes: they do not fail the check
+    Ok(if diags.iter().all(|d| d.severity() == "note") {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE

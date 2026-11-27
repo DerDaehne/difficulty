@@ -102,3 +102,37 @@ for i in 1 2 3 4 5 6 7; do s=$(date +%s%N); ./push > /dev/null; e=$(date +%s%N);
 
 `tests/run2c.rs` prüft die Grenze der Push-Messung bei jedem Testlauf (hier 10× großzügiger:
 ein Lauf unter 50 ms gilt).
+
+## Kopien sparen: Last-Use-Move
+
+Rechner und Werkzeug wie oben (gcc 16.2, `dif` als Release-Build, Aufruf `dif build`, Wanduhr des
+Programms einschließlich Start und `repeat`, fünf Läufe, ms). Programm: 1000 Aufrufe auf einer
+Liste mit 1 000 000 `int`; `bump` ändert ein Element der übergebenen Liste und gibt sie zurück,
+`bump_mut(mut xs, k)` ändert sie am Ort.
+
+```dif
+[]int bump([]int xs, int k) {
+    xs[k] = xs[k] + 1
+    return xs
+}
+
+void main() {
+    []int xs = repeat(0, 1000000)
+    for int i in range(1000) {
+        xs = bump(xs, i)       // oder: bump_mut(mut xs, i)
+    }
+}
+```
+
+| Aufruf | vorher (02f3584) | nachher | Ziel |
+|---|---|---|---|
+| `xs = bump(xs, i)` | 155–161 | 5,0–6,6 | < 20 |
+| `bump_mut(mut xs, i)` | 5,2–6,4 | 5,1–6,4 | – |
+
+Ursache vorher: der Argumentwert war eine Kopie (ein Zähler mehr), also kopierte das erste
+Schreiben in `bump` 8 MB; 1000 Aufrufe sind 8 GB Speicherverkehr. Jetzt ist die letzte Benutzung
+der Variablen ein Move (`DIF_MOVE`), die Liste ist ungeteilt, und das Schreiben geschieht am Ort:
+`bump` ist so schnell wie `bump_mut`. Der Rest der 5 ms ist Prozessstart und `repeat`. Gibt der
+Aufrufer die Liste weiter, die er danach noch liest, kopiert `bump` weiter (`dif check --hints`
+nennt den Parameter). Der Test `tests/copies.rs` hält beides fest (Bewegung unter 40 ms,
+Kopie mehr als dreimal so langsam).

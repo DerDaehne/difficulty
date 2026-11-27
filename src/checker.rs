@@ -208,6 +208,11 @@ pub struct Info {
     pub lits: HashMap<(u32, u32), LitInfo>,
     /// Spans of `Name() { … }` that are a call of a function with a block, not a literal.
     pub lit_calls: HashSet<(u32, u32)>,
+    /// Reads of a variable (by span) after which it is never read again: the backend moves
+    /// them instead of copying (`live::moves`).
+    pub moves: HashSet<(u32, u32)>,
+    /// Hints (`dif check --hints`): not errors.
+    pub hints: Vec<Diag>,
 }
 
 /// A function literal (R26): its function type and the values it captures (name, type).
@@ -256,6 +261,8 @@ pub fn check(file: &str, src: &str, m: &Module) -> (Vec<Diag>, Info) {
         ftys: c.ftys,
         lits: c.lits,
         lit_calls: c.lit_calls,
+        moves: c.moves,
+        hints: c.hints,
     };
     (c.diags, info)
 }
@@ -478,6 +485,8 @@ struct Checker<'a> {
     place_ty: Ty,
     /// Hints for a lost change at a position (a `pop` whose list is never read again).
     lost_hints: HashMap<u32, String>,
+    moves: HashSet<(u32, u32)>,
+    hints: Vec<Diag>,
     /// Reading the place of an assignment (a map entry in it is R30).
     assigning: bool,
     /// A builtin method or function called last: does it have an effect (R13)?
@@ -553,6 +562,8 @@ impl<'a> Checker<'a> {
             imports: Vec::new(),
             place_ty: Ty::Err,
             lost_hints: HashMap::new(),
+            moves: HashSet::new(),
+            hints: Vec::new(),
             assigning: false,
             last_effect: None,
             lit_float: false,
@@ -1211,6 +1222,29 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Does copying a value of type `t` cost something (counted memory inside)?
+    fn counted(&self, t: Ty, depth: u32) -> bool {
+        if depth > 6 {
+            return false;
+        }
+        match t {
+            Ty::Str | Ty::List(_) | Ty::Map(_) => true,
+            Ty::Opt(i) => self.counted(self.opts[i as usize], depth + 1),
+            Ty::Res(i) => {
+                let (v, e) = self.ress[i as usize];
+                self.counted(v, depth + 1) || self.counted(e, depth + 1)
+            }
+            Ty::Arr(i) => self.counted(self.arrs[i as usize].0, depth + 1),
+            Ty::Named(i) => match &self.types[i as usize].kind {
+                Kind::Struct(fs) => fs.iter().any(|f| self.counted(f.ty, depth + 1)),
+                Kind::Enum(vs) => vs
+                    .iter()
+                    .any(|v| v.fields.iter().any(|(t, _)| self.counted(*t, depth + 1))),
+            },
+            _ => false,
+        }
+    }
+
     fn fn_name(&self, id: usize) -> String {
         let f = self.fns[id].decl;
         match &f.recv {
@@ -1252,6 +1286,27 @@ impl<'a> Checker<'a> {
                 .enumerate()
                 .filter_map(|(k, p)| p.mut_pos.filter(|_| !d[id].changes[k]).map(|mp| (k, mp)))
                 .collect();
+            let copies: Vec<usize> = (0..f.params.len())
+                .filter(|&k| {
+                    let (p, ty) = (&f.params[k], self.fns[id].params[k].ty);
+                    p.mut_pos.is_none() && d[id].changes[k] && self.counted(ty, 0)
+                })
+                .collect();
+            for k in copies {
+                let p = &f.params[k];
+                let msg = format!(
+                    "`{}` is changed here but taken without mut: every call copies it unless the caller passes its last use",
+                    p.name
+                );
+                let hint = format!(
+                    "pass the last use (`{0} = {1}({0}, …)`), or take it as mut: {2}",
+                    p.name,
+                    f.name,
+                    self.signature(id, Some(k))
+                );
+                self.hints
+                    .push(Diag::new("H1.param_copy", p.pos, msg).hint(hint));
+            }
             for (k, mp) in unneeded {
                 let msg = format!("`{}` is never changed; remove mut", f.params[k].name);
                 let hint = self.signature(id, Some(k));
@@ -1288,6 +1343,8 @@ impl<'a> Checker<'a> {
         if f.mut_self.is_some() {
             escape.push("self".into());
         }
+        self.moves
+            .extend(live::moves(&f.body, &self.call_changes, &escape));
         for (place, pos) in live::lost(&f.body, &self.call_changes, &escape) {
             let root = place.split('.').next().unwrap_or("").to_string();
             if root != "self" && !self.fn_locals.contains(&root) {
@@ -3636,6 +3693,8 @@ impl<'a> Checker<'a> {
         let before = self.diags.len();
         self.block(&t.body);
         if self.derived.is_some() && self.diags.len() == before {
+            self.moves
+                .extend(live::moves(&t.body, &self.call_changes, &[]));
             for (place, pos) in live::lost(&t.body, &self.call_changes, &[]) {
                 if self
                     .fn_locals

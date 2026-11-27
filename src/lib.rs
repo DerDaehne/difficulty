@@ -30,6 +30,17 @@ pub fn check_bytes(file: &str, bytes: &[u8]) -> Vec<Diag> {
     }
 }
 
+/// Like `check_bytes`; a file without errors gets its hints (`H` codes, spec §0.1) instead.
+pub fn check_hints(file: &str, bytes: &[u8]) -> Vec<Diag> {
+    match lexer::decode(bytes) {
+        Ok(src) => on_big_stack(|| match front(file, src) {
+            Ok((_, info)) => info.hints,
+            Err(d) => d,
+        }),
+        Err(d) => vec![d],
+    }
+}
+
 /// C source of a program, or its diagnostics (a program needs `void main()`, R1).
 pub fn compile(file: &str, bytes: &[u8]) -> Result<String, Vec<Diag>> {
     let src = lexer::decode(bytes).map_err(|d| vec![d])?;

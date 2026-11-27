@@ -4,7 +4,7 @@
 //! whole containing it counts. A backward liveness analysis over the structured syntax
 //! tree; loops iterate to a fixpoint.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::ast::*;
 use crate::diag::Pos;
@@ -18,14 +18,7 @@ pub type CallChanges = HashMap<(u32, u32), Vec<(String, Pos)>>;
 /// The first lost change of each place (a dotted path), in source order. `escape` holds the roots
 /// that count as read when the function ends (`mut` parameters, `self`).
 pub fn lost(body: &Block, changes: &CallChanges, escape: &[String]) -> Vec<(String, Pos)> {
-    let mut l = Live {
-        changes,
-        escape: escape.iter().cloned().collect(),
-        report: true,
-        lost: Vec::new(),
-        exit: Vec::new(),
-        head: Vec::new(),
-    };
+    let mut l = Live::new(changes, escape);
     let end = l.escape.clone();
     l.block(body, end);
     let mut first: Vec<(String, Pos)> = Vec::new();
@@ -40,7 +33,27 @@ pub fn lost(body: &Block, changes: &CallChanges, escape: &[String]) -> Vec<(Stri
     first
 }
 
+/// Last-use moves: the spans of the reads of a variable after which no path reads its root
+/// before it is assigned anew or the function ends. The backend moves such a read instead of
+/// copying it. A name that occurs twice in one expression is never moved (C leaves the order
+/// of operands open), nor is anything in an expression with a literal or an `if`.
+pub fn moves(body: &Block, changes: &CallChanges, escape: &[String]) -> HashSet<(u32, u32)> {
+    let mut l = Live::new(changes, escape);
+    let end = l.escape.clone();
+    l.block(body, end);
+    l.last
+        .into_iter()
+        .filter_map(|(k, v)| v.then_some(k))
+        .collect()
+}
+
 struct Live<'c> {
+    /// Reads of a variable by span: true while every visit found it the last use.
+    last: HashMap<(u32, u32), bool>,
+    /// Names that occur once in the expression being visited.
+    allowed: HashSet<String>,
+    /// Nesting depth of expressions where nothing is moved.
+    off: usize,
     changes: &'c CallChanges,
     escape: Set,
     report: bool,
@@ -83,7 +96,43 @@ fn read(live: &Set, c: &str) -> bool {
     })
 }
 
-impl Live<'_> {
+impl<'c> Live<'c> {
+    fn new(changes: &'c CallChanges, escape: &[String]) -> Self {
+        Live {
+            changes,
+            escape: escape.iter().cloned().collect(),
+            report: true,
+            lost: Vec::new(),
+            exit: Vec::new(),
+            head: Vec::new(),
+            last: HashMap::new(),
+            allowed: HashSet::new(),
+            off: 0,
+        }
+    }
+
+    /// An expression of its own (a statement, a condition): the names that occur once in it
+    /// may be moved, unless it holds a literal or an `if`.
+    fn top(&mut self, e: &Expr, extra: &[&Expr], live: Set) -> Set {
+        let mut counts = HashMap::new();
+        let mut off = has_complex(e);
+        count(e, &mut counts);
+        for x in extra {
+            off |= has_complex(x);
+            count(x, &mut counts);
+        }
+        let once = counts
+            .into_iter()
+            .filter_map(|(n, k)| (k == 1).then_some(n))
+            .collect();
+        let saved = std::mem::replace(&mut self.allowed, once);
+        self.off += off as usize;
+        let live = self.expr(e, live);
+        self.off -= off as usize;
+        self.allowed = saved;
+        live
+    }
+
     fn change(&mut self, place: &str, pos: Pos, live: &Set) {
         if self.report && !read(live, place) {
             self.lost.push((place.to_string(), pos));
@@ -101,7 +150,7 @@ impl Live<'_> {
         match s {
             Stmt::Var(v) => {
                 kill(&mut live, &v.name);
-                self.expr(&v.value, live)
+                self.top(&v.value, &[], live)
             }
             Stmt::Assign {
                 place, op, value, ..
@@ -117,7 +166,13 @@ impl Live<'_> {
                 }
                 // the place is evaluated first, then the value; index expressions in the
                 // place are read too (`xs[i][j] = v`)
-                live = self.expr(value, live);
+                // (the root of a place that is not a plain name is used by the write, so the
+                // value does not move it)
+                let mut parts: Vec<&Expr> = Vec::new();
+                if !matches!(place.kind, ExprKind::Ident(_)) {
+                    parts.push(place);
+                }
+                live = self.top(value, &parts, live);
                 let mut p = place;
                 loop {
                     match &p.kind {
@@ -143,7 +198,7 @@ impl Live<'_> {
                 for (c, b) in branches.iter().rev() {
                     let inner = self.block(b, live.clone());
                     acc.extend(inner);
-                    acc = self.expr(c, acc);
+                    acc = self.top(c, &[], acc);
                 }
                 acc
             }
@@ -153,7 +208,7 @@ impl Live<'_> {
                     let body_in = l.block(body, head.clone());
                     let mut h = exit.clone();
                     h.extend(body_in);
-                    l.expr(cond, h)
+                    l.top(cond, &[], h)
                 })
             }
             Stmt::For {
@@ -169,7 +224,7 @@ impl Live<'_> {
                     h.extend(body_in);
                     h
                 });
-                self.expr(iter, head)
+                self.top(iter, &[], head)
             }
             Stmt::Switch {
                 subject,
@@ -203,18 +258,18 @@ impl Live<'_> {
                     }
                     acc.extend(inner);
                 }
-                self.expr(subject, acc)
+                self.top(subject, &[], acc)
             }
             Stmt::Break(_) => self.exit.last().cloned().unwrap_or_default(),
             Stmt::Continue(_) => self.head.last().cloned().unwrap_or_default(),
             Stmt::Return(v, _) => {
                 let end = self.escape.clone();
                 match v {
-                    Some(e) => self.expr(e, end),
+                    Some(e) => self.top(e, &[], end),
                     None => end,
                 }
             }
-            Stmt::Call(e) | Stmt::Discard(e, _) => self.expr(e, live),
+            Stmt::Call(e) | Stmt::Discard(e, _) => self.top(e, &[], live),
         }
     }
 
@@ -308,7 +363,9 @@ impl Live<'_> {
                     std::mem::take(&mut self.exit),
                     std::mem::take(&mut self.head),
                 );
+                self.off += 1;
                 let mut inner = self.block(&l.body, Set::new());
+                self.off -= 1;
                 (self.report, self.escape, self.exit, self.head) = (report, escape, exit, head);
                 for p in &l.params {
                     kill(&mut inner, &p.name);
@@ -346,6 +403,10 @@ impl Live<'_> {
     fn place(&mut self, e: &Expr, suffix: &str, mut live: Set) -> Set {
         match &e.kind {
             ExprKind::Ident(n) => {
+                if suffix.is_empty() && self.report {
+                    let last = self.off == 0 && self.allowed.contains(n) && !read(&live, n);
+                    *self.last.entry((e.pos.offset, e.end)).or_insert(true) &= last;
+                }
                 live.insert(format!("{n}{suffix}"));
                 live
             }
@@ -371,5 +432,67 @@ impl Live<'_> {
             live = self.stmt(s, live);
         }
         live
+    }
+}
+
+/// Does `e` hold a function literal or an `if` value?
+fn has_complex(e: &Expr) -> bool {
+    let mut found = false;
+    walk(e, &mut |x| {
+        found |= matches!(x.kind, ExprKind::FuncLit(_) | ExprKind::IfExpr(..));
+    });
+    found
+}
+
+/// How often each name occurs in `e`.
+fn count(e: &Expr, into: &mut HashMap<String, u32>) {
+    walk(e, &mut |x| {
+        if let ExprKind::Ident(n) = &x.kind {
+            *into.entry(n.clone()).or_insert(0) += 1;
+        }
+    });
+}
+
+/// Every sub-expression of `e`; a literal or an `if` is visited itself, not inside.
+fn walk(e: &Expr, f: &mut dyn FnMut(&Expr)) {
+    f(e);
+    match &e.kind {
+        ExprKind::Unary(_, x)
+        | ExprKind::Paren(x)
+        | ExprKind::Mut(x)
+        | ExprKind::SomeVal(x)
+        | ExprKind::ErrVal(x)
+        | ExprKind::OkVal(Some(x))
+        | ExprKind::Field(x, _) => walk(x, f),
+        ExprKind::Binary(_, l, r, _) | ExprKind::Index(l, r, _) => {
+            walk(l, f);
+            walk(r, f);
+        }
+        ExprKind::Call(g, args) => {
+            walk(g, f);
+            args.iter().for_each(|a| walk(a, f));
+        }
+        ExprKind::Try(x, or) => {
+            walk(x, f);
+            if let Some(o) = or {
+                walk(&o.alt, f);
+            }
+        }
+        ExprKind::Str(segs) => {
+            for s in segs {
+                if let StrSeg::Expr(x) | StrSeg::Fmt(x, _) = s {
+                    walk(x, f);
+                }
+            }
+        }
+        ExprKind::StructLit(_, inits) => inits.iter().for_each(|i| walk(&i.value, f)),
+        ExprKind::ListLit(items) => items.iter().for_each(|x| walk(x, f)),
+        ExprKind::MapLit(entries) => {
+            for (k, v) in entries {
+                walk(k, f);
+                walk(v, f);
+            }
+        }
+        _ => {}
     }
 }

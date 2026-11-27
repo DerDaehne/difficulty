@@ -28,6 +28,15 @@ pub struct Diag {
 }
 
 impl Diag {
+    /// `note` for a hint (code `H…`), else `error`.
+    pub fn severity(&self) -> &'static str {
+        if self.code.starts_with('H') {
+            "note"
+        } else {
+            "error"
+        }
+    }
+
     /// `id` is `<code>.<name>`; a bare code (no name yet) is its own id, which the
     /// id test rejects.
     pub fn new(id: &'static str, pos: Pos, msg: impl Into<String>) -> Self {
@@ -58,8 +67,13 @@ impl Diag {
 
     pub fn render(&self, file: &str) -> String {
         let mut s = format!(
-            "{}:{}:{}: error[{}]: {}",
-            file, self.pos.line, self.pos.col, self.code, self.msg
+            "{}:{}:{}: {}[{}]: {}",
+            file,
+            self.pos.line,
+            self.pos.col,
+            self.severity(),
+            self.code,
+            self.msg
         );
         if let Some(h) = &self.hint {
             s.push_str("\n  hint: ");
@@ -70,9 +84,10 @@ impl Diag {
 
     pub fn json(&self, file: &str) -> String {
         let mut s = format!(
-            "{{\"v\":1,\"code\":{},\"id\":{},\"severity\":\"error\",\"file\":{},\"line\":{},\"col\":{},\"offset\":{},\"message\":{}",
+            "{{\"v\":1,\"code\":{},\"id\":{},\"severity\":{},\"file\":{},\"line\":{},\"col\":{},\"offset\":{},\"message\":{}",
             json_str(self.code),
             json_str(self.id),
+            json_str(self.severity()),
             json_str(file),
             self.pos.line,
             self.pos.col,

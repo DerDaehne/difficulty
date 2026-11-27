@@ -1,0 +1,167 @@
+enum Cons {
+    Nil
+    Link(int head, Cons tail)
+}
+
+struct Bag {
+    []int items
+    str label
+}
+
+enum Fail {
+    Odd(int n)
+}
+
+[]int bump([]int xs, int k) {
+    xs[k] = xs[k] + 1
+    return xs
+}
+
+void bump_mut(mut []int xs, int k) {
+    xs[k] = xs[k] + 1
+}
+
+Bag rename(Bag b, str label) {
+    b.label = label
+    return b
+}
+
+Cons push_front(Cons c, int n) {
+    return Cons.Link(n, c)
+}
+
+int!Fail check([]int xs, int n) {
+    if n % 2 == 1 {
+        return err(Fail.Odd(n))
+    }
+    return xs.len() + n
+}
+
+// the last use is before `try`: the list moves into the call, the failure releases the rest
+int!Fail before_try([]int xs, int n) {
+    []int ys = xs
+    int a = try check(xs, n)
+    return a + ys.len()
+}
+
+// a move in a branch, the other branch reads the value again
+int branch(bool c) {
+    []int xs = [1, 2, 3]
+    if c {
+        []int ys = bump(xs, 0)
+        return ys[0]
+    }
+    xs.push(4)
+    return xs.len()
+}
+
+// a move in a loop, assigned again in the same iteration
+[]int in_loop(int rounds) {
+    []int xs = [0, 0, 0]
+    for int i in range(rounds) {
+        xs = bump(xs, i % 3)
+    }
+    return xs
+}
+
+// read again in the next iteration: no move in the loop
+int loop_reads(int rounds) {
+    []int xs = [5, 5]
+    int total = 0
+    for int i in range(rounds) {
+        []int ys = bump(xs, 0)
+        total += ys[0] + xs[0]
+    }
+    return total
+}
+
+// break and continue leave the loop with the value moved
+int early(int n) {
+    str s = "a"
+    int hits = 0
+    while true {
+        str t = s
+        s = t + "b"
+        if s.len() > n {
+            break
+        }
+        hits += 1
+        if hits % 2 == 0 {
+            continue
+        }
+    }
+    return hits + s.len()
+}
+
+void main() {
+    // aliases stay independent
+    []int xs = [1, 2, 3]
+    []int ys = xs
+    xs[0] = 100
+    print(xs)
+    print(ys)
+    []int zs = ys
+    ys = bump(ys, 1)
+    print(ys)
+    print(zs)
+
+    xs = bump(xs, 2)
+    xs = bump(xs, 2)
+    print(xs)
+    []int mine = [0, 0]
+    bump_mut(mut mine, 1)
+    print(mine)
+
+    print(in_loop(10))
+    print(loop_reads(3))
+    print(branch(true))
+    print(branch(false))
+    print(early(5))
+
+    Bag b = Bag{items: [1], label: "x"}
+    Bag c = rename(b, "y")
+    print(b)
+    print(c)
+    b = rename(b, "z")
+    print(b)
+
+    Cons list = Cons.Nil
+    for int i in range(3) {
+        list = push_front(list, i)
+    }
+    Cons other = list
+    list = push_front(list, 9)
+    print(list)
+    print(other)
+
+    print(before_try([1, 2], 2) ?? -1)
+    print(before_try([1, 2], 3) ?? -1)
+    map[str]int m = {"a": 1}
+    map[str]int m2 = m
+    m["b"] = 2
+    print(m)
+    print(m2)
+    str s = "ab"
+    str t = s
+    s += "c"
+    print(s)
+    print(t)
+    // a slice loop reads a snapshot
+    []int src = [1, 2, 3, 4, 5]
+    int sum = 0
+    for int i, int x in src.slice(1, 4) {
+        src.push(x)
+        sum += i * 100 + x
+    }
+    print(sum)
+    print(src)
+    for int x in src.slice(2, 2) {
+        print(x)
+    }
+    for int x in src.slice(0, 2) {
+        if x == 2 {
+            break
+        }
+        print(x)
+    }
+}
