@@ -346,6 +346,7 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 
 | ID | Fix | Meldung |
 |---|---|---|
+| R25.default_constant |  | default must be a constant |
 | R25.default_last |  | `…` has no default but follows `…`, which has one |
 | R25.default_not_allowed |  | a `mut` parameter has no default (also: a function parameter; a type with a type parameter) |
 | R25.name_after_position |  | a positional argument cannot follow a named one |
@@ -355,8 +356,9 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | R25.name_on_value |  | a function value has no parameter names |
 | R25.name_without_default | ja | `…` has no default and is passed by position |
 | R25.positional_default | ja | `…` has a default and is passed by name |
-| R27.constraint_implied | ja | `…` already includes `…` |
-| R27.constraint_unknown |  | `…` is not a capability |
+| R27.constraint_every_type | ja | `…` is not a constraint: every type has it |
+| R27.constraint_unknown |  | `…` is not a constraint |
+| R27.type_arg_inferred_variant | ja | `…` is inferred from the values; remove `[…]` |
 | R27.infer_conflict |  | `…` is … from `…`, found … |
 | R27.instance_depth |  | the instances of `…` nest deeper than … levels |
 | R27.struct_needs_type |  | the type arguments of `…` come from the place on the left |
@@ -364,8 +366,8 @@ Jede Meldung des Compilers hat genau eine ID (§0.3a); die Tabelle nennt sie mit
 | R27.type_arg_inferred | ja | `…` is inferred from the arguments; remove `[…]` |
 | R27.type_arg_missing |  | cannot infer `…` for `…`: it only appears in the return type |
 | R27.type_param_unused |  | type parameter `…` is never used |
-| R28.capability_missing |  | `…` needs `…` to be …, found … |
-| R28.capability_needed | ja | `…` needs `…` to be … |
+| R28.ordered_missing |  | `…` needs `…` to be ordered, found … |
+| R28.ordered_needed | ja | `…` needs `…` to be ordered |
 
 ---
 
@@ -2440,11 +2442,11 @@ main.dif:5:6: error[R18]: test "sum" is declared twice
 
 ```ebnf
 param   = [ "mut" ] type IDENT [ "=" default ] | func_type IDENT ;   (* ersetzt `param` aus R2 *)
-default = expr ;                       (* ein Ausdruck, dessen Wert zur Übersetzungszeit feststeht, wie bei einer globalen `const` (R4) (Vorschlag, offen) *)
+default = expr ;                       (* Wert steht zur Übersetzungszeit fest: wie die rechte Seite einer globalen `const` (R4) *)
 arg     = [ "mut" ] expr | func_lit | IDENT ":" expr ;   (* ersetzt `arg` aus §2; `name: wert` ist ein benanntes Argument *)
 ```
 
-- **Deklaration.** Ein Parameter mit Default (`str label = ""`) steht hinter allen ohne Default; sonst `R25` am ersten Parameter ohne Default dahinter, Meldung `` `n` has no default but follows `label`, which has one ``, Hinweis `put parameters with a default last`. Der Typ des Defaults muss genau der Typ des Parameters sein (`R8` wie bei einer Variable, R2). `mut`-Parameter und Funktionstypen haben keinen Default (`R25`, Meldung `` a `mut` parameter has no default ``; ein Funktionstyp: `` a function parameter has no default ``). Ein Parameter, dessen Typ einen Typparameter enthält (R27), hat keinen Default (`R25`, Meldung `` the type of `x` contains `T`: it has no default ``), weil es keinen Wert für jedes `T` gibt. Der Default ist ein Wert; jeder Aufruf, der den Parameter weglässt, bekommt eine Kopie (R5).
+- **Deklaration.** Ein Parameter mit Default (`str label = ""`) steht hinter allen ohne Default; sonst `R25` am ersten Parameter ohne Default dahinter, Meldung `` `n` has no default but follows `label`, which has one ``, Hinweis `put parameters with a default last`. Der Default ist ein Wert, der beim Kompilieren feststeht, wie die rechte Seite einer globalen `const` (R4): Literale, `const`-Namen, Operatoren darauf, Struct- und Varianten-Literale aus solchen Werten, `none`, `[]`, `{}`. Ein Aufruf, ein Parameter oder eine Variable darin ist `R25` am Ausdruck, Meldung `` default must be a constant ``, Hinweis `pass it at the call, or use a constant: const int SIZE = 4` (anders als der Vorgabewert eines Feldes, R5, der Aufrufe ohne Wirkung zulässt). Der Typ des Defaults muss genau der Typ des Parameters sein (`R8` wie bei einer Variable, R2). `mut`-Parameter und Funktionstypen haben keinen Default (`R25`, Meldung `` a `mut` parameter has no default ``; ein Funktionstyp: `` a function parameter has no default ``). Ein Parameter, dessen Typ einen Typparameter enthält (R27), hat keinen Default (`R25`, Meldung `` the type of `x` contains `T`: it has no default ``), weil es keinen Wert für jedes `T` gibt. Der Default ist ein Wert; jeder Aufruf, der den Parameter weglässt, bekommt eine Kopie (R5).
 - **Aufruf.** Ohne Default werden Argumente der Reihe nach übergeben, mit Default beim Namen: `ui.tile("0.3", label: "notes")`. Benannte Argumente stehen hinter allen übrigen, in der Reihenfolge der Deklaration; Weglassen ist erlaubt, ein weggelassener Parameter hat seinen Default. Eine Funktion mit Defaults ruft man also mit jedem Vorderstück der Namen auf: `tile("1", label: "a")`, `tile("1", status: Status.Ok)`, aber nicht `tile("1", status: Status.Ok, label: "a")`.
 - **Fehler.** Ein Default-Parameter positional übergeben (`tile("1", "a")`) ist `R25` am Argument, Meldung `` `label` has a default and is passed by name ``, Hinweis `label: "a"` (per `dif fix`). Ein Parameter ohne Default mit Namen übergeben (`add(a: 1, b: 2)`) ist `R25` am Namen, Meldung `` `a` has no default and is passed by position ``, Hinweis `1` (per `dif fix`). Falsche Reihenfolge ist `R25` am Argument, das zu früh steht, Meldung `` `label` comes before `status` in the declaration ``, Hinweis die geordnete Argumentliste (per `dif fix`). Ein unbekannter Name ist `R25`, Meldung `` `tile` has no parameter `lable` ``, Hinweis `did you mean label?` (ähnlichster Name, wie R4). Derselbe Name zweimal ist `R25`, Meldung `` `label` is given twice, first at … ``. Ein positionales Argument hinter einem benannten ist `R25`, Meldung `` a positional argument cannot follow a named one ``, ohne Hinweis. Die Zahl der positionalen Argumente prüft R8 (`arg_count`), mit der Zahl der Parameter ohne Default.
 - **Methoden.** Wie bei Funktionen; `self` zählt nicht (R7): `void Point.move(mut self, int dx, int step = 1)`, Aufruf `p.move(3, step: 2)`. Eingebaute Methoden (§4) haben keine Defaults.
@@ -2863,7 +2865,7 @@ main.dif:6:17: error[R11]: `break` outside a loop
 
 ### R27 — Generics
 
-**Regel.** Typparameter stehen in eckigen Klammern hinter dem Namen und werden beim Aufruf meist abgeleitet; jede Instanz wird eigener Code. Eine Einschränkung steht vor dem Typparameter wie ein Typ vor dem Namen: `equal`, `ordered`, `hashable`, `text`.
+**Regel.** Typparameter stehen in eckigen Klammern hinter dem Namen und werden beim Aufruf meist abgeleitet; jede Instanz wird eigener Code. Die einzige Einschränkung ist `ordered`; sie steht vor dem Typparameter wie ein Typ vor dem Namen: `[ordered T]`.
 
 **Teil 3 ergänzt:**
 
@@ -2874,23 +2876,22 @@ enum_decl   = "enum" IDENT [ tparams ] "{" … "}" ;                (* Rest wie 
 method_decl = type recv "." IDENT "(" … ")" block ;               (* ersetzt `method_decl` aus R7 *)
 recv        = IDENT [ "[" IDENT { "," IDENT } "]" ] ;             (* Pair[A, B]: bindet A und B für die Methode *)
 tparams     = "[" tparam { "," tparam } [ "," ] "]" ;
-tparam      = { capability } IDENT ;                              (* Einschränkungen vor dem Namen *)
-capability  = "ordered" | "hashable" | "equal" | "text" ;         (* in dieser Reihenfolge (Vorschlag, offen) *)
+tparam      = [ "ordered" ] IDENT ;                               (* die Einschränkung vor dem Namen *)
 targs       = "[" type { "," type } "]" ;
 named_type  = IDENT [ "." IDENT ] [ targs ] ;                     (* ergänzt R2: Pair[int, str] *)
 postfix     = … | IDENT targs "(" [ args ] ")" ;                  (* ergänzt §2: decode[Config](s) *)
 ```
 
 - **Wo.** Funktionen, `struct`, `enum`; Methoden bekommen die Typparameter ihres Typs über `recv` und keine eigenen (Vorschlag, offen: für eine generische Methode mit eigenem Typparameter schreibt man eine Funktion). Ein Typparameter ist ein Typname (R4) und gilt in der Deklaration; er darf keinen Namen verdecken (`R4`, `already declared`). Ein Typparameter, der nirgends vorkommt, ist `R27`, Meldung `` type parameter `T` is never used ``, Hinweis `remove it`. Der Name an `recv` darf von dem an der `struct` abweichen, die Zahl nicht (`R27`, Meldung `` `Pair` takes 2 type arguments, found 1 ``); Einschränkungen übernimmt die Methode von der `struct` und fügt keine hinzu.
-- **Einschränkungen.** `ordered` erlaubt `<`, `<=`, `>`, `>=` (R28), `hashable` den Schlüssel einer Map und `equal` `==` und `!=`, `text` Ausgabe und `"{x}"`. Es gilt die Regel von R28, nur ausdrücklich: `ordered` schließt `equal`, `hashable` und `text` ein, `hashable` schließt `equal` ein; was eingeschlossen ist, wird nicht noch einmal geschrieben (`R27`, Meldung `` `ordered` already includes `equal` ``, Hinweis die Liste ohne das Überflüssige, per `dif fix`). Mehrere stehen hintereinander vor dem Namen, in der Reihenfolge der Grammatik: `[hashable text K]`. Ein unbekanntes Wort vor einem Namen ist `R27`, Meldung `` `eq` is not a capability ``, Hinweis `equal, ordered, hashable, text` (mit „did you mean“).
-- **Der Rumpf sieht nur, was die Einschränkungen sagen.** Ein Rumpf wird einmal gegen die Deklaration geprüft, nie gegen eine Instanz. Ein Wert vom Typ `T` darf nur das, was seine Einschränkungen erlauben: ohne `equal` kein `==`, ohne `text` keine Ausgabe, ohne `hashable` kein Schlüssel, ohne `ordered` kein `<`; er hat nie Felder oder Methoden (`R8`, `has no field`). Sonst `R28` an der Operation, Meldung `` `>` needs `T` to be ordered ``, Hinweis `declare it: T biggest[ordered T](T a, T b)` (per `dif fix`); für `==` ``… to be equal``, für Text ``… to be text``, für Schlüssel ``… to be hashable``. Dasselbe prüft eine `struct` bei ihren Feldern (`map[K]V` braucht `hashable K`). (Vorschlag, offen: nach R28 ist jeder Typ `equal` und `text`; die Alternative lässt `==` und Text an jedem `T` ohne Schreibweise zu und kennt dann nur `ordered` als wirksame Einschränkung. Die Wahl hier hält die Regel für `T` gleich für alle vier und ändert nichts an R28 für konkrete Typen.)
+- **Einschränkung.** `ordered` ist die einzige: sie erlaubt `<`, `<=`, `>`, `>=` und die Operationen, die sie brauchen (`sort`, `min`, `max`). Alles andere hat jeder Typ nach R28: `==`, `!=`, Ausgabe und `"{x}"`, `contains`, `index_of`, `count` und der Schlüssel einer Map gehen an jedem Typparameter ohne Einschränkung. `equal`, `hashable` oder `text` vor einem Namen (`[equal T]`) sind `R27` am Wort, Meldung `` `equal` is not a constraint: every type has it ``, Hinweis `remove it: T same[T](T a, T b)` (per `dif fix`); jedes andere Wort vor dem Namen ist `R27` mit Meldung `` `eq` is not a constraint ``, Hinweis `the only constraint is ordered`. Mehrere Einschränkungen an einem Parameter gibt es nicht.
+- **Der Rumpf sieht nur, was `T` hat.** Ein Rumpf wird einmal gegen die Deklaration geprüft, nie gegen eine Instanz. Ein Wert vom Typ `T` darf, was jeder Typ darf (kopieren, `==`, Text, Schlüssel); `<` und was es braucht nur mit `ordered`; er hat nie Felder oder Methoden (`R8`, `has no field`). Sonst `R28` an der Operation, Meldung `` `>` needs `T` to be ordered ``, Hinweis `declare it: T biggest[ordered T](T a, T b)` (per `dif fix`).
 - **Ableitung.** Beim Aufruf einer generischen Funktion steht jeder Typparameter, der in einem Parameter vorkommt, nie in `[…]`: er wird aus den Typen der Argumente abgeleitet (Funktionsliterale haben ihren vollen Typ, R26, die Reihenfolge der Argumente ist gleichgültig). Ein Typparameter, der nur im Rückgabetyp vorkommt, steht immer; geschrieben stehen genau diese, in der Reihenfolge der Deklaration: `decode[Config](s)`. Ohne Aufruf (als Wert, R26) stehen alle. Es gibt keine Ableitung aus der Zielvariable, dem `return` oder dem Typ links.
 - **Meldungen der Ableitung.** Ein Typargument, das abgeleitet wird, ist `R27` am `[`, Meldung `` `T` is inferred from the arguments; remove `[int]` ``, Hinweis der Aufruf ohne (`max(3, 5)`, per `dif fix`). Ein Typparameter, der nur im Rückgabetyp steht und fehlt, ist `R27` am Namen der Funktion, Meldung `` cannot infer `T` for `empty`: it only appears in the return type ``, Hinweis `write it: empty[int]()` (der Typ aus dem Ziel, wenn es einen gibt, sonst `empty[…]()`). Dasselbe gilt, wenn ein Argument keinen eigenen Typ nennt (`[]`, `{}`, `none`) und `T` nirgends sonst vorkommt. Zwei Argumente, die `T` verschieden festlegen, sind `R27` am zweiten, Meldung `` `T` is int from `a`, found str ``, ohne Hinweis. Zu viele oder zu wenige Typargumente sind `R27`, Meldung `` `decode` takes 1 type argument, found 2 ``.
 - **Fähigkeit fehlt am Aufruf.** Ein Typargument ohne die verlangte Fähigkeit ist `R28` am Namen der Funktion, Meldung `` `max` needs `T` to be ordered, found Point ``, Hinweis wie bei `sort` (`only numbers, rune and str are ordered`). Der Aufruf prüft nur die Einschränkungen, nie den Rumpf.
 - **Instanzen.** Jede verschiedene Folge von Typargumenten ist ein eigener Typ und eigener Code (Monomorphisierung, ein C-Exemplar pro Instanz): `Pair[int, str]` und `Pair[str, int]` sind verschiedene Typen, zwei Schreibweisen derselben Argumente derselbe. Meldungen nennen immer die Deklaration und den Typ mit seinen Argumenten (`Pair[int, str]`), nie ein Exemplar oder einen Namen aus dem erzeugten C; weil der Rumpf gegen die Deklaration geprüft ist, gibt es keine Meldung „in der Instanz“. Instanzen, die Instanzen erzeugen, ohne zu enden (`f[T]` ruft `f[[]T]`), sind `R27`, Meldung `` the instances of `f` nest deeper than 16 levels ``, ohne Hinweis (Vorschlag, offen: die Grenze).
-- **Fähigkeiten generischer Typen** (R28). Eine Instanz von `struct` und `enum` hat die Fähigkeiten, die alle Feld- und Variantentypen nach dem Einsetzen haben; `ordered` nie. In einem generischen Rumpf hat `Pair[A, B]` `equal`, wenn `A` und `B` es haben, `text` ebenso, `hashable` ebenso; nicht mehr. `[]T` und `map[K]V` folgen Teil 2c. Ein Funktionswert (R26) ist ein Typargument wie jeder andere Typ.
+- **Fähigkeiten generischer Typen** (R28). Eine Instanz von `struct` und `enum` hat die Fähigkeiten, die alle Feld- und Variantentypen nach dem Einsetzen haben; `ordered` nie. Ein Typparameter ist `equal`, `text` und `hashable` wie jeder Typ, `ordered` nur mit der Einschränkung; also hat `Pair[A, B]` im Rumpf die ersten drei immer. `[]T` und `map[K]V` folgen Teil 2c. Ein Funktionswert (R26) ist ein Typargument wie jeder andere Typ.
 - **Struct-Literal.** Der Typ steht links: `Pair[int, str] p = Pair{first: 1, second: "a"}`; das Literal braucht einen Ort mit bekanntem Typ (Variable, Feld, `return`, Argument eines nicht generischen Parameters). Sonst `R27` am Literal, Meldung `` the type arguments of `Pair` come from the place on the left ``, Hinweis `store it in a variable first: Pair[int, str] p = Pair{…}`.
-- **Generische `enum`.** Varianten gehören zum Typ: `Tree.Leaf(3)` leitet `T` aus den Werten ab wie ein Aufruf; eine Variante ohne Werte oder ohne `T` in ihren Werten braucht die Argumente: `Tree[int].Empty`. In `case` stehen sie nie (der Typ ist der des `switch`, R10). (Vorschlag, offen.)
+- **Generische `enum`.** Varianten gehören zum Typ: `Tree.Leaf(3)` leitet `T` aus den Werten ab wie ein Aufruf; eine Variante ohne Werte oder ohne `T` in ihren Werten schreibt den Typ: `Tree[int].Empty`. `Tree[int].Leaf(3)` ist `R27` am `[`, Meldung `` `T` is inferred from the values; remove `[int]` ``, Hinweis `Tree.Leaf(3)` (per `dif fix`). In `case` stehen sie nie (der Typ ist der des `switch`, R10).
 
 ```text
 T max[ordered T](T a, T b) {

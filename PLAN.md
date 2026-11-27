@@ -106,7 +106,7 @@ Vollständig und ohne „außer“. Diese Liste ist auch der Kern von `llms.txt`
 | R24 | Erwartet C ein Paar aus Funktion und `void *user`, übergibt man eine dif-Funktion und, wenn sie Zustand braucht, eine Variable; die Funktion bekommt die Variable als ersten Parameter, mit `mut`, wenn sie sie ändert (R6). Keine Funktion: `none`. Der Kontext gilt, solange der Aufruf läuft, in den die Variable mit `mut` hineinging; ein Callback außerhalb dieses Aufrufs oder aus einem anderen Thread bricht mit Meldung ab. | `rk.app_main(rk.app_desc{…, launch: launch, user: mut app})` |
 | R25 | Parameter mit Default stehen hinten und werden beim Aufruf beim Namen genannt (`name: wert`), alle anderen der Reihe nach. | `ui.tile("0.3", label: "notes")` |
 | R26 | Ein Funktionswert hat den Typ `R(T1, T2)` und wird geschrieben wie eine Funktion ohne Namen: `R(T1 a, T2 b) { … }`. Ein Literal steht nur direkt als Argument eines Aufrufs (nie in einer Variable, einem struct, einer Liste, in `spawn` oder als Typargument) und lebt nur während dieses Aufrufs: es nimmt beim Auswerten eine Momentaufnahme jedes Namens ringsum, den es benutzt, und ändert nie etwas ringsum (eine Änderung daran ist R6). Ein Literal ohne Parameter darf als Block `{ … }` direkt hinter der schließenden Klammer stehen; `return` und `try` darin beenden den Block. Benannte Funktionen und Varianten-Konstruktoren haben keine Umgebung und sind gewöhnliche Werte, die man speichern darf. Ändert ein Funktionswert einen Parameter, steht `mut` in seinem Typ. | `people.filter(bool(Person p) { return p.age >= 18 })` · `db.transaction() { … }` · `on_change: Msg.Draft` · `void(mut A, M) update` |
-| R27 | Typparameter stehen in eckigen Klammern hinter dem Namen und werden beim Aufruf meist abgeleitet; jede Instanz wird eigener Code. Eine Einschränkung steht vor dem Typparameter wie ein Typ vor dem Namen: `equal`, `ordered`, `hashable`, `text`. | `[]B convert[A, B]([]A xs, B(A) f)` · `T max[ordered T](T a, T b)` · `struct Pair[A, B]` |
+| R27 | Typparameter stehen in eckigen Klammern hinter dem Namen und werden beim Aufruf meist abgeleitet; jede Instanz wird eigener Code. Die einzige Einschränkung ist `ordered`; sie steht vor dem Typparameter wie ein Typ vor dem Namen: `[ordered T]`; `==`, Text und Map-Schlüssel haben alle Typen (R28). | `[]B convert[A, B]([]A xs, B(A) f)` · `T max[ordered T](T a, T b)` · `struct Pair[A, B]` |
 | R28 | Jeder Typ ohne Funktionswert-Felder ist `equal` (`==`) und `text` (Ausgabe, `"{x}"`); `ordered` (`<`) sind Zahlen und `str`; `hashable` ist alles, was `equal` ist. Griffe vergleichen ihre Identität, Maps sind gleich, wenn ihre Einträge gleich sind. | `Point{x: 1, y: 2} == Point{x: 1, y: 2}` · `map[Point]str` |
 | R29 | Zahlen: Ganzzahl-`/` rundet Richtung 0, `%` hat das Vorzeichen des Dividenden; Floats folgen IEEE 754 (`inf`, `NaN`, `NaN == NaN` ist false); Ganzzahl-Division durch 0, `INT_MIN / -1` und Shifts ab der Bitbreite brechen ab. Ausdrücke und Argumente werden von links nach rechts ausgewertet. | `-7 / 2` ist `-3` · `-7 % 3` ist `-1` · `1.0 / 0.0` ist `inf` |
 | R30 | `map[K]V` schreibt man `{k: v, …}`; `m[k]` liefert `?V`, `m[k] = v` setzt, die Reihenfolge ist die der Einfügung. | `counts[w] = (counts[w] ?? 0) + 1` |
@@ -771,7 +771,7 @@ struct Pair[A, B] {
 []str names = convert(people, str(Person p) { return p.name })
 ```
 
-**Generics (R27):** Typparameter in eckigen Klammern nach dem Namen, beim Aufruf meist abgeleitet. Monomorphisierung: ein C-Exemplar pro Instanz. Einschränkungen stehen vor dem Typparameter: `T max[ordered T](T a, T b)`; automatische Fähigkeiten regelt R28.
+**Generics (R27):** Typparameter in eckigen Klammern nach dem Namen, beim Aufruf meist abgeleitet. Monomorphisierung: ein C-Exemplar pro Instanz. Die einzige Einschränkung ist `ordered`, sie steht vor dem Typparameter: `T max[ordered T](T a, T b)`; automatische Fähigkeiten regelt R28.
 
 | | |
 |---|---|
@@ -1454,7 +1454,7 @@ Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate)
 | Optionen an Funktionen | benannte Parameter mit Default, beim Aufruf per Name (R25) |
 | Funktionswerte | Literal `bool(Person p) { … }`, nur während des Aufrufs gültig, fängt Werte ein (Momentaufnahme) und ändert nie etwas ringsum (R26); keine impliziten Parameter wie `it` |
 | Blöcke | Literal ohne Parameter als `{ … }` direkt hinter `)`: `ui.tiles() { … }`; Kopfzeile von `if`/`while`/`for`/`switch` endet am ersten `{` (R3, R26) |
-| Generics | vollständig in v0: Typparameter `[A, B]`, Funktionstypen `R(T)`, Einschränkung vor dem Parameter `[ordered T]` (R27); Fähigkeiten automatisch nach fester Regel (R28) |
+| Generics | vollständig in v0: Typparameter `[A, B]`, Funktionstypen `R(T)`, einzige Einschränkung `ordered` vor dem Parameter (`[ordered T]`) (R27); Fähigkeiten automatisch nach fester Regel (R28) |
 | v0-Umfang | Kern zuerst: v0 = M0–M4, danach v0.1 C-Import, v0.2 Test-Werkzeuge, v0.3 UI/Editoren, v0.4 Export/JSON, v1.x Nebenläufigkeit (§10) |
 | Agenten-Messung | ab M2 bei jedem Meilenstein, festes Protokoll (§10) |
 | Literale | Ausdrücke nur aus Literalen rechnen im Typ ihrer Stelle, ohne Stelle `int`/`f64` (R8) |
