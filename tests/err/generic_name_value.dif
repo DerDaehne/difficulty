@@ -1,0 +1,9 @@
+// expect: error[R27] 7:23
+T max[ordered T](T a, T b) {
+    return if a < b { b } else { a }
+}
+
+void main() {
+    int(int, int) f = max
+    print(f(1, 2))
+}

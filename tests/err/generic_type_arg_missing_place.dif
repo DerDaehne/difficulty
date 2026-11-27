@@ -1,0 +1,10 @@
+// expect: error[R27] 8:20
+enum Maybe[T] {
+    Nothing
+    Just(T value)
+}
+
+void main() {
+    Maybe[int] m = Maybe.Nothing
+    print(m)
+}

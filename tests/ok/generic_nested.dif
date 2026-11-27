@@ -1,0 +1,37 @@
+struct Pair[A, B] {
+    A first
+    B second
+}
+
+struct Holder {
+    Pair[int, str] p
+    []Pair[int, int] more = []
+}
+
+struct Stack[T] {
+    []T items = []
+}
+
+int sz[T](Stack[T] s) {
+    return s.items.len()
+}
+
+T head[T](Pair[T, T] p) {
+    return p.first
+}
+
+enum Maybe[T] {
+    Nothing
+    Just(T value)
+}
+
+void main() {
+    Holder h = Holder{p: Pair{first: 1, second: "a"}}
+    []Pair[int, int] l = [Pair{first: 1, second: 2}]
+    print(h)
+    print(l)
+    Stack[str] s = Stack{items: ["a", "b"]}
+    print(sz(s))
+    Pair[int, int] pp = Pair{first: 4, second: 5}
+    print(head(pp))
+}

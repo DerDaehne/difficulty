@@ -1,0 +1,115 @@
+struct Pair[A, B] {
+    A first
+    B second
+}
+
+enum Tree[T] {
+    Empty
+    Leaf(T value)
+    Node(Tree[T] left, Tree[T] right)
+}
+
+struct Cache[K, V] {
+    map[K]V data = {}
+    []K order = []
+}
+
+void Cache[K, V].put(mut self, K key, V value) {
+    if !self.data.has(key) {
+        self.order.push(key)
+    }
+    self.data[key] = value
+}
+
+?V Cache[K, V].get(K key) {
+    return self.data[key]
+}
+
+[]V Cache[K, V].values_in_order() {
+    []V out = []
+    for K k in self.order {
+        ?V v = self.data[k]
+        switch v {
+            case some(V x):
+                out.push(x)
+            case none:
+                print("missing")
+        }
+    }
+    return out
+}
+
+Pair[[]A, []B] unzip[A, B]([]Pair[A, B] ps) {
+    []A as = []
+    []B bs = []
+    for Pair[A, B] p in ps {
+        as.push(p.first)
+        bs.push(p.second)
+    }
+    return Pair{first: as, second: bs}
+}
+
+[]T flatten[T]([][]T xss) {
+    []T out = []
+    for []T xs in xss {
+        for T x in xs {
+            out.push(x)
+        }
+    }
+    return out
+}
+
+Tree[T] build[T]([]T xs) {
+    if xs.is_empty() {
+        return Tree[T].Empty
+    }
+    if xs.len() == 1 {
+        return Tree.Leaf(xs[0])
+    }
+    int mid = xs.len() / 2
+    return Tree.Node(build(xs.slice(0, mid)), build(xs.slice(mid, xs.len())))
+}
+
+[]T leaves[T](Tree[T] t) {
+    switch t {
+        case Tree.Empty:
+            return []
+        case Tree.Leaf(T v):
+            return [v]
+        case Tree.Node(Tree[T] l, Tree[T] r):
+            []T out = leaves(l)
+            for T x in leaves(r) {
+                out.push(x)
+            }
+            return out
+    }
+}
+
+T twice[T](T x, T(T) f) {
+    return f(f(x))
+}
+
+void main() {
+    []Pair[str, int] ps = [Pair{first: "a", second: 1}, Pair{first: "b", second: 2}]
+    Pair[[]str, []int] u = unzip(ps)
+    print(u)
+    print(flatten([[1, 2], [3], []]))
+    print(flatten([["x"], ["y", "z"]]))
+    Tree[int] t = build([1, 2, 3, 4, 5])
+    print(leaves(t))
+    Tree[str] ts = build(["a", "b", "c"])
+    print(leaves(ts))
+    print(twice("ab", str(str s) { return "{s}{s}" }))
+    print(twice([1], []int([]int xs) { return flatten([xs, xs]) }))
+    Cache[str, []int] c = Cache{}
+    c.put("one", [1])
+    c.put("two", [2, 2])
+    c.put("one", [1, 1, 1])
+    print(c.get("one"))
+    print(c.get("zero"))
+    print(c.values_in_order())
+    Cache[Pair[int, int], str] cp = Cache{}
+    Pair[int, int] key = Pair{first: 1, second: 2}
+    cp.put(key, "k")
+    print(cp.get(key))
+}

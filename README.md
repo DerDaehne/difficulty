@@ -267,8 +267,9 @@ Früh, aber benutzbar. Gebaut sind die Teile 1 bis 2d der [Spezifikation](docs/s
 `int`, `bool`, `str`, `struct`, `enum` (auch rekursiv), Methoden, `mut`, `switch`, `if` als
 Ausdruck, `?T`, `T!E`, `try`, `??`, Tests, dazu Listen, Arrays und Maps als Werte
 (Copy-on-Write), Zahlen von `i8` bis `u64` und `f64`, Text mit Unicode, Dateien und
-Standardeingabe sowie Funktionsliterale mit `filter`/`map`/`sort_by`. Als Nächstes folgen
-Generics und das direkte Einbinden von C-Bibliotheken. Der Fahrplan steht in [PLAN.md](PLAN.md).
+Standardeingabe, Funktionsliterale mit `filter`/`map`/`sort_by` und eigene Generics für
+Funktionen, `struct`, `enum` und Methoden (`T max[ordered T](T a, T b)`). Als Nächstes folgt
+das direkte Einbinden von C-Bibliotheken. Der Fahrplan steht in [PLAN.md](PLAN.md).
 
 ## Entwickeln
 

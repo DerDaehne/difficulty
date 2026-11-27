@@ -2513,6 +2513,9 @@ impl<'a> Checker<'a> {
             ExprKind::Binary(op, l, r, opos) => self.binary(op, l, r, *opos),
             ExprKind::Call(f, args) => self.call(e, f, args, place),
             ExprKind::Field(base, name) => {
+                if let Some(r) = self.generic_variant(e, base, name, None, place) {
+                    return r;
+                }
                 let ctor = matches!(place, Ty::Func(_))
                     .then(|| self.ctor_value(base, name))
                     .flatten();
