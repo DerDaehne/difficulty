@@ -1988,7 +1988,11 @@ impl<'a> Emitter<'a> {
         let (s, mut c, end) = self.building(Ty::Named(eid));
         let _ = write!(c, "{s}.tag = {k}; ");
         for (j, v) in vals.iter().enumerate() {
-            let _ = write!(c, "{s}.u.v{k}.f{j} = {}; ", self.boxing(eid, k, j, v.clone()));
+            let _ = write!(
+                c,
+                "{s}.u.v{k}.f{j} = {}; ",
+                self.boxing(eid, k, j, v.clone())
+            );
         }
         c.push_str(&end);
         c

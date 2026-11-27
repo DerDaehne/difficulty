@@ -685,7 +685,7 @@ Teil 2a legt fest (Griffe, Listen, Arrays, Maps und das Speichermodell: „R5, T
 - Ein Literal darf über mehrere Zeilen gehen: Zeilenumbrüche sind nach `{`, nach `,` und vor `}` erlaubt, ein abschließendes Komma ebenso.
 - Felder liest und ändert man mit `p.x` und `p.x = 1`.
 - Ein `enum` zählt seine Varianten auf, getrennt durch `,` oder Zeilenumbruch. Eine Variante kann benannte Werte tragen (`NoSuchSeat(int row, int seat)`). Man schreibt Varianten immer mit ihrem Typ: `Seat.Free`, `BookErr.NoSuchSeat(3, 5)` mit den Werten in Reihenfolge. An die Werte kommt man nur über `switch` (R10).
-- Ein Typ, der sich über Felder oder Varianten-Werte selbst enthält (`struct Node { Node next }`, `enum Tree { Leaf, Node(Tree l, Tree r) }`, auch über mehrere Typen hinweg), ist `R5` an seinem Namen, Meldung `` `Tree` contains itself ``, Hinweis `a value has a fixed size; keep linked values in a list`. Über eine Liste oder Map (Teil 2c) enthält sich ein Typ nicht selbst, über ein Array schon.
+- **Selbstenthaltung.** Ein `enum` darf sich in der Nutzlast einer Variante enthalten: direkt (`enum Expr { Num(int n), Add(Expr a, Expr b) }`), wechselseitig mit einem anderen `enum` und über ein `struct`-Feld, das in der Nutzlast steht. Regel: jeder Kreis, der über mindestens eine Variante läuft, ist erlaubt. Der Compiler legt eine Nutzlast, die zum `enum` zurückführt, unsichtbar in einen gezählten Block; für das Programm ändert sich nichts: ein Wert hat keine Zyklen, Kopieren ist ein Zählerschritt (ein Block ist nach dem Teilen unveränderlich, ein `switch` bindet Kopien), `==` und die Textform (R28) laufen durch die Blöcke, die Freigabe ist iterativ (auch ein Wert mit 100 000 Ebenen sprengt keinen Stapel; `==` und Textform brauchen je Ebene einen Stapelrahmen). Ein Kreis, der nur über `struct`-Felder (und Arrays / `?T` / `T!E` darin) läuft, hat keine feste Größe: `R5` am Namen des ersten Typs im Kreis (`struct Node { Node next }`, `struct A { B b }` mit `struct B { A a }`, `struct Node { [2]Node kids }`), Meldung `` `Node` contains itself ``, Hinweis `a value has a fixed size; keep linked values in a list`. Über eine Liste oder Map (Teil 2c) enthält sich ein Typ ohnehin nicht selbst.
 - Namen von `struct` und `enum` leben im Modul wie Funktionen (R4). Feld- und Methodennamen eines Typs sind verschieden voneinander (R4).
 
 ```dif
@@ -706,6 +706,31 @@ void main() {
 ```
 
 Ausgabe: `Point{x: 1, y: 0} Point{x: 10, y: 0} false Seat.Taken`.
+
+Ein Ausdrucksbaum ist ein `enum`, der sich enthält:
+
+```dif
+enum Expr {
+    Num(int n)
+    Add(Expr a, Expr b)
+}
+
+int eval(Expr e) {
+    switch e {
+    case Expr.Num(int n):
+        return n
+    case Expr.Add(Expr a, Expr b):
+        return eval(a) + eval(b)
+    }
+}
+
+void main() {
+    Expr e = Expr.Add(Expr.Num(1), Expr.Add(Expr.Num(2), Expr.Num(3)))
+    print("{e} = {eval(e)}")
+}
+```
+
+Ausgabe: `Expr.Add(Expr.Num(1), Expr.Add(Expr.Num(2), Expr.Num(3))) = 6`.
 
 ```dif error R5
 struct Point {
@@ -741,7 +766,7 @@ list_lit = "[" [ expr { "," expr } [ "," ] ] "]" ;
 - **Arrays `[N]T`** haben genau `N` Elemente und liegen inline; `N` ist ein Ganzzahl-Literal oder eine `const int` mit Wert ab 1, sonst `R5`, Meldung `` the length of an array is a constant of at least 1 ``. Das Literal `[a, b, c]` an der Stelle eines `[3]int` muss genau `N` Elemente haben, sonst `R8`, Meldung `` [3]int needs 3 elements, found 2 ``, Hinweis `use []int for a list that can have any length`, am `[`. Eine Liste wird nie von selbst zum Array (R31); `xs.slice(0, 3)` ist wieder eine Liste. Arrays verschachteln (`[3][3]int`).
 - **Index.** `x[i]` liest ein Element einer Liste oder eines Arrays; `i` ist ein `int`, sonst `R8`, Meldung `` expected int, found u8 ``, Hinweis `int(i)`. Das Ergebnis ist eine Kopie. `x[i] = v`, `x[i] += v` und `x[i].f = v` schreiben in das Element (Ort, R6); das Element muss existieren, `xs[xs.len()] = v` hängt nicht an (`push`). Der Index ist immer geprüft: außerhalb von `0 … len-1` bricht das Programm ab (R14) an der `[`. Bei einem Array mit konstantem Index steht der Abbruch schon beim Kompilieren fest und ist `error[R14]`. Ein `str` hat keinen Index: `s[0]` ist `R8`, Meldung `` cannot index str ``, Hinweis `use s.slice(a, b) or s.runes()`.
 - **Schleife über einen Schnappschuss.** `for T x in xs` läuft über den Wert, den `xs` beim Eintritt hatte (R11); Änderungen an `xs` im Rumpf sind sicher, wirken aber nicht auf diese Schleife. Das kostet nichts, bis der Rumpf `xs` schreibt: dann kopiert dieses erste Schreiben einmal.
-- **Selbstbezug.** Über `[]T` und `map` darf ein Typ sich selbst enthalten (ein `struct Tree` mit dem Feld `[]Tree kids`, Beispiel unten): die Liste ist ein eigener Speicher. Über ein Array nicht (R5, Teil 2a).
+- **Selbstbezug.** Über `[]T` und `map` darf ein Typ sich selbst enthalten (ein `struct Tree` mit dem Feld `[]Tree kids`, Beispiel unten): die Liste ist ein eigener Speicher. Über ein Array nicht, wenn der Kreis nur über `struct`-Felder läuft (R5, Teil 2a).
 
 ```dif snippet
 []int xs = [1, 2, 3]
