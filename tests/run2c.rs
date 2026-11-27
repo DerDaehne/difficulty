@@ -714,7 +714,8 @@ error: line 7: expected key = value\nerror: line 8: the key is empty\n";
 fn kino_example_session_matches_golden_output() {
     let root = env!("CARGO_MANIFEST_DIR");
     let src = std::fs::read_to_string(format!("{root}/examples/kino.dif")).unwrap();
-    let input = b"b 3 5\nb 3 5\nb 6 1\nb 3\nb 3 x\ng 4\ng 9\ng 8\ns 3 5\ns 3 5\np\nhilfe\n\nt\nq\nb 1 1\n";
+    let input =
+        b"b 3 5\nb 3 5\nb 6 1\nb 3\nb 3 x\ng 4\ng 9\ng 8\ns 3 5\ns 3 5\np\nhilfe\n\nt\nq\nb 1 1\n";
     let r = run_with("kino", &src, input, &[], &[]);
     let help = "Befehle: b <reihe> <platz> | g <n> | s <reihe> <platz> | p | t | q";
     let want = format!(
@@ -727,5 +728,8 @@ Reihe 3, Platz 5 storniert.\nFehler: Reihe 3, Platz 5 ist gar nicht gebucht.\n\
 Reihe 3: . . . . . . . .\nReihe 4: . . . . . . . .\nReihe 5: . . . . . . . .\n{help}\n{help}\n\
 Tickets verkauft: 12 von 40, Auslastung: 30.0 %\nTickets verkauft: 12 von 40, Auslastung: 30.0 %\n"
     );
-    assert_eq!((r.out.as_str(), r.err.as_str(), r.code), (want.as_str(), "", 0));
+    assert_eq!(
+        (r.out.as_str(), r.err.as_str(), r.code),
+        (want.as_str(), "", 0)
+    );
 }
