@@ -151,8 +151,8 @@ Zwei einfache Bilder genügen: Ein Funktionsaufruf `f(x)` liest `x`, `f(mut x)` 
 - Ein neues Schlüsselwort kommt nur, wenn keine Bibliotheksfunktion reicht.
 - Regelnummern sind stabil, weil sie Fehlercodes sind; neue Regeln hängen hinten an.
 
-Schlüsselwörter (25): `const struct enum if else while for in break continue return switch case default try or mut use pub test extern unsafe void self defer`, nach v0 dazu `spawn parallel yield`. Genaue Einteilung (reservierte Literale, Kontextwörter, vordefinierte Namen): docs/spec.md §1.5
-Kontextwörter: `as` in `use`-Zeilen; `c link pkg source impl load strip release with send` in `use c`/`extern`-Zeilen; `panics` im Testkopf
+Schlüsselwörter (25): `const struct enum if else while for in break continue return switch case default try or mut use pub test extern void self defer typedef`; Nebenläufigkeit kommt ohne eigene Wörter aus (ADR 017). Bis M3b gebaut ist, gilt noch die alte Liste mit `unsafe` statt `typedef`. Genaue Einteilung (reservierte Literale, Kontextwörter, vordefinierte Namen): docs/spec.md §1.5
+Kontextwörter: `as` in `use`-Zeilen (Build-Angaben stehen nach ADR 017 in `dif.build`, nicht im Quelltext; `panics` im Testkopf entfällt mit M3b)
 Literale/Konstruktoren: `true false none some ok err` · eingebaute Funktionen: `print range repeat expect assert`
 
 ---
@@ -1400,14 +1400,42 @@ Makros · Klassen, Vererbung, Objekte · Exceptions · Operator-Überladung (v0)
 | v0 | M1 „Hallo, nativ“ ✓ | `int`, `bool`, `str`-Literale, Funktionen, `const`, `if`/`while`/`for`, `print` → hello und fib als native Binaries, Größe und Laufzeit gemessen (`docs/measurements.md`) |
 | v0 | M2 „Kino“ ✓ | in fünf Scheiben, jede lauffähig: **a** `struct`, Methoden, `mut`, `enum`, `switch`, `if` als Ausdruck · **b** `?T`, `T!E`, `try`, `??`, `test`/`expect`/`dif test` · **c** Runtime mit RC und Copy-on-Write, `str`, `rune`, feste Ganzzahlbreiten, `f64`, `[]T`, `[N]T`, `map`, `io`, `os`, Formatangaben · **d** Funktionsliterale an Aufrufen und Block-Argument (R26) und die allgemeine std v0 (Text, Zahlen, Listen mit `filter`/`map`/`sort_by`/`any`/`all`, Maps, Dateien, Argumente), eingebaut vom Compiler, bevor es eigene Generics gibt · **e** `kino.dif` aus §5 läuft, Tests grün; **erste Agenten-Messung** (Haiku und Sonnet, danach Opus) |
 | v0 | M3 „Ausdruck“ | benannte Parameter, Funktionswerte als eigene Werte, eigene Generics, eigene Module (R16, `use name`, `pub`), std in difficulty selbst geschrieben → Aufgabenliste aus §4.11 ohne UI läuft. Dazu in der std: eine Spalten-Einheit für Text (`s.rune_count()`, Umrechnung Rune ↔ Byte für `slice`), `os.mtime`, `io.copy_file`, `os.cache_dir` |
-| v0 | M4 „Werkzeug-Kern“ | `extern` und Linken, `defer`, `dif check --json`, `fmt`, `fix` |
-| v0.1 | M5 „C-Nachbar“ | `use c`, `bindgen`, Laufzeit-Laden, C-Quellen, Callbacks mit Kontext; `f32` (Regeln wie R29); in `extern` `mut T` für Ausgabeparameter (`bool *`, `float *`) und `?` für `NULL` ohne `unsafe`; eine Liste an C als Zeiger und Länge; `release T with f` auch für C-structs, die Ressourcen sind (`Font`, `Texture2D`); Wiederausfuhr importierter C-Typen aus einem Modul |
-| v0.2 | M6 „Werkzeugkasten“ | Coverage, Sanitizer, Doc-Tests, Prozess-Isolation, `doc`, `llms`, `explain` |
-| v0.3 | M7 „UI“ | rekta-Modul, Editoren, `--lang de` |
-| v0.4 | – | Export als `.so`/`.dll` (`dif build --lib`) mit festgelegter Grenze: `str` ↔ `const char *`, ein zurückgegebener String gilt bis zum nächsten Aufruf derselben Bibliothek, Griffe als Parameter; `--panic=trap`: ein Abbruch in einem Export kehrt mit Fehler zurück und hinterlegt die Meldung, statt den ladenden Prozess zu beenden. JSON, `decode` nimmt für fehlende Felder die Standardwerte des structs |
-| v1.x | – | Nebenläufigkeit, Benchmarks in der Sprache |
+| v0 | M3b „Schlank“ | Syntax-Verschlankung nach ADR 017 (unten): gebaute Formen fallen weg oder werden einfacher, `dif fix` schreibt alten Code um. Ziel: die Roadmap ohne Zuwachs an Syntax liefern |
+| v0 | M4 „Werkzeug-Kern“ | `extern` und Linken über `dif.build`, `defer` (Argumente werden sofort ausgewertet, wie in Go), `dif check --json`, `fmt`, `fix` |
+| v0.1 | M5 „C-Nachbar“ | `use "x.h"` (eine Zeile wie `#include`; Linken, Quellen, Laden, Präfixe, Freigeber und `rename snake` stehen in `dif.build`), `bindgen`, Laufzeit-Laden, C-Quellen; kein Zeigertyp im Quelltext: der Import bildet `T *` auf Griff bzw. `?Griff`, `mut T` (Ausgabeparameter), `[]T` (Zeiger und Länge) oder `?c.str` ab, was so nicht geht, wird nicht importiert und läuft über ein C-Stück; Callbacks mit Kontext nur als Parameterpaar `(Funktion, mut Kontext)`; `f32` (Regeln wie R29); Freigeber auch für C-structs, die Ressourcen sind (`Font`, `Texture2D`); Wiederausfuhr `pub use rl.Color` |
+| v0.2 | M6 „Werkzeugkasten“ | Coverage, Sanitizer, Doc-Tests (aus dem `//`-Block über der Deklaration), Prozess-Isolation, `doc`, `llms`, `explain` |
+| v0.3 | M7 „UI“ | rekta-Modul mit der Oberfläche als Baum aus Werten (`ui.column([ui.label("Today"), …])`, vergleichbar in Tests) statt Builder-Griff und Block-Argument, Editoren, `--lang de` |
+| v0.4 | – | Export als `.so`/`.dll` mit `dif build --lib`: exportiert wird, was `pub` ist (kein eigenes Wort `export`); festgelegte Grenze: `str` ↔ `const char *`, ein zurückgegebener String gilt bis zum nächsten Aufruf derselben Bibliothek, Griffe als Parameter; `--panic=trap`: ein Abbruch in einem Export kehrt mit Fehler zurück und hinterlegt die Meldung. JSON als abgeleitete Methoden `User.from_json(text)` und `u.to_json()` (keine Typargumente am Aufruf); fehlende Felder nehmen die Standardwerte des structs |
+| v1.x | – | Nebenläufigkeit ohne eigene Wörter: `task.start(int() { … })`, `t.wait()`, `xs.par_map(f)`, `chan[T]`, `task[T]`, `shared[T]` als generische Typen der std; Benchmarks in der Sprache |
 
-Die Ergänzungen in M3, M5 und v0.4 stammen aus einem Editor-Entwurf (raylib-Oberfläche, Plugins als live geladene `.so`). Zur Entscheidung, nicht eingeplant: ein Alias für Funktionstypen (`map[str](void(mut Ed, []str))` steht sonst ausgeschrieben), Umbenennen von C-Namen beim Import (`InitWindow` → `init_window`), ein Export, der eine Rückruf-Funktion aus C als Funktionswert bekommt.
+Die Ergänzungen in M3, M5 und v0.4 stammen aus einem Editor-Entwurf (raylib-Oberfläche, Plugins als live geladene `.so`).
+
+**ADR 017: Syntax-Verschlankung** (Entscheidung des Menschen 2026-11-28, nach einem unabhängigen Gutachten zur Syntax). Leitlinie: „C in angenehm, kein Syntax-Zoo“. Gezählt nach der Regel des Gutachtens (jede Form, die ein Leser über C hinaus kennen muss): heute 179 Formen, die alte Roadmap 217, nach ADR 017 172 (−21 %), davon nicht aus C bekannt 131 → 88 (−33 %). Die Roadmap kommt damit ohne Zuwachs gegenüber heute aus. Bis M3b gebaut ist, beschreiben docs/spec.md, llms.txt und die Beispiele in §3/§4 noch die alten Formen.
+
+M3b, gebaute Formen (alt → neu):
+
+| # | Alt | Neu |
+|---|---|---|
+| 1 | Block-Argument `times(3) { … }` | Literal als Argument `times(3, void() { … })`; ein Literal ist nur `R(T x) {` an Argument- oder Wertstelle, der Fall `Name() { }` verschwindet, der Parser braucht keine Namen |
+| 2 | benannte Parameter mit Defaults `connect("a.de", tls: true)` | Optionen als struct mit Feld-Defaults: `connect(Conn{host: "a.de", tls: true})` |
+| 3 | Typargumente am Aufruf, wenn nur der Rückgabetyp sie nennt: `Tree[int].Empty`, `empty[int]()`, `max[int]` als Wert | eine Regel „Typ aus der Stelle“ wie bei `none`, `[]`, `{}`: `Tree[int] t = Tree.Empty`, `[]int xs = empty()`, `int(int, int) f = max`; Typargumente stehen nur in Typen (`Pair[int, str]`) |
+| 4 | `try x or err(E e): F.V(e)` | entfällt; `try x or F.V` (Konstruktor als Wert) bleibt, sonst `switch` |
+| 5 | Formatangaben `{x:.2f}`, `{x:g}`, `{n:02}`, `{s:<10}` | Methoden: `{x.fixed(2)}`, `{n.pad(2, '0')}`, `{s.pad_right(10)}`, `{s.pad_left(8)}`; keine Mini-Sprache im String |
+| 6 | einzeilige Raw-Strings und `L10.raw_needless` | entfallen; mehrzeilige Raw-Strings bleiben |
+| 7 | `test "x" panics "msg" { … }` | `expect_panic("msg", void() { … })` im Test |
+| 8 | vier `for`-Formen | zwei: `for T x in …` und `for A a, B b in …`; `range(…)` ist ein gewöhnlicher Ausdruck |
+| 9 | `[N]T` | `[]T`; feste Längen erkennt der Compiler |
+| 10 | `///` | Dokumentation ist der `//`-Block direkt über der Deklaration |
+| 11 | `+% -% *%` | Methoden `a.wrap_add(b)`, `a.wrap_sub(b)`, `a.wrap_mul(b)` |
+| 12 | Typen in Mustern `case ok(ed.Reply r):`, `case Shape.Rect(int w, int h):` | ohne Typen: `case ok(r):`, `case Shape.Rect(w, h):`; im Übergang gelten beide, `dif fmt` schreibt die neue |
+| 13 | lange Funktionstypen `map[str](void(mut Ed, []str))` | neues Wort `typedef` wie in C, für jeden Typ: `typedef void(mut Ed, []str) Command`, dann `map[str]Command` |
+| 14 | `pub` vor Typen, Funktionen, Feldern und Methoden (R16, noch nicht gebaut) | `pub` nur vor Deklarationen auf oberster Ebene; Felder und Methoden eines `pub`-Typs sind sichtbar |
+
+Geplante Formen, die so nicht kommen: `use c … link … pkg … source … impl … load … strip … release … with … send` (→ `use "x.h"` und `dif.build`, M5), `unsafe`, `*T`, `p.is_null()`, `xs.ptr()` (→ Abbildung im Import, M5), `user: mut app` im struct-Literal (→ Parameterpaar, M5), `export` (→ `pub` und `--lib`, v0.4), `json.decode[T]` (→ `T.from_json`, v0.4), `spawn`, `parallel for … yield` (→ `task.start`, `par_map`, v1.x), Builder-Griff mit Block-Argument für UI (→ Baum aus Werten, M7). `defer` wertet seine Argumente sofort aus (M4).
+
+Offen, zur Entscheidung: `mut` auch am Methodenaufruf (`mut b.scale(2)`), damit jede Änderung am Aufruf steht. Bis dahin sagt das README ehrlich, dass eine ändernde Methode `mut self` in ihrer Signatur trägt. Ebenfalls offen: ein Export, der eine Rückruf-Funktion aus C als Funktionswert bekommt.
+
+Nicht übernommen (das Gutachten rät selbst ab): Bit-Zuweisungen streichen, `as`, `0b` und `_` in Zahlen streichen, `test` als Funktion, `try … or` als Methode, Methoden ganz durch Funktionen ersetzen, `while` streichen.
 
 **Agenten-Messung** (ab M2, bei jedem Meilenstein): Katalog aus Kino, Wortzählung, Zustandsautomat, Textparser, Datei mit Fehlern, ab v0.1 eine C-Bibliothek. Gemessen werden pass@1 (erster Versuch kompiliert und Tests grün, ohne Hilfe), pass@5 (mit `dif check`/`dif test`-Schleife, höchstens 5 Runden), Runden bis grün, Tokens und Regelverstöße je Regel. Verglichen wird mit denselben Aufgaben in Python. Modelle: Claude Opus, Sonnet, Haiku und ein lokales Modell (Ollama); Kontext nur `llms.txt` und die Aufgabe. Häufige Regelverstöße führen zu besseren Diagnosen oder zu einer Regeländerung.
 
@@ -1424,7 +1452,8 @@ Repo-Layout, sobald Code entsteht (nicht vorab anlegen): `src/` (Compiler-Crate)
 | Variablen | immer expliziter Typ (`int n = 0`), `const` für Unveränderliches, keine Inferenz |
 | Methoden | `Rückgabetyp Typ.name(…)`; `self` ist in jeder Methode der Ort, an dem sie aufgerufen wird; ändert sie ihn, steht `mut self` als erster Parameter |
 | Übergabe | `mut` in Signatur und Aufruf (`void shift(mut Point p, int dx)`, `shift(mut p, 5)`); Parameter ohne `mut` sind lokale Kopien wie in C; eine nie gelesene Änderung ist ein Fehler (R6) |
-| Methodenaufruf | `hall.book(3, 5)` ohne `mut` (auch bei `mut self`): `self` ist der Ort vor dem Punkt; ein Aufruf ohne Wirkung ist ein Fehler (R13) |
+| Methodenaufruf | `hall.book(3, 5)` ohne `mut` (auch bei `mut self`): `self` ist der Ort vor dem Punkt; ein Aufruf ohne Wirkung ist ein Fehler (R13); `mut` am Methodenaufruf ist offen (ADR 017) |
+| Syntax-Umfang | ADR 017 (§10): eine Form je Sache, nichts, was C nicht braucht; Block-Argument, benannte Parameter, Formatangaben, `[N]T`, `///`, `+%`, Typen in Mustern, `unsafe`/`*T`, `export`, `spawn`/`parallel`/`yield` entfallen; neu ist nur `typedef` |
 | Regeln | Design-Grundsätze und Regeln R1–R31 ohne Sonderfälle (§3); Fehlercodes = Regelnummern |
 | Fehler | `int!AgeErr parse_age(str s)`, `void!BookErr`, `?str`; `try`, `err(...)` |
 | Verzweigung | `switch`/`case`, kein Fallthrough, vollständig |
