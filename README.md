@@ -12,8 +12,8 @@ Eine kompilierte Sprache, die sich schreibt wie ein angenehmeres C.</p>
 
 difficulty sieht aus wie C: Typen stehen vorn, Blöcke in `{ }`, Programme werden über C11
 zu kleinen nativen Binaries. Die Fallen von C fehlen. Es gibt keine Zeiger, sondern Werte, kein `null`, sondern `?T`. Fehler
-stehen im Typ, Überlauf hält an, statt still weiterzurechnen. Was ein Programm verändert, steht
-mit `mut` am Aufruf. Der Compiler meldet jeden Fehler genau einmal, mit Regel, Stelle und einem
+stehen im Typ, Überlauf hält an, statt still weiterzurechnen. Ändert eine Funktion ein Argument,
+steht `mut` am Aufruf; ändert eine Methode ihren Wert, steht `mut self` in ihrer Signatur. Der Compiler meldet jeden Fehler genau einmal, mit Regel, Stelle und einem
 Vorschlag, wie es richtig geht.
 
 Das Logo ist ein C, dessen offene Seite ein Strich schließt. Zusammen ergeben sie ein d.
